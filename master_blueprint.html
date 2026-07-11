@@ -198,19 +198,18 @@
   .fc-sep{width:1px; align-self:stretch; background:var(--gray-200); margin:0 4px;}
   .fc-zoom-label{font-family:var(--mono); font-size:11px; color:var(--gray-500); min-width:38px; text-align:center;}
 
-  .fc-canvas{position:relative; overflow:hidden; background:var(--paper); cursor:grab; touch-action:none;}
+  .fc-canvas{position:relative; overflow:hidden; background:#eaeae6; cursor:grab; touch-action:none;
+    background-image: radial-gradient(circle, rgba(0,0,0,0.22) 1.2px, transparent 1.2px);
+  }
   .fc-canvas:active{cursor:grabbing;}
   .fc-viewport{position:absolute; inset:0; overflow:hidden;}
-  .fc-world{position:absolute; left:0; top:0; transform-origin:0 0;
-    background-image: radial-gradient(circle, rgba(0,0,0,0.14) 1px, transparent 1px);
-    background-size:28px 28px;
-  }
-  .fc-svg{position:absolute; left:0; top:0; pointer-events:none;}
+  .fc-world{position:absolute; left:0; top:0; transform-origin:0 0;}
+  .fc-svg{position:absolute; left:0; top:0; pointer-events:none; overflow:visible;}
   .fc-edge-hit{pointer-events:stroke; stroke:transparent; stroke-width:16px; cursor:pointer;}
   .fc-edge-line{stroke:#2b2b2b; stroke-width:1.5px;}
   .fc-edge-line.dashed{stroke:#9a9a9a; stroke-width:1.3px; stroke-dasharray:6,4;}
   g.selected .fc-edge-line{stroke:#111; stroke-width:2.4px;}
-  .fc-edge-label-bg{fill:var(--paper); stroke:var(--gray-300); stroke-width:1px;}
+  .fc-edge-label-bg{fill:#eaeae6; stroke:var(--gray-300); stroke-width:1px;}
   .fc-edge-label{font-family:var(--mono); font-size:9.5px; fill:#444;}
 
   .fc-node-layer{position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none;}
@@ -559,9 +558,11 @@ class FlowChart {
     this.uid = FlowChart._uid++;
     this.nodes = data.nodes.map(function(n){ return Object.assign({}, n); });
     this.edges = data.edges.map(function(e){ return Object.assign({}, e); });
+    this.groups = (data.groups || []).slice();
     this.defaultData = {
       nodes: data.nodes.map(function(n){ return Object.assign({}, n); }),
-      edges: data.edges.map(function(e){ return Object.assign({}, e); })
+      edges: data.edges.map(function(e){ return Object.assign({}, e); }),
+      groups: (data.groups || []).slice()
     };
     this.scale = opts.initialScale || 0.55;
     this.panX = 20; this.panY = 20;
@@ -606,6 +607,8 @@ class FlowChart {
     defs.appendChild(marker);
     this.svg.appendChild(defs);
 
+    this.groupLayer = document.createElementNS('http://www.w3.org/2000/svg','g');
+    this.svg.appendChild(this.groupLayer);
     this.edgeLayer = document.createElementNS('http://www.w3.org/2000/svg','g');
     this.svg.appendChild(this.edgeLayer);
     this.world.appendChild(this.svg);
@@ -662,6 +665,10 @@ class FlowChart {
 
   _applyTransform(){
     this.world.style.transform = 'translate(' + this.panX + 'px, ' + this.panY + 'px) scale(' + this.scale + ')';
+    var bgSz = (28 * this.scale) + 'px ' + (28 * this.scale) + 'px';
+    var bgPos = this.panX + 'px ' + this.panY + 'px';
+    this.root.style.backgroundSize = bgSz;
+    this.root.style.backgroundPosition = bgPos;
     var wrap = this.root.parentElement;
     var zEl = wrap ? wrap.querySelector('.fc-zoom-label') : null;
     if (zEl) zEl.textContent = Math.round(this.scale * 100) + '%';
@@ -689,6 +696,7 @@ class FlowChart {
     this.nodeLayer.innerHTML = '';
     this._nodeEls = {};
     var self = this;
+    this._renderGroups();
     this.nodes.forEach(function(n){ self._renderNode(n); });
     this._renderEdges();
   }
@@ -762,6 +770,133 @@ class FlowChart {
     });
   }
 
+  _renderGroups(){
+    if (!this.groupLayer) return;
+    this.groupLayer.innerHTML = '';
+    var self = this;
+    (this.groups || []).forEach(function(g){
+
+      /* ── container rect (click-through background) ───────────────── */
+      var rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+      rect.setAttribute('x', g.x); rect.setAttribute('y', g.y);
+      rect.setAttribute('width', g.w); rect.setAttribute('height', g.h);
+      rect.setAttribute('rx', '8');
+      rect.setAttribute('fill', g.fill || 'rgba(255,255,255,0.5)');
+      rect.setAttribute('stroke', g.stroke || '#aaa');
+      rect.setAttribute('stroke-width', '1.5');
+      rect.setAttribute('stroke-dasharray', '9,4');
+      rect.setAttribute('pointer-events', 'none'); /* click-through background */
+      self.groupLayer.appendChild(rect);
+
+      /* ── label pill (drag handle) ────────────────────────────────── */
+      var labelG = null;
+      var pill = null, textEl = null;
+      if (g.label){
+        labelG = document.createElementNS('http://www.w3.org/2000/svg','g');
+        labelG.setAttribute('pointer-events', 'all');
+        labelG.style.cursor = 'move';
+        self.groupLayer.appendChild(labelG);
+
+        var labelW = g.label.length * 6.3 + 22;
+        pill = document.createElementNS('http://www.w3.org/2000/svg','rect');
+        pill.setAttribute('x', g.x + 12); pill.setAttribute('y', g.y - 10);
+        pill.setAttribute('width', labelW); pill.setAttribute('height', 19);
+        pill.setAttribute('rx', '4');
+        pill.setAttribute('fill', g.stroke || '#888');
+        labelG.appendChild(pill);
+
+        textEl = document.createElementNS('http://www.w3.org/2000/svg','text');
+        textEl.setAttribute('x', g.x + 23); textEl.setAttribute('y', g.y + 4);
+        textEl.setAttribute('font-size', '9.5');
+        textEl.setAttribute('font-weight', '700');
+        textEl.setAttribute('font-family', 'ui-monospace,SF Mono,Menlo,Consolas,monospace');
+        textEl.setAttribute('letter-spacing', '0.7');
+        textEl.setAttribute('fill', '#ffffff');
+        textEl.textContent = g.label;
+        labelG.appendChild(textEl);
+      }
+
+      /* ── resize grip (bottom-right corner) ────────────────────── */
+      var RH = 16;
+      var rh = document.createElementNS('http://www.w3.org/2000/svg','rect');
+      rh.setAttribute('x', g.x + g.w - RH); rh.setAttribute('y', g.y + g.h - RH);
+      rh.setAttribute('width', RH); rh.setAttribute('height', RH);
+      rh.setAttribute('rx', '4');
+      rh.setAttribute('fill', g.stroke || '#aaa');
+      rh.setAttribute('opacity', '0.75');
+      rh.setAttribute('pointer-events', 'all');
+      rh.style.cursor = 'nwse-resize';
+      self.groupLayer.appendChild(rh);
+
+      /* decorative diagonal lines inside grip */
+      var linesG = document.createElementNS('http://www.w3.org/2000/svg','g');
+      linesG.setAttribute('pointer-events', 'none');
+      self.groupLayer.appendChild(linesG);
+
+      function drawGripLines(){
+        linesG.innerHTML = '';
+        [5,9,13].forEach(function(o){
+          var ln = document.createElementNS('http://www.w3.org/2000/svg','line');
+          ln.setAttribute('x1', g.x + g.w - RH + o); ln.setAttribute('y1', g.y + g.h - 2);
+          ln.setAttribute('x2', g.x + g.w - 2);       ln.setAttribute('y2', g.y + g.h - RH + o);
+          ln.setAttribute('stroke', 'rgba(255,255,255,0.75)'); ln.setAttribute('stroke-width','1');
+          linesG.appendChild(ln);
+        });
+      }
+      drawGripLines();
+
+      /* ── helper: refresh all elements from current g.x/y/w/h ─── */
+      function _refresh(){
+        rect.setAttribute('x', g.x); rect.setAttribute('y', g.y);
+        rect.setAttribute('width', g.w); rect.setAttribute('height', g.h);
+        if (pill){ pill.setAttribute('x', g.x + 12); pill.setAttribute('y', g.y - 10); }
+        if (textEl){ textEl.setAttribute('x', g.x + 23); textEl.setAttribute('y', g.y + 4); }
+        rh.setAttribute('x', g.x + g.w - RH); rh.setAttribute('y', g.y + g.h - RH);
+        drawGripLines();
+      }
+
+      /* ── drag to move ─────────────────────────────────────────── */
+      if (labelG){
+        labelG.addEventListener('pointerdown', function(e){
+          FlowChart.active = self;
+          e.stopPropagation();
+          labelG.setPointerCapture(e.pointerId);
+          var sx = e.clientX, sy = e.clientY, ox = g.x, oy = g.y;
+          function onMove(ev){
+            g.x = Math.round(ox + (ev.clientX - sx) / self.scale);
+            g.y = Math.round(oy + (ev.clientY - sy) / self.scale);
+            _refresh();
+          }
+          function onUp(){
+            labelG.removeEventListener('pointermove', onMove);
+            labelG.removeEventListener('pointerup', onUp);
+          }
+          labelG.addEventListener('pointermove', onMove);
+          labelG.addEventListener('pointerup', onUp);
+        });
+      }
+
+      /* ── resize ───────────────────────────────────────────────── */
+      rh.addEventListener('pointerdown', function(e){
+        FlowChart.active = self;
+        e.stopPropagation();
+        rh.setPointerCapture(e.pointerId);
+        var sx = e.clientX, sy = e.clientY, ow = g.w, oh = g.h;
+        function onMove(ev){
+          g.w = Math.max(80, Math.round(ow + (ev.clientX - sx) / self.scale));
+          g.h = Math.max(40, Math.round(oh + (ev.clientY - sy) / self.scale));
+          _refresh();
+        }
+        function onUp(){
+          rh.removeEventListener('pointermove', onMove);
+          rh.removeEventListener('pointerup', onUp);
+        }
+        rh.addEventListener('pointermove', onMove);
+        rh.addEventListener('pointerup', onUp);
+      });
+    });
+  }
+
   _renderEdges(){
     this.edgeLayer.innerHTML = '';
     var self = this;
@@ -798,8 +933,12 @@ class FlowChart {
       var goingDown = bcy > acy;
       sx = acx; sy = goingDown ? a.y + a.h : a.y;
       tx = bcx; ty = goingDown ? b.y : b.y + b.h;
-      var midY = (sy + ty) / 2;
-      d = 'M ' + sx + ' ' + sy + ' L ' + sx + ' ' + midY + ' L ' + tx + ' ' + midY + ' L ' + tx + ' ' + ty;
+      /* cubic bezier S-curve — control points at vertical midpoint so
+         even many arrows converging on one target visually separate */
+      var s = Math.min(Math.max(Math.abs(ty - sy) * 0.50, 80), 260);
+      var cy1 = sy + (goingDown ?  s : -s);
+      var cy2 = ty - (goingDown ?  s : -s);
+      d = 'M ' + sx + ' ' + sy + ' C ' + sx + ' ' + cy1 + ' ' + tx + ' ' + cy2 + ' ' + tx + ' ' + ty;
     }
     return {d:d, mid:{x:(sx+tx)/2, y:(sy+ty)/2}};
   }
@@ -933,6 +1072,7 @@ class FlowChart {
   loadData(data){
     this.nodes = data.nodes.map(function(n){ return Object.assign({}, n); });
     this.edges = data.edges.map(function(e){ return Object.assign({}, e); });
+    this.groups = (data.groups || this.groups || []).slice();
     this.selected = null;
     this.renderAll();
     this.fitView();
@@ -1257,107 +1397,259 @@ function buildLayerMapData(){
 
 /* ---- 4. Master Flowchart — every agent, one box each ---- */
 function buildMasterData(){
-  var nodes = [];
-  var rows = [
-    {y:30,   items:[{id:'nexus', name:'NEXUS', role:'Master supervisor', w:220}]},
-    {y:220,  items:[
-      {id:'prism', name:'PRISM-BTC', role:'OHLCV + order book'},
-      {id:'hydra', name:'HYDRA', role:'Dominance, mkt cap'},
-      {id:'poseidon', name:'POSEIDON-BTC', role:'Funding, OI, liq'},
-      {id:'titan', name:'TITAN', role:'On-chain flows'}
-    ]},
-    {y:410,  items:[
-      {id:'archimedes', name:'ARCHIMEDES-BTC', role:'50+ indicators (JIT)'},
-      {id:'mercury', name:'MERCURY-BTC', role:'Order-book microstructure'}
-    ]},
-    {y:600,  items:[
-      {id:'regime', name:'REGIME-BTC', role:'Market state'},
-      {id:'flow', name:'FLOW-BTC', role:'Liquidity, stop-hunts'},
-      {id:'momentum', name:'MOMENTUM-BTC', role:'Trend alignment'},
-      {id:'volume', name:'VOLUME-BTC', role:'VWAP, vol. profile'},
-      {id:'pattern', name:'PATTERN-BTC', role:'Math chart patterns'},
-      {id:'structure', name:'STRUCTURE-BTC', role:'S/R, Fib, pivots'},
-      {id:'oculus', name:'OCULUS-BTC', role:'Visual chart reader'},
-      {id:'herald', name:'HERALD', role:'News, semantic search'},
-      {id:'echo', name:'ECHO', role:'Social sentiment'},
-      {id:'pulse', name:'PULSE', role:'Macro, Fear&Greed'},
-      {id:'spectra', name:'SPECTRA', role:'Alt-data'}
-    ]},
-    {y:800,  items:[{id:'prophet', name:'PROPHET-BTC', role:'ML ensemble orchestrator', w:230}]},
-    {y:940,  items:[
-      {id:'lstm', name:'LSTM', role:'Short sequences'},
-      {id:'xgboost', name:'XGBoost', role:'Feature-based'},
-      {id:'catboost', name:'CatBoost', role:'Categorical-aware'},
-      {id:'lightgbm', name:'LightGBM', role:'Fast scoring'},
-      {id:'rf', name:'Random Forest', role:'Medium-term'},
-      {id:'gnn', name:'GNN', role:'Inter-asset graph'},
-      {id:'gru', name:'GRU', role:'Ultra-short seq'}
-    ]},
-    {y:1130, items:[{id:'darwinex', name:'DARWINEX-BTC', role:'PPO/SAC sizing agent, off by default', w:260}]},
-    {y:1320, items:[
-      {id:'bull', name:'BULL-BTC', role:'Strongest long case'},
-      {id:'bear', name:'BEAR-BTC', role:'Strongest short case'},
-      {id:'socrates', name:'SOCRATES-BTC', role:'Adversarial challenge'},
-      {id:'magistra', name:'MAGISTRA-BTC', role:'Investment thesis'}
-    ]},
-    {y:1460, items:[
-      {id:'wardenagg', name:'WARDEN-AGGRESSIVE', role:'Maximize returns'},
-      {id:'wardencon', name:'WARDEN-CONSERVATIVE', role:'Protect capital'},
-      {id:'wardenneu', name:'WARDEN-NEUTRAL', role:'Mediates sizing'}
-    ]},
-    {y:1650, items:[{id:'oracle', name:'ORACLE-BTC', role:'Bayesian confidence fusion', w:250}]},
-    {y:1840, items:[{id:'strategist', name:'STRATEGIST-BTC', role:'Final trade decision', w:240}]},
-    {y:2030, items:[
-      {id:'guardian', name:'GUARDIAN', role:'Pre-trade guard pipeline'},
-      {id:'warden', name:'WARDEN', role:'Kelly position sizing'},
-      {id:'sentinel', name:'SENTINEL', role:'Portfolio risk'}
-    ]},
-    {y:2220, items:[
-      {id:'hermes', name:'HERMES', role:'Order strategy'},
-      {id:'broker', name:'BROKER', role:'CCXT exchange gateway'}
-    ]},
-    {y:2410, items:[
-      {id:'argus', name:'ARGUS', role:'Monitors position, 30s'},
-      {id:'velox', name:'VELOX', role:'Stop-loss hard gate'}
-    ]},
-    {y:2600, items:[
-      {id:'nemesis', name:'NEMESIS', role:'Post-mortem writer'},
-      {id:'kronos', name:'KRONOS', role:'Rule synthesis'},
-      {id:'cassandra', name:'CASSANDRA', role:'Scorecards, reweighting'}
-    ]},
-    {y:2790, items:[{id:'atlas', name:'ATLAS', role:'4 memory systems', w:220}]},
-    {y:2980, items:[{id:'aether', name:'AETHER', role:'Live dashboard', w:220}]}
-  ];
-  rows.forEach(function(r){ nodes = nodes.concat(rowLayout(r.items, r.y)); });
+  /* ------------------------------------------------------------------ *
+   *  LAYOUT STRATEGY                                                    *
+   *  Two vertical "lanes" side by side to stop arrows crossing:        *
+   *    LEFT  (centerX=900)  — data/compute main spine                  *
+   *    RIGHT (centerX=2600) — parallel context agents (sentiment/news) *
+   *  Each row is spaced far enough that labels don't collide.          *
+   * ------------------------------------------------------------------ */
 
+  var nodes = [];
+  function N(id, name, role, x, y, w, h){
+    w = w || 200; h = h || 72;
+    nodes.push({id:id, label:name, sub:role, x:x, y:y, w:w, h:h});
+  }
+
+  /* ── LAYER 0 — TRIGGER & ORCHESTRATION ────────────────────────── */
+  // Centered header
+  N('candle',     'CANDLE CLOSES',          '15m / 1h / 4h per config — triggers a full decision cycle',         1100, 30,  360, 72);
+  N('nexus',      'NEXUS',                  'Layer 0 · Master supervisor — spawns per-currency pipelines, tracks validation stage, enforces global limits', 760, 155, 340, 80);
+  N('config',     'MASTER CONFIG',          'Layer 0 · system_config.yaml — every agent reads its kill-switch at cycle start; disabled inputs are never silently treated as neutral', 1190, 155, 340, 80);
+
+  /* ── LAYER I — DATA COLLECTION ─────────────────────────────────── */
+  // Left lane: price/derivatives data
+  N('prism',      'PRISM-BTC',              'Layer I · Fetches live OHLCV across all timeframes + raw order book snapshot via exchange WebSocket', 440, 310, 260, 80);
+  N('poseidon',   'POSEIDON-BTC',           'Layer I · Fetches funding rate, open interest, long/short ratio, liquidation heat-map from perpetuals & Coinglass', 740, 310, 280, 80);
+  /* Context / shared agents — placed beside the debate layer (same y band)
+     so their arrows to ORACLE are short instead of spanning the whole chart */
+  N('hydra',      'HYDRA',                  'Layer I · BTC dominance, global market cap, DeFi TVL, altcoin season index — shared across all currencies, runs continuously', 1500, 1540, 260, 88);
+  N('titan',      'TITAN',                  'Layer I · On-chain data — exchange net flows, whale movements, active addresses, SOPR, MVRV (off by default, saves API cost)', 1820, 1540, 260, 88);
+  N('herald',     'HERALD',                 'Layer I · Fetches & dedupes crypto news; FAISS semantic search; LLM-generated rolling summary per topic — shared, runs continuously', 1500, 1690, 260, 88);
+  N('echo',       'ECHO',                   'Layer I · Social sentiment from Twitter/X, Reddit, Telegram; FinBERT + VADER scoring; per-source kill switch — shared, runs continuously', 1820, 1690, 260, 88);
+  N('pulse',      'PULSE',                  'Layer I · Fear & Greed Index, DXY, US10Y yield, CPI/Fed dates, Polymarket, FRED macro series — shared, runs continuously', 1500, 1840, 260, 88);
+  N('spectra',    'SPECTRA',                'Layer I · Google Trends, Polymarket odds, futures basis, Grayscale premiums — non-obvious alt-data (off by default)', 1820, 1840, 260, 88);
+
+  /* ── LAYER II — FEATURE ENGINEERING ────────────────────────────── */
+  N('archimedes', 'ARCHIMEDES-BTC',         'Layer II · Numba JIT indicator engine — computes RSI, MACD, ATR, ADX, VWAP, Bollinger, Ichimoku, Supertrend, OBV, MFI, Hurst, 50+ more, across every timeframe in milliseconds', 440, 580, 310, 88);
+  N('mercury',    'MERCURY-BTC',            'Layer II · Order-book microstructure — bid/ask depth, cross-candle delta, spread, imbalance ratio, absorption zones', 800, 580, 280, 88);
+
+  /* ── DETERMINISTIC SNAPSHOT ─────────────────────────────────────── */
+  N('snapshot',   'DETERMINISTIC SNAPSHOT LOCKED',  'All indicators & price data computed and frozen here — NO LLM (not OCULUS, not the debate layer) can contradict or overwrite these numbers for the rest of this cycle', 440, 740, 640, 80);
+
+  /* ── LAYER III — INTELLIGENCE (Technical sub-agents) ───────────── */
+  N('regime',     'REGIME-BTC',             'Layer III · Classifies current market state: strong trend / weak trend / ranging / volatile breakout / distribution', 80,  900, 240, 88);
+  N('flow',       'FLOW-BTC',               'Layer III · Identifies liquidity pools, stop-hunt zones, order blocks, fair-value gaps from order-book + ARCHIMEDES data', 370, 900, 240, 88);
+  N('momentum',   'MOMENTUM-BTC',           'Layer III · Multi-timeframe trend alignment: EMA stacks, MACD trajectory, RSI divergence, momentum confirmation', 660, 900, 240, 88);
+  N('volume',     'VOLUME-BTC',             'Layer III · VWAP anchoring, volume profile, accumulation/distribution scoring, OBV divergence detection', 950, 900, 240, 88);
+  N('pattern',    'PATTERN-BTC',            'Layer III · Math-only chart pattern detector (H&S, double tops, flags, wedges, engulfing candles) — computed from price-series geometry, no vision LLM', 1240, 900, 260, 88);
+  N('structure',  'STRUCTURE-BTC',          'Layer III · Maps support/resistance via swing-point analysis, Fibonacci retracements, pivot points, round-number levels', 1550, 900, 250, 88);
+
+  /* ── LAYER III — OCULUS (separate box, observation status) ─────── */
+  N('oculus',     'OCULUS-BTC',             'Layer III · Visual chart-pattern reader — renders candlestick chart images for each active timeframe (1m→30d) and sends to vision-capable LLM; outputs pattern name, stage, direction, target, confidence per timeframe → multi-TF synthesis; runs every cycle but OBSERVATION MODE until it clears Stage 3', 80, 1060, 380, 104);
+
+  /* ── LAYER III — Shared context (feeds Oracle from right side) ─── */
+  // herald/echo/pulse/spectra/hydra/titan already placed at Layer I — they feed ORACLE directly
+
+  /* ── LAYER IV — PREDICTION ──────────────────────────────────────── */
+  N('prophet',    'PROPHET-BTC',            'Layer IV · ML ensemble orchestrator — runs 7 models in parallel, aggregates directional predictions with confidence weights; each model has its own individual kill switch', 480, 1240, 310, 80);
+
+  // Individual ML models row
+  N('lstm',       'LSTM',                   'Layer IV · Captures temporal dependencies in short OHLCV sequences for near-term price direction prediction', 80,  1390, 175, 80);
+  N('xgboost',    'XGBoost',                'Layer IV · Gradient-boosted trees on the full engineered feature set — fast, interpretable, historically strong baseline', 305, 1390, 175, 80);
+  N('catboost',   'CatBoost',               'Layer IV · Categorical-aware gradient boosting — handles regime/structure labels without one-hot encoding overhead', 530, 1390, 175, 80);
+  N('lightgbm',   'LightGBM',               'Layer IV · Leaf-wise gradient boosting with very fast inference — used for high-frequency feature scoring', 755, 1390, 175, 80);
+  N('rf',         'Random Forest',          'Layer IV · Ensemble of decision trees providing a stable medium-term directional signal, robust to noisy features', 980, 1390, 175, 80);
+  N('gnn',        'GNN',                    'Layer IV · Graph Neural Network — models cross-asset correlations between BTC, ETH, SOL, etc. for inter-market signal', 1205, 1390, 175, 80);
+  N('gru',        'GRU',                    'Layer IV · Gated Recurrent Unit — ultra-short sequence modelling; faster than LSTM, used for very-short-horizon reads', 1430, 1390, 175, 80);
+
+  /* ── LAYER V — RL AGENT ─────────────────────────────────────────── */
+  N('darwinex',   'DARWINEX-BTC',           'Layer V · PPO/SAC reinforcement-learning agent — learns optimal position actions (enter/exit/hold/size) from reward signal; OFF by default; when on, retrains in scheduled offline batches only — never continuous online updates against open positions', 480, 1550, 320, 96);
+
+  /* ── LAYER VI — DEBATE LAYER ────────────────────────────────────── */
+  // Directional debate chain
+  N('bull',       'BULL-BTC',               'Layer VI · Builds the strongest long case: entry catalysts, support structure, upside targets — runs every cycle even in observation mode', 200, 1730, 240, 80);
+  N('bear',       'BEAR-BTC',               'Layer VI · Builds the strongest short case: resistance zones, distribution signals, macro headwinds, downside risk', 500, 1730, 240, 80);
+  N('socrates',   'SOCRATES-BTC',           'Layer VI · Adversarial cross-examiner — challenges both the bull and bear cases, flags contradictions, forces sharper argument from each side', 800, 1730, 260, 80);
+  N('magistra',   'MAGISTRA-BTC',           'Layer VI · Reads the full BULL→BEAR→SOCRATES exchange and synthesises a structured investment thesis: direction, conviction level, key risks, primary driver; OBSERVATION MODE until Stage 3', 1100, 1730, 280, 96);
+
+  // Risk sub-debate (scored/promoted independently)
+  N('wardenagg',  'WARDEN-AGGRESSIVE',      'Layer VI Risk Sub-Debate · Argues for maximising returns — presents the case for a larger position size given the signal strength', 200, 1910, 235, 80);
+  N('wardencon',  'WARDEN-CONSERVATIVE',    'Layer VI Risk Sub-Debate · Argues for protecting capital — presents the case for a smaller or no position given uncertainty', 490, 1910, 245, 80);
+  N('wardenneu',  'WARDEN-NEUTRAL',         'Layer VI Risk Sub-Debate · Mediates between AGGRESSIVE and CONSERVATIVE; outputs a recommended sizing multiplier to WARDEN (Risk Layer)', 790, 1910, 250, 80);
+
+  /* ── LAYER VII — CONFIDENCE ENGINE ─────────────────────────────── */
+  N('oracle',     'ORACLE-BTC',             'Layer VII · Bayesian confidence fusion engine — fuses ML ensemble output, RL signal (if on), debate thesis (if promoted), OCULUS visual read (if promoted), sentiment, macro, on-chain into one unified confidence score + direction; auto-reweights around whatever is switched off or not yet promoted — never fakes a neutral value for a missing input', 440, 2090, 380, 104);
+
+  /* ── ATLAS MEMORY INJECT ────────────────────────────────────────── */
+  N('atlas_inj',  'ATLAS — Brain Inject',   'ATLAS provides memory-enriched context to STRATEGIST: synthesised trading rules from KRONOS, post-mortem lessons from NEMESIS, dynamic confidence thresholds, and rejected-trade feedback — grounding the LLM in real historical performance', 890, 2090, 310, 104);
+
+  /* ── LAYER VIII — DECISION ──────────────────────────────────────── */
+  N('strategist', 'STRATEGIST-BTC',         'Layer VIII · Reads ORACLE\'s confidence report + ATLAS brain context; outputs ONE final decision: BUY / SELL / SHORT / EXIT / WAIT / NO_TRADE with full reasoning, entry price, stop-loss, take-profit, and a complete config-snapshot log of exactly which agents were active', 440, 2270, 380, 96);
+
+  /* ── LAYER IX — RISK LAYER ──────────────────────────────────────── */
+  N('guardian',   'GUARDIAN',               'Layer IX · Sequential fail-fast pre-trade guard pipeline: cooldown window → symbol whitelist → max position size → daily loss stop → margin sufficiency → minimum risk/reward; every rejection is logged and fed back to STRATEGIST', 200, 2450, 270, 96);
+  N('reject',     'REJECTED',               'Layer IX · Trade rejected — reason is logged with full context; STRATEGIST is notified so future prompts are informed by what failed the guard', 200, 2620, 220, 72);
+  N('warden',     'WARDEN',                 'Layer IX · Position sizing via fractional Kelly Criterion: kelly=(win_rate×avg_win/avg_loss)−(1−win_rate), then ×0.25 conservative fraction, further scaled by current volatility and ORACLE confidence tier', 540, 2450, 280, 96);
+  N('sentinel',   'SENTINEL',               'Layer IX · Global portfolio risk manager: max daily loss, max drawdown, per-currency exposure cap, cross-asset correlation limits, total portfolio heat — runs identically in paper & live mode; these three Risk agents are NEVER switchable off for live trading', 880, 2450, 290, 96);
+
+  /* ── LAYER X — EXECUTION ────────────────────────────────────────── */
+  N('hermes',     'HERMES',                 'Layer X · Execution commander — picks order strategy (TWAP / VWAP / Limit / Market / Iceberg) based on order size, current liquidity, and urgency; the single gateway into the exchange', 440, 2650, 280, 88);
+  N('broker',     'BROKER',                 'Layer X · CCXT exchange-abstraction layer (Binance / Bybit / OKX / Kraken) — handles auth, rate-limit queuing, WebSocket fill confirmations; runs in paper mode until Stage 4', 780, 2650, 280, 88);
+
+  /* ── LAYER XI — MONITORING ──────────────────────────────────────── */
+  N('argus',      'ARGUS',                  'Layer XI · Checks every open position\'s P&L, distance-to-stop, distance-to-target, trailing-stop conditions, and time-based exit rules every 30 seconds — triggers early exit if any threshold is breached', 440, 2820, 280, 96);
+  N('velox',      'VELOX',                  'Layer XI · Stop-loss hard-rule enforcer — a stop-loss CANNOT be tightened (moved against the trade) unless price has genuinely progressed toward the target by a learned threshold; this rule cannot be overridden by any LLM', 780, 2820, 290, 96);
+  N('posclose',   'POSITION CLOSES',        'Trade closed — by stop-loss hit, take-profit hit, ARGUS time-based rule, or manual override; timestamp and final P&L recorded', 570, 2990, 290, 72);
+
+  /* ── LAYER XII — SELF-LEARNING ──────────────────────────────────── */
+  N('nemesis',    'NEMESIS',                'Layer XII · Writes a structured post-mortem after every closed trade: verdict (correct / incorrect), expected-vs-actual outcome, signal-quality assessment, AI-mistake classification, and a plain-language lesson — stored in ATLAS for future retrieval', 200, 3130, 280, 96);
+  N('kronos',     'KRONOS',                 'Layer XII · Periodically clusters closed trades using vector similarity and synthesises plain-language rules (best-practice, anti-pattern, corrective, AI-mistake-type) that get injected into future STRATEGIST and ORACLE prompts via ATLAS', 540, 3130, 280, 96);
+  N('cassandra',  'CASSANDRA',              'Layer XII · Tracks each ML model\'s rolling accuracy and reweights the PROPHET ensemble accordingly; flags weak models for retraining; SEPARATELY runs the scorecards for OCULUS and the Debate Layer — tracking divergence win-rate, R-multiple, trend-adjusted edge; auto-demotes if a promoted component later drops below the bar', 870, 3130, 310, 104);
+
+  /* ── LAYER XIII — MEMORY ────────────────────────────────────────── */
+  N('atlas',      'ATLAS',                  'Layer XIII · Coordinates four memory systems: (1) ChromaDB vector store of trade experiences for semantic retrieval, (2) SQLite relational audit trail & full trade history, (3) Redis fast in-memory cache for live-cycle data, (4) FAISS semantic index for HERALD news retrieval; feeds STRATEGIST every cycle via brain inject', 440, 3320, 380, 96);
+
+  /* ── DASHBOARD ──────────────────────────────────────────────────── */
+  N('aether',     'AETHER',                 'Dashboard · Live web dashboard — signals for active currencies, open positions, running P&L, brain-rule growth chart, per-agent activity log, full config toggle panel, OCULUS pattern feed, CASSANDRA scorecard for debate layer and visual reader', 440, 3490, 380, 96);
+
+  /* ================================================================ *
+   *  EDGES — grouped by data-flow phase to make intent readable      *
+   * ================================================================ */
   var edges = [
-    E('nexus','prism','',true), E('nexus','sentinel','',true), E('nexus','hermes','',true),
-    E('prism','archimedes'), E('prism','mercury'), E('prism','oculus'),
-    E('archimedes','regime'), E('archimedes','flow'), E('archimedes','momentum'),
-    E('archimedes','volume'), E('archimedes','pattern'), E('archimedes','structure'),
-    E('archimedes','prophet'), E('archimedes','darwinex'),
-    E('mercury','flow'), E('mercury','structure'),
-    E('hydra','oracle'), E('poseidon','oracle'), E('titan','oracle'),
-    E('herald','oracle'), E('echo','oracle'), E('pulse','oracle'), E('spectra','oracle'),
-    E('regime','oracle'), E('flow','oracle'), E('momentum','oracle'), E('volume','oracle'),
-    E('pattern','oracle'), E('structure','oracle'), E('oculus','oracle','if promoted'),
-    E('lstm','prophet'), E('xgboost','prophet'), E('catboost','prophet'), E('lightgbm','prophet'),
-    E('rf','prophet'), E('gnn','prophet'), E('gru','prophet'),
-    E('prophet','oracle'), E('darwinex','oracle','if on'),
-    E('bull','bear'), E('bear','socrates'), E('socrates','magistra'), E('magistra','oracle','if promoted'),
-    E('wardenagg','wardenneu'), E('wardencon','wardenneu'), E('wardenneu','warden','sizing only'),
-    E('oracle','strategist'), E('atlas','strategist','brain context'),
-    E('strategist','guardian'), E('guardian','warden','approved'), E('warden','sentinel'),
-    E('sentinel','hermes','approved'), E('hermes','broker'),
-    E('broker','argus'), E('argus','velox'),
-    E('argus','nemesis','on close'), E('argus','cassandra','on close'),
-    E('nemesis','atlas'), E('cassandra','atlas'),
-    E('atlas','kronos','',true), E('kronos','atlas','rules'),
-    E('cassandra','oculus','scores',true), E('cassandra','magistra','scores',true),
-    E('atlas','prism','next cycle',true),
-    E('cassandra','aether','',true), E('sentinel','aether','',true), E('guardian','aether','',true)
+    /* ── Trigger & Orchestration ── */
+    E('candle','nexus'),
+    E('candle','prism'),
+    E('nexus','config','reads',true),
+
+    /* ── Data collection → Feature Engineering ── */
+    E('prism','archimedes','OHLCV'),
+    E('prism','mercury','order book'),
+    E('prism','oculus','raw OHLCV'),         /* OCULUS renders directly from price data */
+    E('poseidon','archimedes','deriv. data'),
+
+    /* ── Feature Engineering → Snapshot (lock) ── */
+    E('archimedes','snapshot'),
+    E('mercury','snapshot'),
+
+    /* ── Snapshot → 6 Technical intelligence agents only ── */
+    E('snapshot','regime'),
+    E('snapshot','flow'),
+    E('snapshot','momentum'),
+    E('snapshot','volume'),
+    E('snapshot','pattern'),
+    E('snapshot','structure'),
+
+    /* ── ARCHIMEDES directly feeds ML + RL (shorter arrow) ── */
+    E('archimedes','prophet','computed features'),
+    E('archimedes','darwinex','state features',true),
+
+    /* ── Technical analysis agents → ORACLE ── */
+    E('regime','oracle'),
+    E('flow','oracle'),
+    E('momentum','oracle'),
+    E('volume','oracle'),
+    E('pattern','oracle'),
+    E('structure','oracle'),
+    E('oculus','oracle','if promoted'),
+
+    /* ── Context / shared agents → ORACLE (short arrows, same y band) ── */
+    E('hydra','oracle','cross-market'),
+    E('titan','oracle','on-chain'),
+    E('herald','oracle','news summary'),
+    E('echo','oracle','sentiment'),
+    E('pulse','oracle','macro'),
+    E('spectra','oracle','alt-data'),
+
+    /* ── ML sub-models → PROPHET → ORACLE ── */
+    E('lstm','prophet'),
+    E('xgboost','prophet'),
+    E('catboost','prophet'),
+    E('lightgbm','prophet'),
+    E('rf','prophet'),
+    E('gnn','prophet'),
+    E('gru','prophet'),
+    E('prophet','oracle','ensemble vote'),
+
+    /* ── RL agent → ORACLE ── */
+    E('darwinex','oracle','if on'),
+
+    /* ── Debate chain ── */
+    E('prophet','bull','ML signal'),
+    E('bull','bear'),
+    E('bear','socrates'),
+    E('socrates','magistra'),
+    E('magistra','oracle','if promoted'),
+
+    /* ── Risk sub-debate → WARDEN ── */
+    E('wardenagg','wardenneu'),
+    E('wardencon','wardenneu'),
+    E('wardenneu','warden','sizing rec'),
+
+    /* ── ORACLE + ATLAS → STRATEGIST → Risk pipeline ── */
+    E('oracle','strategist','confidence report'),
+    E('atlas_inj','strategist','brain context'),
+    E('strategist','guardian','proposed trade'),
+    E('guardian','reject','blocked'),
+    E('guardian','warden','approved'),
+    E('warden','sentinel','sized order'),
+    E('sentinel','hermes','risk approved'),
+
+    /* ── Execution ── */
+    E('hermes','broker','order'),
+    E('broker','argus','fill confirmed'),
+    E('argus','velox','stop check'),
+    E('argus','posclose','exit trigger'),
+    E('velox','posclose','hard stop'),
+
+    /* ── Post-trade learning loop ── */
+    E('posclose','nemesis','outcome'),
+    E('posclose','cassandra','outcome'),
+    E('nemesis','atlas','post-mortem'),
+    E('cassandra','atlas','scores'),
+    E('atlas','kronos','clusters',true),
+    E('kronos','atlas','rules back'),
+    E('cassandra','oculus','scorecard',true),
+    E('cassandra','magistra','scorecard',true),
+
+    /* ── Dashboard live feeds ── */
+    E('guardian','aether','rejections',true),
+    E('sentinel','aether','risk stats',true),
+    E('cassandra','aether','scorecards',true),
+    E('argus','aether','P&L',true),
+
+    /* ── Memory cycle-back ── */
+    E('atlas','atlas_inj','brain inject',true),
+    E('atlas','prism','next cycle',true)
   ];
-  return {nodes:nodes, edges:edges};
+
+  /* ================================================================ *
+   *  LAYER CONTAINERS — bounding box for each architectural layer    *
+   * ================================================================ */
+  function G(id, label, x, y, w, h, hex){
+    var r=parseInt(hex.slice(1,3),16), g2=parseInt(hex.slice(3,5),16), b2=parseInt(hex.slice(5,7),16);
+    return {id:id, label:label, x:x, y:y, w:w, h:h, stroke:hex, fill:'rgba('+r+','+g2+','+b2+',0.07)'};
+  }
+  var groups = [
+    G('g0',    'LAYER 0 — TRIGGER & ORCHESTRATION',      735,   5,  820, 255, '#3d5a80'),
+    G('gi',    'LAYER I — DATA COLLECTION',              420, 290,  620, 122, '#2d6a4f'),
+    G('gii',   'LAYER II — FEATURE ENGINEERING',         420, 558,  682, 130, '#7b2d8b'),
+    G('giii',  'LAYER III — INTELLIGENCE AGENTS',         58, 878, 1766, 308, '#b5640a'),
+    G('giv',   'LAYER IV — ML PREDICTION',               58,1218, 1570, 272, '#1a6b5c'),
+    G('gv',    'LAYER V — REINFORCEMENT LEARNING',       458,1528,  368, 140, '#b54a0a'),
+    G('gvi',   'LAYER VI — DEBATE LAYER',                178,1708, 1230, 306, '#8b2d4a'),
+    G('gctx',  'LAYER I — SHARED CONTEXT AGENTS',       1478,1518,  628, 434, '#2d6a4f'),
+    G('gvii',  'LAYER VII — CONFIDENCE ENGINE',          418,2068,  808, 148, '#155780'),
+    G('gviii', 'LAYER VIII — DECISION',                  418,2248,  430, 140, '#1c1c2e'),
+    G('gix',   'LAYER IX — RISK MANAGEMENT',             178,2428, 1018, 290, '#8b1a1a'),
+    G('gx',    'LAYER X — EXECUTION',                    418,2628,  668, 130, '#3d3d3d'),
+    G('gxi',   'LAYER XI — TRADE MONITORING',            418,2798,  678, 288, '#4a5a1a'),
+    G('gxii',  'LAYER XII — SELF-LEARNING',              178,3108, 1028, 150, '#1a4a8b'),
+    G('gxiii', 'LAYER XIII — MEMORY (ATLAS)',             418,3298,  428, 140, '#5a1a8b'),
+    G('gdash', 'DASHBOARD — AETHER',                     418,3468,  428, 140, '#2d2d2d')
+  ];
+
+  return {nodes:nodes, edges:edges, groups:groups};
 }
 
 /* =========================================================================
@@ -1379,7 +1671,7 @@ function initFlowcharts(){
   buildToolbar(fcLayerMap, document.getElementById('toolbar-layermap'));
 
   var canvasMaster = document.getElementById('canvas-master');
-  var fcMaster = new FlowChart(canvasMaster, buildMasterData(), {worldW:3000, worldH:3200, initialScale:0.3});
+  var fcMaster = new FlowChart(canvasMaster, buildMasterData(), {worldW:2200, worldH:3800, initialScale:0.22});
   buildToolbar(fcMaster, document.getElementById('toolbar-master'));
 
   FLOWCHARTS_BY_TAB = {

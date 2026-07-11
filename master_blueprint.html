@@ -578,11 +578,19 @@ class FlowChart {
     this.root = rootEl;
     this.uid = FlowChart._uid++;
     this.nodes = data.nodes.map(function(n){ return Object.assign({}, n); });
-    this.edges = data.edges.map(function(e){ return Object.assign({}, e); });
+    this.edges = data.edges.map(function(e){
+      var copy = Object.assign({}, e);
+      if (e.waypoints) copy.waypoints = e.waypoints.map(function(wp){ return Object.assign({}, wp); });
+      return copy;
+    });
     this.groups = (data.groups || []).slice();
     this.defaultData = {
       nodes: data.nodes.map(function(n){ return Object.assign({}, n); }),
-      edges: data.edges.map(function(e){ return Object.assign({}, e); }),
+      edges: data.edges.map(function(e){
+        var copy = Object.assign({}, e);
+        if (e.waypoints) copy.waypoints = e.waypoints.map(function(wp){ return Object.assign({}, wp); });
+        return copy;
+      }),
       groups: (data.groups || []).slice()
     };
     this.scale = opts.initialScale || 0.55;
@@ -945,6 +953,23 @@ class FlowChart {
     if (!a || !b) return null;
     var acx = a.x + a.w/2, acy = a.y + a.h/2, bcx = b.x + b.w/2, bcy = b.y + b.h/2;
     var sx, sy, tx, ty, d;
+
+    if (e.waypoints && e.waypoints.length > 0) {
+      var wps = e.waypoints;
+      var p1 = this._clipPoint(a, wps[0].x, wps[0].y);
+      var p2 = this._clipPoint(b, wps[wps.length-1].x, wps[wps.length-1].y);
+      sx = p1.x; sy = p1.y;
+      tx = p2.x; ty = p2.y;
+
+      d = 'M ' + sx + ' ' + sy;
+      wps.forEach(function(wp){ d += ' L ' + wp.x + ' ' + wp.y; });
+      d += ' L ' + tx + ' ' + ty;
+
+      var allPts = [{x:sx, y:sy}].concat(wps).concat([{x:tx, y:ty}]);
+      var mid = this._getPolylineMidpoint(allPts);
+      return {d:d, mid:mid};
+    }
+
     if (Math.abs(acy - bcy) < 6) {
       var p1 = this._clipPoint(a, bcx, bcy);
       var p2 = this._clipPoint(b, acx, acy);
@@ -990,14 +1015,168 @@ class FlowChart {
       text.textContent = e.label;
       g.appendChild(rect); g.appendChild(text);
     }
-    g.addEventListener('pointerdown', function(ev){ FlowChart.active = self; ev.stopPropagation(); self.selectEdge(e.id); });
+
+    g.addEventListener('pointerdown', function(ev){
+      FlowChart.active = self;
+      ev.stopPropagation();
+      self.selectEdge(e.id);
+
+      /* Click directly on line → insert new waypoint */
+      if (ev.target.classList.contains('fc-edge-hit')) {
+        var rectEl = self.viewport.getBoundingClientRect();
+        var clickX = (ev.clientX - rectEl.left - self.panX) / self.scale;
+        var clickY = (ev.clientY - rectEl.top - self.panY) / self.scale;
+        if (!e.waypoints) e.waypoints = [];
+
+        var insertIdx = self._findWaypointInsertIndex(e, clickX, clickY);
+        var newWP = {x: Math.round(clickX), y: Math.round(clickY)};
+        e.waypoints.splice(insertIdx, 0, newWP);
+
+        self._renderEdges();
+        self._startWaypointDrag(e.id, insertIdx, ev);
+      }
+    });
+
     g.addEventListener('dblclick', function(ev){
       ev.stopPropagation();
       var val = prompt('Arrow label:', e.label || '');
       if (val !== null){ e.label = val.trim(); self._renderEdges(); }
     });
+
+    /* Waypoint handle indicators */
+    if (this.selected && this.selected.type === 'edge' && this.selected.id === e.id && e.waypoints) {
+      e.waypoints.forEach(function(wp, idx){
+        var handle = document.createElementNS('http://www.w3.org/2000/svg','circle');
+        handle.setAttribute('cx', wp.x); handle.setAttribute('cy', wp.y);
+        handle.setAttribute('r', '6');
+        handle.setAttribute('class', 'fc-waypoint-handle');
+        handle.setAttribute('fill', '#ffffff');
+        handle.setAttribute('stroke', '#111111');
+        handle.setAttribute('stroke-width', '1.5');
+        handle.setAttribute('pointer-events', 'all');
+        handle.style.cursor = 'pointer';
+
+        handle.addEventListener('pointerdown', function(pEv){
+          FlowChart.active = self;
+          pEv.stopPropagation();
+          handle.setPointerCapture(pEv.pointerId);
+          var sx = pEv.clientX, sy = pEv.clientY, ox = wp.x, oy = wp.y;
+
+          function onMove(ev2){
+            wp.x = Math.round(ox + (ev2.clientX - sx) / self.scale);
+            wp.y = Math.round(oy + (ev2.clientY - sy) / self.scale);
+
+            var newPath = self._pathFor(e);
+            if (newPath) {
+              line.setAttribute('d', newPath.d);
+              hit.setAttribute('d', newPath.d);
+              var labelRect = g.querySelector('.fc-edge-label-bg');
+              var labelText = g.querySelector('.fc-edge-label');
+              if (labelRect && labelText) {
+                var w = parseFloat(labelRect.getAttribute('width'));
+                labelRect.setAttribute('x', newPath.mid.x - w/2);
+                labelRect.setAttribute('y', newPath.mid.y - 8);
+                labelText.setAttribute('x', newPath.mid.x);
+                labelText.setAttribute('y', newPath.mid.y + 4);
+              }
+            }
+            handle.setAttribute('cx', wp.x);
+            handle.setAttribute('cy', wp.y);
+          }
+
+          function onUp(){
+            handle.removeEventListener('pointermove', onMove);
+            handle.removeEventListener('pointerup', onUp);
+            self._renderEdges();
+          }
+          handle.addEventListener('pointermove', onMove);
+          handle.addEventListener('pointerup', onUp);
+        });
+
+        handle.addEventListener('dblclick', function(pEv){
+          pEv.stopPropagation();
+          e.waypoints.splice(idx, 1);
+          self._renderEdges();
+        });
+
+        g.appendChild(handle);
+      });
+    }
+
     this.edgeLayer.appendChild(g);
     if (this.selected && this.selected.type === 'edge' && this.selected.id === e.id) g.classList.add('selected');
+  }
+
+  _getPolylineMidpoint(points) {
+    var totalLen = 0;
+    var lens = [];
+    for (var i = 0; i < points.length - 1; i++) {
+      var dx = points[i+1].x - points[i].x;
+      var dy = points[i+1].y - points[i].y;
+      var len = Math.sqrt(dx*dx + dy*dy);
+      lens.push(len);
+      totalLen += len;
+    }
+    var target = totalLen / 2;
+    var cur = 0;
+    for (var i = 0; i < points.length - 1; i++) {
+      if (cur + lens[i] >= target) {
+        var ratio = (target - cur) / lens[i];
+        return {
+          x: points[i].x + ratio * (points[i+1].x - points[i].x),
+          y: points[i].y + ratio * (points[i+1].y - points[i].y)
+        };
+      }
+      cur += lens[i];
+    }
+    return points[points.length - 1];
+  }
+
+  _findWaypointInsertIndex(e, cx, cy) {
+    if (!e.waypoints || e.waypoints.length === 0) return 0;
+    var a = this._nodeById(e.from), b = this._nodeById(e.to);
+    if (!a || !b) return 0;
+    var acx = a.x + a.w/2, acy = a.y + a.h/2, bcx = b.x + b.w/2, bcy = b.y + b.h/2;
+
+    var points = [{x: acx, y: acy}].concat(e.waypoints).concat([{x: bcx, y: bcy}]);
+    var minDist = Infinity;
+    var insertIdx = 0;
+
+    for (var i = 0; i < points.length - 1; i++) {
+      var d = this._distToSegment({x: cx, y: cy}, points[i], points[i+1]);
+      if (d < minDist) {
+        minDist = d;
+        insertIdx = i;
+      }
+    }
+    return insertIdx;
+  }
+
+  _distToSegment(p, v, w) {
+    var l2 = (v.x - w.x)**2 + (v.y - w.y)**2;
+    if (l2 === 0) return Math.sqrt((p.x - v.x)**2 + (p.y - v.y)**2);
+    var t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.sqrt((p.x - (v.x + t * (w.x - v.x)))**2 + (p.y - (v.y + t * (w.y - v.y)))**2);
+  }
+
+  _startWaypointDrag(edgeId, insertIdx, ev) {
+    var self = this;
+    setTimeout(function(){
+      var g = self.edgeLayer.querySelector('g[data-id="'+edgeId+'"]');
+      if (!g) return;
+      var handles = g.querySelectorAll('.fc-waypoint-handle');
+      var handle = handles[insertIdx];
+      if (handle) {
+        var dragEv = new PointerEvent('pointerdown', {
+          clientX: ev.clientX,
+          clientY: ev.clientY,
+          pointerId: ev.pointerId,
+          bubbles: true
+        });
+        handle.dispatchEvent(dragEv);
+      }
+    }, 10);
   }
 
   selectNode(id){
@@ -1092,7 +1271,11 @@ class FlowChart {
 
   loadData(data){
     this.nodes = data.nodes.map(function(n){ return Object.assign({}, n); });
-    this.edges = data.edges.map(function(e){ return Object.assign({}, e); });
+    this.edges = data.edges.map(function(e){
+      var copy = Object.assign({}, e);
+      if (e.waypoints) copy.waypoints = e.waypoints.map(function(wp){ return Object.assign({}, wp); });
+      return copy;
+    });
     this.groups = (data.groups || this.groups || []).slice();
     this.selected = null;
     this.renderAll();

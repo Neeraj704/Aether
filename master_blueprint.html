@@ -1,0 +1,1469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QUANTUM EDGE — System Blueprint</title>
+<style>
+  :root{
+    --ink:#111111;
+    --ink-soft:#3a3a3a;
+    --gray-700:#4a4a4a;
+    --gray-500:#767676;
+    --gray-400:#999999;
+    --gray-300:#c9c9c9;
+    --gray-200:#dfdfdf;
+    --gray-150:#e9e9e9;
+    --gray-100:#f2f2f0;
+    --paper:#fbfbf9;
+    --white:#ffffff;
+    --mono: ui-monospace, "SF Mono", "Roboto Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --header-h: 56px;
+    --tabs-h: 44px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:15px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:#111;color:#fff;}
+
+  /* ---------- header / tabs ---------- */
+  header.top{
+    position:sticky; top:0; z-index:50;
+    height:var(--header-h);
+    background:var(--paper);
+    border-bottom:1px solid var(--ink);
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 22px;
+  }
+  header.top .brand{
+    font-family:var(--mono); font-weight:700; letter-spacing:2px; font-size:15px;
+  }
+  header.top .brand .bolt{opacity:0.5; margin-right:8px;}
+  header.top .tagline{
+    font-size:11.5px; color:var(--gray-500); font-family:var(--mono);
+    letter-spacing:0.3px;
+  }
+  nav.tabs{
+    position:sticky; top:var(--header-h); z-index:49;
+    height:var(--tabs-h);
+    display:flex; align-items:stretch;
+    background:var(--paper);
+    border-bottom:1px solid var(--gray-300);
+    overflow-x:auto;
+  }
+  .tab-btn{
+    appearance:none; border:none; background:none; cursor:pointer;
+    font-family:var(--mono); font-size:11.5px; letter-spacing:1px; text-transform:uppercase;
+    color:var(--gray-500);
+    padding:0 18px;
+    border-bottom:2px solid transparent;
+    white-space:nowrap;
+  }
+  .tab-btn:hover{color:var(--ink);}
+  .tab-btn.active{color:var(--ink); border-bottom-color:var(--ink);}
+
+  main{display:block;}
+  .tab-panel{display:none;}
+  .tab-panel.active{display:block;}
+  #tab-master.active{
+    display:flex; flex-direction:column;
+    height:calc(100vh - var(--header-h) - var(--tabs-h));
+  }
+
+  .wrap{max-width:860px; margin:0 auto; padding:44px 24px 90px;}
+  .wrap-wide{max-width:1180px; margin:0 auto; padding:44px 24px 90px;}
+
+  h1.page-title{
+    font-family:var(--mono); font-size:13px; letter-spacing:2px; text-transform:uppercase;
+    color:var(--gray-500); margin:0 0 6px;
+  }
+  h2.section-head{
+    font-family:var(--mono); font-size:19px; font-weight:700; letter-spacing:0.2px;
+    margin:56px 0 14px; padding-top:20px; border-top:1px solid var(--gray-200);
+    display:flex; align-items:baseline; gap:10px;
+  }
+  h2.section-head:first-of-type{border-top:none; margin-top:8px; padding-top:0;}
+  h2.section-head .num{color:var(--gray-400); font-weight:400;}
+  h3.sub-head{
+    font-family:var(--mono); font-size:13.5px; font-weight:700; letter-spacing:0.3px;
+    text-transform:uppercase; color:var(--ink-soft);
+    margin:30px 0 10px;
+  }
+  p{color:var(--ink-soft); margin:0 0 14px;}
+  .lede{font-size:16.5px; color:var(--ink); line-height:1.65;}
+  ul.plain, ol.plain{margin:0 0 16px; padding-left:22px; color:var(--ink-soft);}
+  ul.plain li, ol.plain li{margin-bottom:7px;}
+  strong{color:var(--ink); font-weight:650;}
+  code{font-family:var(--mono); font-size:0.88em; background:var(--gray-100); padding:1px 5px; border:1px solid var(--gray-200);}
+  a{color:var(--ink);}
+  a.quiet{color:var(--gray-500); text-decoration:none; border-bottom:1px dotted var(--gray-400);}
+  a.quiet:hover{color:var(--ink); border-bottom-color:var(--ink);}
+
+  .toc{
+    display:flex; flex-wrap:wrap; gap:6px 18px;
+    font-family:var(--mono); font-size:11.5px; letter-spacing:0.3px;
+    padding:14px 16px; border:1px solid var(--gray-200); background:var(--gray-100);
+    margin-bottom:10px;
+  }
+  .toc a{color:var(--gray-600); text-decoration:none;}
+  .toc a:hover{color:var(--ink); text-decoration:underline;}
+
+  blockquote{
+    margin:0 0 22px; padding:14px 18px;
+    border-left:2px solid var(--ink);
+    font-style:italic; color:var(--ink-soft);
+    background:var(--gray-100);
+  }
+
+  pre.code-block{
+    font-family:var(--mono); font-size:12px; line-height:1.55;
+    background:#111; color:#e6e6e6;
+    padding:16px 18px; overflow-x:auto; margin:0 0 20px;
+    border:1px solid #000;
+  }
+  pre.code-block .c{color:#8a8a8a;}
+
+  table.ref{
+    width:100%; border-collapse:collapse; font-size:13px; margin-bottom:22px;
+  }
+  table.ref caption{text-align:left; font-family:var(--mono); font-size:11px; color:var(--gray-500); letter-spacing:0.5px; text-transform:uppercase; margin-bottom:8px;}
+  table.ref th{
+    text-align:left; font-family:var(--mono); font-size:10.5px; letter-spacing:0.5px; text-transform:uppercase;
+    color:var(--gray-500); font-weight:600;
+    border-bottom:1px solid var(--ink); padding:7px 10px;
+  }
+  table.ref td{
+    padding:7px 10px; border-bottom:1px solid var(--gray-200); color:var(--ink-soft); vertical-align:top;
+  }
+  table.ref tr:hover td{background:var(--gray-100);}
+  table.ref td.mono, table.ref th.mono{font-family:var(--mono); font-size:12px; color:var(--ink);}
+  .scroll-x{overflow-x:auto;}
+
+  .grid-2{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  .grid-3{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
+  @media (max-width:720px){ .grid-2{grid-template-columns:1fr;} .grid-3{grid-template-columns:1fr;} }
+  .card{border:1px solid var(--gray-300); padding:16px 18px;}
+  .card h4{font-family:var(--mono); font-size:12px; letter-spacing:0.5px; text-transform:uppercase; margin:0 0 8px; color:var(--ink);}
+  .card p{font-size:13.5px; margin-bottom:0;}
+  .card ul.plain{font-size:13.5px; margin-bottom:0;}
+
+  .tagpill{
+    display:inline-block; font-family:var(--mono); font-size:10px; letter-spacing:0.4px;
+    padding:2px 7px; border:1px solid var(--gray-400); color:var(--gray-600); margin:0 5px 5px 0;
+  }
+
+  .rule{border:none; border-top:1px solid var(--gray-200); margin:30px 0;}
+
+  .currency-row{display:flex; align-items:center; flex-wrap:wrap; gap:0; margin:18px 0 26px; font-family:var(--mono); font-size:12px;}
+  .currency-row .cbox{border:1px solid var(--ink); padding:8px 14px; background:var(--white);}
+  .currency-row .cbox.dim{border-color:var(--gray-300); color:var(--gray-500);}
+  .currency-row .carrow{padding:0 8px; color:var(--gray-400);}
+
+  footer.site-footer{
+    border-top:1px solid var(--gray-300); padding:26px 24px 60px; max-width:860px; margin:0 auto;
+    font-family:var(--mono); font-size:11px; color:var(--gray-400); letter-spacing:0.3px;
+  }
+
+  /* ---------- flowchart embed ---------- */
+  .fc-embed{
+    border:1px solid var(--ink);
+    margin:20px 0 28px;
+    background:var(--white);
+  }
+  .fc-embed .fc-canvas{ height:560px; }
+  .fc-hint{
+    font-family:var(--mono); font-size:11px; color:var(--gray-500); letter-spacing:0.2px;
+    padding:9px 14px; border-bottom:1px solid var(--gray-200); background:var(--gray-100);
+  }
+  .fc-toolbar{
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+    padding:8px 10px; border-bottom:1px solid var(--gray-300); background:var(--paper);
+  }
+  .fc-btn{
+    font-family:var(--mono); font-size:11px; letter-spacing:0.3px;
+    background:var(--white); color:var(--ink);
+    border:1px solid var(--gray-400); padding:5px 10px; cursor:pointer;
+  }
+  .fc-btn:hover{border-color:var(--ink); background:var(--gray-100);}
+  .fc-btn.active{background:var(--ink); color:var(--white); border-color:var(--ink);}
+  .fc-btn-danger:hover{border-color:#7a1f1f; color:#7a1f1f;}
+  .fc-sep{width:1px; align-self:stretch; background:var(--gray-200); margin:0 4px;}
+  .fc-zoom-label{font-family:var(--mono); font-size:11px; color:var(--gray-500); min-width:38px; text-align:center;}
+
+  .fc-canvas{position:relative; overflow:hidden; background:var(--paper); cursor:grab; touch-action:none;}
+  .fc-canvas:active{cursor:grabbing;}
+  .fc-viewport{position:absolute; inset:0; overflow:hidden;}
+  .fc-world{position:absolute; left:0; top:0; transform-origin:0 0;
+    background-image: radial-gradient(circle, rgba(0,0,0,0.14) 1px, transparent 1px);
+    background-size:28px 28px;
+  }
+  .fc-svg{position:absolute; left:0; top:0; pointer-events:none;}
+  .fc-edge-hit{pointer-events:stroke; stroke:transparent; stroke-width:16px; cursor:pointer;}
+  .fc-edge-line{stroke:#2b2b2b; stroke-width:1.5px;}
+  .fc-edge-line.dashed{stroke:#9a9a9a; stroke-width:1.3px; stroke-dasharray:6,4;}
+  g.selected .fc-edge-line{stroke:#111; stroke-width:2.4px;}
+  .fc-edge-label-bg{fill:var(--paper); stroke:var(--gray-300); stroke-width:1px;}
+  .fc-edge-label{font-family:var(--mono); font-size:9.5px; fill:#444;}
+
+  .fc-node-layer{position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none;}
+  .fc-node{
+    position:absolute; pointer-events:auto; cursor:move;
+    background:var(--white); border:1.3px solid var(--ink);
+    padding:8px 9px 7px; box-sizing:border-box;
+    box-shadow:2px 2px 0 rgba(0,0,0,0.05);
+  }
+  .fc-node.selected{outline:2px solid var(--ink); outline-offset:2px;}
+  .fc-node.connect-source{outline:2px dashed var(--ink); outline-offset:2px;}
+  .fc-node-name{
+    font-family:var(--mono); font-weight:700; font-size:11px; letter-spacing:0.2px;
+    word-break:break-word; color:var(--ink); cursor:text;
+  }
+  .fc-node-role{
+    font-family:var(--sans); font-size:9.5px; color:var(--gray-500); margin-top:4px;
+    word-break:break-word; cursor:text;
+  }
+  .fc-node-name.editing, .fc-node-role.editing{
+    background:var(--gray-100); outline:1px dashed var(--gray-400);
+  }
+  .fc-node-del{
+    position:absolute; top:-9px; right:-9px; width:18px; height:18px; line-height:16px;
+    border-radius:50%; border:1.2px solid var(--ink); background:var(--white); color:var(--ink);
+    font-size:12px; cursor:pointer; opacity:0.25; padding:0;
+  }
+  .fc-node:hover .fc-node-del{opacity:1;}
+  .fc-root.connect-mode .fc-canvas, .connect-mode{cursor:crosshair !important;}
+
+  /* master (full tab) */
+  #embed-master{
+    flex:1 1 auto; min-height:0; display:flex; flex-direction:column;
+    margin:0; border:none; border-top:1px solid var(--ink);
+  }
+  #embed-master .fc-canvas{flex:1 1 auto; height:auto;}
+  .master-head{
+    padding:12px 22px 0; display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:6px;
+  }
+  .master-head h1{margin:0;}
+  .master-head p{margin:0 0 10px; font-size:12.5px; max-width:640px;}
+
+  @media (max-width:640px){
+    header.top{padding:0 14px;}
+    header.top .tagline{display:none;}
+    .wrap, .wrap-wide{padding:30px 16px 70px;}
+    .fc-embed .fc-canvas{height:420px;}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand"><span class="bolt">&#9889;</span>QUANTUM EDGE</div>
+  <div class="tagline">agentic crypto trading system — master blueprint</div>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-tab="overview">Overview</button>
+  <button class="tab-btn" data-tab="pipeline">Validation Pipeline</button>
+  <button class="tab-btn" data-tab="signalflow">Signal Flow</button>
+  <button class="tab-btn" data-tab="agents">Agent Ecosystem</button>
+  <button class="tab-btn" data-tab="master">Master Flowchart</button>
+</nav>
+
+<main>
+
+<!-- ================= OVERVIEW ================= -->
+<section id="tab-overview" class="tab-panel active">
+  <div class="wrap">
+    <h1 class="page-title">00 — Overview</h1>
+    <p class="lede">A multi-agent, self-improving crypto trading system. Trades BTC first, one currency added at a time after. Holds positions for 10&ndash;15 minutes up to several hours &mdash; long enough to let several LLM reasoning steps sit inside the decision loop without the latency mattering.</p>
+
+    <div class="toc">
+      <a href="#sec-vision">Vision</a>
+      <a href="#sec-principles">Core principles</a>
+      <a href="#sec-sources">Where it comes from</a>
+      <a href="#sec-currency">Currency rollout</a>
+      <a href="#sec-config">Kill-switch config</a>
+      <a href="#sec-risk">Risk limits</a>
+      <a href="#sec-eval">Evaluation rules</a>
+      <a href="#sec-stack">Tech stack</a>
+      <a href="#sec-roadmap">Roadmap</a>
+    </div>
+
+    <h2 class="section-head" id="sec-vision"><span class="num">01</span> Vision &amp; Philosophy</h2>
+    <p>Every decision starts from hard numbers &mdash; price, indicators, order book, ML model outputs &mdash; computed deterministically. Only after that numeric picture is locked in do any LLM-based agents get to reason over it: debate, chart-pattern reading, macro and sentiment interpretation, final decision-making. Nothing an LLM says can override or contradict the actual computed data.</p>
+    <p>Every part of the system is individually switchable through one configuration file &mdash; every data source, every analysis agent, every ML model, every LLM-based layer. Nothing requires touching code to turn off. This controls API cost, lets you test what happens with a source removed, and isolates exactly which signals are actually earning their keep.</p>
+    <p>Nothing gets to influence real trades until it has earned that right with evidence: first tested against years of historical data, then run live on paper across multiple market conditions, then formally reviewed against a fixed bar &mdash; and only after clearing all of that does it get turned on for real money, starting small.</p>
+    <blockquote>Prove it on historical data, prove it on paper, then &mdash; and only then &mdash; let it touch real money.</blockquote>
+
+    <h2 class="section-head" id="sec-principles"><span class="num">02</span> Core Principles</h2>
+    <ul class="plain">
+      <li><strong>Determinism before LLMs.</strong> All numerical data is computed first, without any LLM involvement, and locked into a snapshot. LLM agents reason on top of it; they cannot invent or override numbers.</li>
+      <li><strong>Nothing trades real money until it's proven.</strong> Historical backtest &rarr; paper trading &rarr; formal evidence review &rarr; live, in that order, every time.</li>
+      <li><strong>New or unproven components run in observation mode first.</strong> They generate a real opinion every cycle, get logged, get scored &mdash; but don't change the trade until they've demonstrably added value.</li>
+      <li><strong>Every agent is a switch.</strong> Every data source and analytical agent can be turned off from one config file, with a defined, safe fallback downstream.</li>
+      <li><strong>One coin first.</strong> Full validation on BTC before touching a second currency &mdash; only ever one thing that can be wrong while debugging.</li>
+      <li><strong>Risk management is not optional.</strong> Portfolio risk limits, position sizing, and pre-trade guard checks stay on; everything else is a genuine switch.</li>
+      <li><strong>Learning happens deliberately.</strong> Rule synthesis and model retraining run in controlled, reviewable batches &mdash; never silent continuous updates against open positions.</li>
+    </ul>
+
+    <h2 class="section-head" id="sec-sources"><span class="num">03</span> Where This Design Comes From</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h4>QRAK — paper-trading, single-asset, LLM-driven</h4>
+        <p>Borrowed: a vector-memory "brain," reflection-synthesized rules, post-mortem autopsies, a surprise-ratio for lucky wins, AI-mistake classification, a fail-fast guard pipeline, a JIT indicator library, order-book microstructure, a stop-loss-tightening hard rule, and sending a rendered chart image to a multimodal LLM &mdash; the direct precedent for OCULUS.</p>
+      </div>
+      <div class="card">
+        <h4>TAURI — LangGraph multi-agent debate, research-only</h4>
+        <p>Borrowed: the pipeline as a state graph, genuinely adversarial two-tier debate, structured Pydantic outputs, a verified market snapshot that locks in ground truth before any LLM reasons, a multi-provider LLM factory, deferred reflection, and checkpoint-based crash recovery.</p>
+      </div>
+    </div>
+    <p style="margin-top:6px;">Built new for this project, absent from both reference repos: live exchange execution via CCXT, a seven-model ML ensemble, an RL position-sizing agent, on-chain data, funding/OI/liquidation data, Bayesian confidence fusion, fractional-Kelly sizing, semantic news search, cross-asset portfolio risk, the visual multi-timeframe chart reader (OCULUS), the full historical &rarr; paper &rarr; live validation pipeline, and the single master kill-switch config.</p>
+
+    <h2 class="section-head" id="sec-currency"><span class="num">04</span> Currency Rollout</h2>
+    <p>BTC clears the full pipeline before a second currency starts its own. Sequential, not parallel &mdash; for debuggability (one set of logs, one thing that can go wrong at a time), cost control (one currency's worth of LLM and data-vendor calls), and honest validation (BTC clearing Stage 1&ndash;3 tells you nothing certain about ETH).</p>
+    <div class="currency-row">
+      <div class="cbox">BTC</div><div class="carrow">&rarr;</div>
+      <div class="cbox dim">ETH</div><div class="carrow">&rarr;</div>
+      <div class="cbox dim">SOL</div><div class="carrow">&rarr;</div>
+      <div class="cbox dim">BNB</div><div class="carrow">&rarr;</div>
+      <div class="cbox dim">XRP</div><div class="carrow">&rarr;</div>
+      <div class="cbox dim">MATIC</div>
+    </div>
+    <p>Shared from day one across every currency: news, sentiment, macro/Fear&amp;Greed, on-chain data, cross-market data, the memory system, portfolio risk, execution gateway, dashboard. Per-currency, re-instantiated for each coin: the market data fetcher, indicator engine, microstructure agent, the six per-coin intelligence agents, OCULUS, the ML ensemble, the RL agent, the four debate agents, confidence fusion, and the final decision agent &mdash; all written generically from the start, parameterized by coin symbol.</p>
+
+    <h2 class="section-head" id="sec-config"><span class="num">05</span> Master Config / Kill-Switch System</h2>
+    <p>Turn any data source, agent, or subsystem on or off &mdash; to save API cost, or to deliberately test what happens with something removed &mdash; by editing one file, never by touching code. Every agent reads its own on/off state from this file at the start of every cycle.</p>
+    <pre class="code-block"><span class="c"># config/system_config.yaml — abridged</span>
+system:
+  active_currency: "BTC"
+  validation_stage: 1        <span class="c"># 1 | 2 | 3 | 4</span>
+
+data_sources:
+  prism:    { enabled: true }   <span class="c"># OHLCV — core, always on</span>
+  titan:    { enabled: false }  <span class="c"># on-chain — off, saving API cost</span>
+  echo_sentiment:
+    sources: { twitter: {enabled: false}, reddit: {enabled: true} }
+
+intelligence_agents:
+  oculus:
+    enabled: true
+    influences_decision: false  <span class="c"># observation mode until Stage 3</span>
+    timeframes: { 1m: {enabled:false}, 15m: {enabled:true}, 4h: {enabled:true} }
+
+debate_layer:
+  enabled: true
+  influences_decision: false    <span class="c"># observation mode until Stage 3</span>
+  risk_subdebate: { enabled: true, influences_decision: true }
+
+reinforcement_learning:
+  darwinex: { enabled: false, mode: "offline_batch_only" }
+
+risk_layer:
+  sentinel: { enabled: true }
+  warden:   { enabled: true }
+  guardian: { enabled: true }   <span class="c"># these three never gate off for live trading</span></pre>
+
+    <p>The rule that makes turning things off safe: <strong>a disabled input is never silently treated as neutral.</strong> Every place that fuses multiple signals renormalizes its weights around what's actually available, and flags that its evidence is reduced.</p>
+    <div class="scroll-x">
+    <table class="ref">
+      <tr><th>Switched off</th><th>Downstream effect in ORACLE's fusion</th></tr>
+      <tr><td class="mono">echo_sentiment</td><td>Sentiment weight dropped and redistributed; confidence report flagged as reduced evidence.</td></tr>
+      <tr><td class="mono">titan (on-chain)</td><td>Same &mdash; weight redistributed, evidence-quality flag set.</td></tr>
+      <tr><td class="mono">one ML model</td><td>Excluded from the ensemble vote; agreement % computed only across remaining active models.</td></tr>
+      <tr><td class="mono">oculus (entire)</td><td>No visual read that cycle; scorecard notes "no read" rather than counting a miss.</td></tr>
+      <tr><td class="mono">debate_layer</td><td>No debate runs; STRATEGIST proceeds on ML, technicals, sentiment and macro alone.</td></tr>
+      <tr><td class="mono">sentinel / warden / guardian</td><td>Live trading is blocked entirely, regardless of anything else in the config.</td></tr>
+    </table>
+    </div>
+    <p>Every decision &mdash; paper or live &mdash; is stored with a complete snapshot of exactly which agents and data sources were switched on when it was made. Without that, there's no way to later tell whether a trade lost because the strategy is bad or because sentiment happened to be off that week.</p>
+
+    <h2 class="section-head" id="sec-risk"><span class="num">06</span> Risk Layer &amp; Starting Limits</h2>
+    <div class="scroll-x">
+    <table class="ref">
+      <tr><th>Agent</th><th>Function</th></tr>
+      <tr><td class="mono">SENTINEL</td><td>Global portfolio risk: max daily loss, max drawdown, per-currency exposure cap, correlation limits, total portfolio heat. Runs identically in paper and live so Stage 2 genuinely rehearses Stage 4.</td></tr>
+      <tr><td class="mono">WARDEN</td><td>Position sizing via fractional Kelly: <code>kelly = (win_rate&times;avg_win)/avg_loss &minus; (1&minus;win_rate)</code>, then <code>fractional = kelly &times; 0.25</code>, scaled by volatility and confidence tier.</td></tr>
+      <tr><td class="mono">GUARDIAN</td><td>Sequential fail-fast guard pipeline: cooldown &rarr; symbol whitelist &rarr; max position size &rarr; daily loss stop &rarr; margin sufficiency &rarr; min risk/reward. Every rejection logged.</td></tr>
+    </table>
+    </div>
+    <ul class="plain">
+      <li>Max daily loss: 2% of capital</li>
+      <li>Max single-trade loss: 0.5% of capital</li>
+      <li>Max concurrent open positions: 4</li>
+      <li>Max exposure per currency: 25% of capital</li>
+      <li>Max total portfolio heat: 5%</li>
+    </ul>
+    <p>These three agents are the one place the system enforces a hard rule regardless of config: it will not move into Stage 4 while any of them is switched off.</p>
+
+    <h2 class="section-head" id="sec-eval"><span class="num">07</span> How the Debate Layer &amp; OCULUS Earn Real Influence</h2>
+    <ol class="plain">
+      <li><strong>Minimum sample size and regime coverage.</strong> Scored trades must span an uptrend, a downtrend, and a ranging period before any number is trusted.</li>
+      <li><strong>The comparison.</strong> For every closed trade, reconstruct what STRATEGIST actually decided without the component, versus what it would have decided with it. Where they agree, the component added nothing that trade.</li>
+      <li><strong>Weight by outcome size, not win/loss.</strong> Score by R-multiple. A component right less than half the time but right big when it matters can still be net positive.</li>
+      <li><strong>The promotion bar</strong> is written down before results exist &mdash; beat the "without it" baseline by an agreed margin, on the divergent-trade subset, across all three regimes, over the full sample.</li>
+      <li><strong>Demotion is automatic.</strong> A promoted component keeps being scored; if it later drops below the bar, it reverts to observation mode.</li>
+      <li><strong>Check it isn't just riding the trend.</strong> Credit is given net of the period's prevailing directional bias, not raw hit rate.</li>
+    </ol>
+    <p>The debate layer and OCULUS are scored and promoted <strong>independently</strong> of each other &mdash; one can clear the bar and the other not. The risk sub-debate is scored against sizing outcomes rather than direction, on its own timeline.</p>
+
+    <h2 class="section-head" id="sec-stack"><span class="num">08</span> Tech Stack</h2>
+    <div class="grid-3">
+      <div class="card"><h4>Core</h4><ul class="plain"><li>Python 3.11+, asyncio</li><li>LangGraph, LangChain</li><li>Pydantic v2, PyYAML</li></ul></div>
+      <div class="card"><h4>Market data</h4><ul class="plain"><li>ccxt (Binance/Bybit/OKX/Kraken)</li><li>websockets, aiohttp</li><li>pycoingecko</li></ul></div>
+      <div class="card"><h4>Features &amp; charts</h4><ul class="plain"><li>numba JIT indicators</li><li>numpy / pandas</li><li>mplfinance / plotly</li></ul></div>
+      <div class="card"><h4>ML models</h4><ul class="plain"><li>xgboost, catboost, lightgbm</li><li>torch, torch-geometric</li><li>stable-baselines3, gymnasium</li></ul></div>
+      <div class="card"><h4>Memory &amp; storage</h4><ul class="plain"><li>chromadb, sentence-transformers</li><li>faiss-cpu, redis, sqlite</li></ul></div>
+      <div class="card"><h4>NLP / vision / infra</h4><ul class="plain"><li>transformers (FinBERT), vaderSentiment</li><li>Anthropic / Google vision API</li><li>FastAPI, apscheduler, discord.py</li></ul></div>
+    </div>
+    <p style="font-size:13px;">Backtesting: vectorbt or backtrader, benchmarked with quantstats. LLM providers: a multi-provider factory (Anthropic, OpenAI, Google, Groq, Ollama) with fallback chains, so no single outage stops the system.</p>
+
+    <h2 class="section-head" id="sec-roadmap"><span class="num">09</span> Build Order</h2>
+    <p>The validation stages decide when you move on, not the calendar.</p>
+    <ol class="plain">
+      <li>Config / kill-switch infrastructure first &mdash; every agent reads its on/off state from this from day one. CCXT bridge in paper mode. Live BTC data flowing through PRISM-BTC.</li>
+      <li>Deterministic core + Stage 1 walk-forward backtesting harness, before there's anything sophisticated to test. 2&ndash;3+ years of BTC history segmented into uptrend/downtrend/chop.</li>
+      <li>ML ensemble (XGBoost + LSTM first) + full Stage 1 run against buy-and-hold and MA-crossover. Do not proceed until it passes every regime segment.</li>
+      <li>Intelligence layer + OCULUS: chart rendering, the vision-LLM call, structured output, per-timeframe switches, caching.</li>
+      <li>Debate layer (observation mode from line one) + ORACLE's Bayesian fusion + STRATEGIST's decision logic.</li>
+      <li>GUARDIAN, WARDEN, SENTINEL, full order lifecycle &mdash; Stage 2 paper trading begins here.</li>
+      <li>ARGUS, VELOX, NEMESIS, KRONOS, CASSANDRA's scorecards built alongside paper trading from its first trade. AETHER dashboard.</li>
+      <li>Formal evidence review once all three regimes are covered &mdash; flip <code>influences_decision</code> or leave in observation.</li>
+      <li>Live trading, BTC only, small and staged. RL stays off unless deliberately revisited, offline-batch only.</li>
+      <li>Second currency &mdash; repeat the pipeline for ETH, then SOL, BNB, XRP, MATIC.</li>
+    </ol>
+
+  </div>
+  <footer class="site-footer">QUANTUM EDGE — master blueprint · every flowchart in the tabs above is draggable, editable and exportable</footer>
+</section>
+
+<!-- ================= VALIDATION PIPELINE ================= -->
+<section id="tab-pipeline" class="tab-panel">
+  <div class="wrap-wide">
+    <h1 class="page-title">Validation Pipeline</h1>
+    <p class="lede">Nothing trades real money until it clears four stages, in order. Every component &mdash; the ML ensemble, the debate system, the visual chart reader &mdash; moves through the same pipeline before it's trusted with capital.</p>
+
+    <div class="fc-embed">
+      <div class="fc-hint">Drag boxes to move · double-click text to rename · drag empty space to pan · scroll to zoom · "+ Box" adds a box · "Connect" then click two boxes to draw an arrow · double-click an arrow to label it · select + Delete to remove</div>
+      <div class="fc-toolbar" id="toolbar-pipeline"></div>
+      <div class="fc-canvas" id="canvas-pipeline" data-name="validation-pipeline"></div>
+    </div>
+
+    <h3 class="sub-head">Stage 1 — Historical Walk-Forward Backtest</h3>
+    <p>Deterministic + ML core only &mdash; indicators, order-book features, the ML ensemble, sizing and risk-gate logic. The debate system and OCULUS are <em>not</em> tested here: both depend on live news, sentiment, and rendered chart context tied to a specific moment, which can't be faithfully reconstructed for years of history. At least 2&ndash;3 years of BTC history, split across an uptrend, a downtrend, and chop; true walk-forward (never a single in-sample fit); net of realistic fees, slippage, spread; benchmarked against buy-and-hold and MA-crossover. <strong>To pass:</strong> beat both baselines, net of costs, in every regime segment individually.</p>
+    <h3 class="sub-head">Stage 2 — Live Paper Trading</h3>
+    <p>The full system runs live, on paper, for as long as it takes to see a genuine uptrend, downtrend, and ranging period &mdash; not a fixed number of days. The deterministic core, ML ensemble, and confidence/decision/risk/execution layers are authoritative. The debate system and OCULUS run in observation mode: a real, logged opinion every cycle that does not change the trade.</p>
+    <h3 class="sub-head">Stage 3 — Formal Evidence Review</h3>
+    <p>A fixed, pre-agreed bar, decided before you look at results. Enough scored trades spanning all three regimes; comparison between what STRATEGIST actually did and what it would have done with the component included, weighted by outcome size. If a component doesn't clear the bar it stays in observation mode &mdash; never forced in "because it should theoretically help."</p>
+    <h3 class="sub-head">Stage 4 — Live, Small and Staged</h3>
+    <p>Real capital, starting small and scaling gradually. A second currency does not start its own Stage 1 until BTC has run in Stage 4 for a meaningful stretch without a structural failure.</p>
+  </div>
+</section>
+
+<!-- ================= SIGNAL FLOW ================= -->
+<section id="tab-signalflow" class="tab-panel">
+  <div class="wrap-wide">
+    <h1 class="page-title">Signal Flow — One Full Decision Cycle</h1>
+    <p class="lede">What runs concurrently, what's locked before any LLM speaks, and how one candle close turns into an executed (or rejected) trade. Boxes on the same row run in parallel &mdash; only the switched-on subset actually fires.</p>
+
+    <div class="fc-embed">
+      <div class="fc-hint">Drag boxes to move · double-click text to rename · drag empty space to pan · scroll to zoom · "+ Box" adds a box · "Connect" then click two boxes to draw an arrow · double-click an arrow to label it · select + Delete to remove</div>
+      <div class="fc-toolbar" id="toolbar-signalflow"></div>
+      <div class="fc-canvas" id="canvas-signalflow" data-name="signal-flow" style="height:680px;"></div>
+    </div>
+
+    <p style="font-size:13.5px;">Once ARCHIMEDES and MERCURY finish, the deterministic snapshot is locked &mdash; no LLM, including OCULUS or the debate layer, can contradict those numbers from that point in the cycle onward. Everything below the snapshot in this diagram reasons on top of it, never around it.</p>
+  </div>
+</section>
+
+<!-- ================= AGENT ECOSYSTEM ================= -->
+<section id="tab-agents" class="tab-panel">
+  <div class="wrap-wide">
+    <h1 class="page-title">Agent Ecosystem</h1>
+    <p class="lede">Every named agent has a kill switch. Portfolio risk, sizing, and the pre-trade guard pipeline are the one category where flipping the switch off also blocks live trading &mdash; everything else is a genuine, safe-to-flip switch.</p>
+
+    <h3 class="sub-head">Multi-Currency Pipeline Map</h3>
+    <p style="font-size:13.5px;">Each currency gets its own full agent pipeline, running in parallel once multiple currencies are live; they all share one set of background services and one risk layer.</p>
+    <div class="fc-embed">
+      <div class="fc-toolbar" id="toolbar-layermap"></div>
+      <div class="fc-canvas" id="canvas-layermap" data-name="pipeline-map" style="height:460px;"></div>
+    </div>
+
+    <h3 class="sub-head">Full Agent Reference (BTC instance)</h3>
+    <div class="scroll-x">
+    <table class="ref" id="agent-ref-table">
+      <tr><th>Agent</th><th>Layer</th><th>LLM?</th><th>Starting mode</th></tr>
+    </table>
+    </div>
+
+    <h3 class="sub-head">Inspiration Source Map</h3>
+    <div class="scroll-x">
+    <table class="ref">
+      <tr><th>Feature</th><th>Source</th></tr>
+      <tr><td>Vector-memory brain + reflection rules</td><td class="mono">QRAK</td></tr>
+      <tr><td>JIT indicator library</td><td class="mono">QRAK</td></tr>
+      <tr><td>AI-mistake classification</td><td class="mono">QRAK</td></tr>
+      <tr><td>Post-mortem autopsies</td><td class="mono">QRAK</td></tr>
+      <tr><td>Guard pipeline + audit trail</td><td class="mono">QRAK</td></tr>
+      <tr><td>Multimodal chart analysis</td><td class="mono">QRAK — direct precedent for OCULUS</td></tr>
+      <tr><td>Stop-loss tightening hard gate</td><td class="mono">QRAK</td></tr>
+      <tr><td>LangGraph state-graph pipeline</td><td class="mono">TAURI</td></tr>
+      <tr><td>Two-tier adversarial debate</td><td class="mono">TAURI</td></tr>
+      <tr><td>Structured typed outputs</td><td class="mono">TAURI</td></tr>
+      <tr><td>Anti-hallucination deterministic snapshot</td><td class="mono">TAURI</td></tr>
+      <tr><td>Multi-provider LLM factory</td><td class="mono">TAURI</td></tr>
+      <tr><td>Sequential multi-currency rollout</td><td class="mono">Built for this project</td></tr>
+      <tr><td>Full backtest &rarr; paper &rarr; evidence-review &rarr; live pipeline</td><td class="mono">Built for this project</td></tr>
+      <tr><td>Observation-mode + promotion gate</td><td class="mono">Built for this project</td></tr>
+      <tr><td>OCULUS visual multi-timeframe reader</td><td class="mono">Built for this project</td></tr>
+      <tr><td>Master kill-switch config</td><td class="mono">Built for this project</td></tr>
+      <tr><td>Per-decision config snapshot logging</td><td class="mono">Built for this project</td></tr>
+      <tr><td>ML prediction ensemble (7 models)</td><td class="mono">Built for this project</td></tr>
+      <tr><td>Bayesian confidence fusion</td><td class="mono">Built for this project</td></tr>
+    </table>
+    </div>
+  </div>
+</section>
+
+<!-- ================= MASTER FLOWCHART (full tab) ================= -->
+<section id="tab-master" class="tab-panel">
+  <div class="master-head">
+    <div>
+      <h1 class="page-title">Master Flowchart — Everything, One Box Per Agent</h1>
+      <p>Every agent in the system, laid out by layer, fully editable. This is the default graph &mdash; drag, rename, connect, delete, add, and export it however you need.</p>
+    </div>
+  </div>
+  <div class="fc-embed" id="embed-master">
+    <div class="fc-hint">Drag boxes to move · double-click a box's text to rename it · drag empty space to pan · scroll / pinch to zoom · "+ Box" adds a box at the center of your view · "Connect" then click a source box then a target box to draw an arrow · double-click an arrow to label it · click to select, then Delete/Backspace to remove · "Reset" restores this default layout</div>
+    <div class="fc-toolbar" id="toolbar-master"></div>
+    <div class="fc-canvas" id="canvas-master" data-name="quantum-edge-master"></div>
+  </div>
+</section>
+
+</main>
+
+<script>
+/* =========================================================================
+   FLOWCHART ENGINE — draggable / zoomable / editable node-and-arrow canvas
+   ========================================================================= */
+class FlowChart {
+  constructor(rootEl, data, opts){
+    opts = opts || {};
+    this.root = rootEl;
+    this.uid = FlowChart._uid++;
+    this.nodes = data.nodes.map(function(n){ return Object.assign({}, n); });
+    this.edges = data.edges.map(function(e){ return Object.assign({}, e); });
+    this.defaultData = {
+      nodes: data.nodes.map(function(n){ return Object.assign({}, n); }),
+      edges: data.edges.map(function(e){ return Object.assign({}, e); })
+    };
+    this.scale = opts.initialScale || 0.55;
+    this.panX = 20; this.panY = 20;
+    this.selected = null;
+    this.connectMode = false;
+    this.connectSource = null;
+    this.worldW = opts.worldW || 3000;
+    this.worldH = opts.worldH || 3200;
+    this._nodeEls = {};
+    this._build();
+    this.renderAll();
+    this._applyTransform();
+  }
+
+  _build(){
+    this.root.classList.add('fc-root');
+    this.root.innerHTML = '';
+    this.viewport = document.createElement('div');
+    this.viewport.className = 'fc-viewport';
+    this.world = document.createElement('div');
+    this.world.className = 'fc-world';
+    this.world.style.width = this.worldW + 'px';
+    this.world.style.height = this.worldH + 'px';
+
+    this.svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    this.svg.setAttribute('class','fc-svg');
+    this.svg.setAttribute('width', this.worldW);
+    this.svg.setAttribute('height', this.worldH);
+    this.svg.setAttribute('viewBox', '0 0 ' + this.worldW + ' ' + this.worldH);
+
+    var defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
+    var marker = document.createElementNS('http://www.w3.org/2000/svg','marker');
+    marker.setAttribute('id','fc-arrow-' + this.uid);
+    marker.setAttribute('viewBox','0 0 10 10');
+    marker.setAttribute('refX','8'); marker.setAttribute('refY','5');
+    marker.setAttribute('markerWidth','7'); marker.setAttribute('markerHeight','7');
+    marker.setAttribute('orient','auto-start-reverse');
+    var arrowPath = document.createElementNS('http://www.w3.org/2000/svg','path');
+    arrowPath.setAttribute('d','M0,0 L10,5 L0,10 z');
+    arrowPath.setAttribute('fill','#222');
+    marker.appendChild(arrowPath);
+    defs.appendChild(marker);
+    this.svg.appendChild(defs);
+
+    this.edgeLayer = document.createElementNS('http://www.w3.org/2000/svg','g');
+    this.svg.appendChild(this.edgeLayer);
+    this.world.appendChild(this.svg);
+
+    this.nodeLayer = document.createElement('div');
+    this.nodeLayer.className = 'fc-node-layer';
+    this.world.appendChild(this.nodeLayer);
+
+    this.viewport.appendChild(this.world);
+    this.root.appendChild(this.viewport);
+
+    this._wireEvents();
+  }
+
+  _wireEvents(){
+    var self = this;
+    this.viewport.addEventListener('pointerdown', function(e){
+      FlowChart.active = self;
+      if (e.target !== self.viewport && e.target !== self.world && e.target !== self.svg) return;
+      if (self.connectMode){ self._cancelConnect(); }
+      self.deselectAll();
+      var startX = e.clientX, startY = e.clientY, ox = self.panX, oy = self.panY;
+      function onMove(ev){
+        self.panX = ox + (ev.clientX - startX);
+        self.panY = oy + (ev.clientY - startY);
+        self._applyTransform();
+      }
+      function onUp(){
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      }
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
+    this.viewport.addEventListener('wheel', function(e){
+      e.preventDefault();
+      var rect = self.viewport.getBoundingClientRect();
+      var mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      var factor = e.deltaY < 0 ? 1.1 : 0.9;
+      self._zoomAt(mx, my, self.scale * factor);
+    }, {passive:false});
+    this.viewport.addEventListener('mouseenter', function(){ FlowChart.active = self; });
+    this.root.tabIndex = 0;
+  }
+
+  _zoomAt(mx, my, newScaleRaw){
+    var newScale = Math.min(2.5, Math.max(0.12, newScaleRaw));
+    var wx = (mx - this.panX) / this.scale, wy = (my - this.panY) / this.scale;
+    this.panX = mx - wx * newScale;
+    this.panY = my - wy * newScale;
+    this.scale = newScale;
+    this._applyTransform();
+  }
+
+  _applyTransform(){
+    this.world.style.transform = 'translate(' + this.panX + 'px, ' + this.panY + 'px) scale(' + this.scale + ')';
+    var wrap = this.root.parentElement;
+    var zEl = wrap ? wrap.querySelector('.fc-zoom-label') : null;
+    if (zEl) zEl.textContent = Math.round(this.scale * 100) + '%';
+  }
+
+  fitView(){
+    if (!this.nodes.length) return;
+    var minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+    this.nodes.forEach(function(n){
+      minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + n.w); maxY = Math.max(maxY, n.y + n.h);
+    });
+    var pad = 70;
+    minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+    var bw = maxX - minX, bh = maxY - minY;
+    var vw = this.viewport.clientWidth || 900, vh = this.viewport.clientHeight || 560;
+    var scale = Math.min(vw / bw, vh / bh, 1);
+    this.scale = Math.max(0.12, scale);
+    this.panX = (vw - bw * this.scale) / 2 - minX * this.scale;
+    this.panY = (vh - bh * this.scale) / 2 - minY * this.scale;
+    this._applyTransform();
+  }
+
+  renderAll(){
+    this.nodeLayer.innerHTML = '';
+    this._nodeEls = {};
+    var self = this;
+    this.nodes.forEach(function(n){ self._renderNode(n); });
+    this._renderEdges();
+  }
+
+  _renderNode(n){
+    var self = this;
+    var el = document.createElement('div');
+    el.className = 'fc-node';
+    el.dataset.id = n.id;
+    el.style.left = n.x + 'px'; el.style.top = n.y + 'px';
+    el.style.width = n.w + 'px'; el.style.minHeight = n.h + 'px';
+
+    var nameEl = document.createElement('div');
+    nameEl.className = 'fc-node-name'; nameEl.textContent = n.label;
+    var subEl = document.createElement('div');
+    subEl.className = 'fc-node-role'; subEl.textContent = n.sub || '';
+    var del = document.createElement('button');
+    del.className = 'fc-node-del'; del.type = 'button'; del.textContent = '\u00D7'; del.title = 'Delete box';
+
+    el.appendChild(nameEl); el.appendChild(subEl); el.appendChild(del);
+    this.nodeLayer.appendChild(el);
+    this._nodeEls[n.id] = el;
+
+    el.addEventListener('pointerdown', function(e){
+      FlowChart.active = self;
+      if (e.target === del) return;
+      if (e.target.isContentEditable) { e.stopPropagation(); return; }
+      e.stopPropagation();
+      if (self.connectMode){ self._connectClick(n.id); return; }
+      self.selectNode(n.id);
+      var startX = e.clientX, startY = e.clientY, ox = n.x, oy = n.y;
+      function onMove(ev){
+        n.x = ox + (ev.clientX - startX) / self.scale;
+        n.y = oy + (ev.clientY - startY) / self.scale;
+        el.style.left = n.x + 'px'; el.style.top = n.y + 'px';
+        self._renderEdges();
+      }
+      function onUp(){
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      }
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
+    del.addEventListener('pointerdown', function(e){ e.stopPropagation(); });
+    del.addEventListener('click', function(e){ e.stopPropagation(); self.deleteNode(n.id); });
+    [nameEl, subEl].forEach(function(t){
+      t.addEventListener('dblclick', function(e){
+        e.stopPropagation();
+        self._editText(t, n, t === nameEl ? 'label' : 'sub');
+      });
+    });
+  }
+
+  _editText(el, node, field){
+    el.contentEditable = 'true';
+    el.classList.add('editing');
+    el.focus();
+    var range = document.createRange(); range.selectNodeContents(el);
+    var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    function finish(){
+      el.contentEditable = 'false';
+      el.classList.remove('editing');
+      node[field] = el.textContent.trim();
+      el.removeEventListener('blur', finish);
+    }
+    el.addEventListener('blur', finish);
+    el.addEventListener('keydown', function onKey(e){
+      if (e.key === 'Enter'){ e.preventDefault(); el.blur(); }
+      if (e.key === 'Escape'){ e.preventDefault(); el.blur(); }
+    });
+  }
+
+  _renderEdges(){
+    this.edgeLayer.innerHTML = '';
+    var self = this;
+    this.edges.forEach(function(e){ self._renderEdge(e); });
+  }
+
+  _nodeById(id){
+    for (var i=0;i<this.nodes.length;i++){ if (this.nodes[i].id === id) return this.nodes[i]; }
+    return null;
+  }
+
+  _clipPoint(rect, tx, ty){
+    var cx = rect.x + rect.w/2, cy = rect.y + rect.h/2;
+    var dx = tx - cx, dy = ty - cy;
+    if (dx === 0 && dy === 0) return {x:cx, y:cy};
+    var hw = rect.w/2, hh = rect.h/2;
+    var sx = dx !== 0 ? hw/Math.abs(dx) : Infinity;
+    var sy = dy !== 0 ? hh/Math.abs(dy) : Infinity;
+    var s = Math.min(sx, sy);
+    return {x: cx + dx*s, y: cy + dy*s};
+  }
+
+  _pathFor(e){
+    var a = this._nodeById(e.from), b = this._nodeById(e.to);
+    if (!a || !b) return null;
+    var acx = a.x + a.w/2, acy = a.y + a.h/2, bcx = b.x + b.w/2, bcy = b.y + b.h/2;
+    var sx, sy, tx, ty, d;
+    if (Math.abs(acy - bcy) < 6) {
+      var p1 = this._clipPoint(a, bcx, bcy);
+      var p2 = this._clipPoint(b, acx, acy);
+      sx = p1.x; sy = p1.y; tx = p2.x; ty = p2.y;
+      d = 'M ' + sx + ' ' + sy + ' L ' + tx + ' ' + ty;
+    } else {
+      var goingDown = bcy > acy;
+      sx = acx; sy = goingDown ? a.y + a.h : a.y;
+      tx = bcx; ty = goingDown ? b.y : b.y + b.h;
+      var midY = (sy + ty) / 2;
+      d = 'M ' + sx + ' ' + sy + ' L ' + sx + ' ' + midY + ' L ' + tx + ' ' + midY + ' L ' + tx + ' ' + ty;
+    }
+    return {d:d, mid:{x:(sx+tx)/2, y:(sy+ty)/2}};
+  }
+
+  _renderEdge(e){
+    var self = this;
+    var p = this._pathFor(e);
+    if (!p) return;
+    var g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.dataset.id = e.id;
+    var hit = document.createElementNS('http://www.w3.org/2000/svg','path');
+    hit.setAttribute('d', p.d); hit.setAttribute('class','fc-edge-hit'); hit.setAttribute('fill','none');
+    var line = document.createElementNS('http://www.w3.org/2000/svg','path');
+    line.setAttribute('d', p.d);
+    line.setAttribute('class', 'fc-edge-line' + (e.dashed ? ' dashed' : ''));
+    line.setAttribute('fill','none');
+    line.setAttribute('marker-end', 'url(#fc-arrow-' + this.uid + ')');
+    g.appendChild(hit); g.appendChild(line);
+    if (e.label){
+      var w = Math.max(24, e.label.length * 6.2 + 10);
+      var rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+      rect.setAttribute('x', p.mid.x - w/2); rect.setAttribute('y', p.mid.y - 8);
+      rect.setAttribute('width', w); rect.setAttribute('height', 16);
+      rect.setAttribute('class','fc-edge-label-bg');
+      var text = document.createElementNS('http://www.w3.org/2000/svg','text');
+      text.setAttribute('x', p.mid.x); text.setAttribute('y', p.mid.y + 4);
+      text.setAttribute('text-anchor','middle'); text.setAttribute('class','fc-edge-label');
+      text.textContent = e.label;
+      g.appendChild(rect); g.appendChild(text);
+    }
+    g.addEventListener('pointerdown', function(ev){ FlowChart.active = self; ev.stopPropagation(); self.selectEdge(e.id); });
+    g.addEventListener('dblclick', function(ev){
+      ev.stopPropagation();
+      var val = prompt('Arrow label:', e.label || '');
+      if (val !== null){ e.label = val.trim(); self._renderEdges(); }
+    });
+    this.edgeLayer.appendChild(g);
+    if (this.selected && this.selected.type === 'edge' && this.selected.id === e.id) g.classList.add('selected');
+  }
+
+  selectNode(id){
+    this.deselectAll();
+    this.selected = {type:'node', id:id};
+    var el = this._nodeEls[id]; if (el) el.classList.add('selected');
+  }
+  selectEdge(id){
+    this.deselectAll();
+    this.selected = {type:'edge', id:id};
+    this._renderEdges();
+  }
+  deselectAll(){
+    if (this.selected && this.selected.type === 'node'){
+      var el = this._nodeEls[this.selected.id]; if (el) el.classList.remove('selected');
+    }
+    this.selected = null;
+    if (this.edgeLayer){
+      var sel = this.edgeLayer.querySelector('.selected'); if (sel) sel.classList.remove('selected');
+    }
+  }
+
+  deleteNode(id){
+    this.nodes = this.nodes.filter(function(n){ return n.id !== id; });
+    this.edges = this.edges.filter(function(e){ return e.from !== id && e.to !== id; });
+    if (this.selected && this.selected.id === id) this.selected = null;
+    this.renderAll();
+  }
+  deleteEdge(id){
+    this.edges = this.edges.filter(function(e){ return e.id !== id; });
+    if (this.selected && this.selected.id === id) this.selected = null;
+    this._renderEdges();
+  }
+
+  addNode(){
+    var vw = this.viewport.clientWidth || 900, vh = this.viewport.clientHeight || 560;
+    var wx = (vw/2 - this.panX) / this.scale, wy = (vh/2 - this.panY) / this.scale;
+    var id = 'box_' + Math.random().toString(36).slice(2,9);
+    var n = {id:id, label:'New Box', sub:'role / description', x: wx-85, y: wy-36, w:170, h:72};
+    this.nodes.push(n);
+    this._renderNode(n);
+    this._renderEdges();
+    this.selectNode(id);
+    var self = this;
+    setTimeout(function(){
+      var el = self._nodeEls[id];
+      if (el){ var nm = el.querySelector('.fc-node-name'); self._editText(nm, n, 'label'); }
+    }, 30);
+  }
+
+  toggleConnect(btn){
+    this.connectMode = !this.connectMode;
+    this.connectSource = null;
+    this.root.classList.toggle('connect-mode', this.connectMode);
+    if (btn) btn.classList.toggle('active', this.connectMode);
+    var self = this;
+    Object.keys(this._nodeEls).forEach(function(k){ self._nodeEls[k].classList.remove('connect-source'); });
+  }
+  _cancelConnect(){
+    this.connectSource = null;
+    var self = this;
+    Object.keys(this._nodeEls).forEach(function(k){ self._nodeEls[k].classList.remove('connect-source'); });
+  }
+  _connectClick(id){
+    if (!this.connectSource){
+      this.connectSource = id;
+      var self = this;
+      Object.keys(this._nodeEls).forEach(function(k){ self._nodeEls[k].classList.remove('connect-source'); });
+      var el = this._nodeEls[id]; if (el) el.classList.add('connect-source');
+    } else {
+      if (this.connectSource !== id){
+        var edgeId = 'e_' + Math.random().toString(36).slice(2,9);
+        this.edges.push({id:edgeId, from:this.connectSource, to:id, label:''});
+        this._renderEdges();
+      }
+      this._cancelConnect();
+    }
+  }
+
+  handleKeydown(e){
+    if (document.activeElement && document.activeElement.isContentEditable) return;
+    if (e.key === 'Delete' || e.key === 'Backspace'){
+      if (this.selected){
+        e.preventDefault();
+        if (this.selected.type === 'node') this.deleteNode(this.selected.id);
+        else this.deleteEdge(this.selected.id);
+      }
+    } else if (e.key === 'Escape'){
+      this._cancelConnect();
+    }
+  }
+
+  loadData(data){
+    this.nodes = data.nodes.map(function(n){ return Object.assign({}, n); });
+    this.edges = data.edges.map(function(e){ return Object.assign({}, e); });
+    this.selected = null;
+    this.renderAll();
+    this.fitView();
+  }
+  resetToDefault(){ this.loadData(this.defaultData); }
+
+  _syncLiveText(){
+    var self = this;
+    this.nodes.forEach(function(n){
+      var el = self._nodeEls[n.id];
+      if (el){
+        n.label = el.querySelector('.fc-node-name').textContent;
+        n.sub = el.querySelector('.fc-node-role').textContent;
+      }
+    });
+  }
+
+  exportJSON(){
+    this._syncLiveText();
+    var data = { nodes: this.nodes, edges: this.edges };
+    var blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+    this._download(blob, (this.root.dataset.name || 'flowchart') + '.json');
+  }
+  importJSON(file){
+    var self = this;
+    var reader = new FileReader();
+    reader.onload = function(){
+      try {
+        var data = JSON.parse(reader.result);
+        if (!data.nodes || !data.edges) throw new Error('bad shape');
+        self.loadData(data);
+      } catch (err){
+        alert('Could not read that file as a flowchart JSON export.');
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  exportSVG(){
+    this._syncLiveText();
+    var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    this.nodes.forEach(function(n){
+      minX = Math.min(minX,n.x); minY = Math.min(minY,n.y);
+      maxX = Math.max(maxX,n.x+n.w); maxY = Math.max(maxY,n.y+n.h);
+    });
+    if (!isFinite(minX)){ minX=0; minY=0; maxX=400; maxY=300; }
+    var pad = 50; minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+    var w = maxX - minX, h = maxY - minY;
+    function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'" viewBox="'+minX+' '+minY+' '+w+' '+h+'">';
+    svg += '<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#222"/></marker></defs>';
+    svg += '<rect x="'+minX+'" y="'+minY+'" width="'+w+'" height="'+h+'" fill="#ffffff"/>';
+    var self = this;
+    this.edges.forEach(function(e){
+      var p = self._pathFor(e); if (!p) return;
+      svg += '<path d="'+p.d+'" stroke="#222" stroke-width="1.5" fill="none" marker-end="url(#arrow)"'+(e.dashed?' stroke-dasharray="6,4" stroke="#999"':'')+'/>';
+      if (e.label){
+        var lw = Math.max(24, e.label.length*6.2+10);
+        svg += '<rect x="'+(p.mid.x-lw/2)+'" y="'+(p.mid.y-8)+'" width="'+lw+'" height="16" fill="#fbfbf9" stroke="#ddd"/>';
+        svg += '<text x="'+p.mid.x+'" y="'+(p.mid.y+4)+'" font-size="10" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" fill="#333">'+esc(e.label)+'</text>';
+      }
+    });
+    this.nodes.forEach(function(n){
+      svg += '<rect x="'+n.x+'" y="'+n.y+'" width="'+n.w+'" height="'+n.h+'" fill="#ffffff" stroke="#111" stroke-width="1.3"/>';
+      svg += '<text x="'+(n.x+n.w/2)+'" y="'+(n.y+20)+'" font-size="12" font-weight="700" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" fill="#111">'+esc(n.label)+'</text>';
+      var words = (n.sub||'').split(' ');
+      var lines = []; var cur = '';
+      words.forEach(function(word){
+        var test = (cur + ' ' + word).trim();
+        if (test.length > 24){ if(cur) lines.push(cur.trim()); cur = word; } else { cur = test; }
+      });
+      if (cur) lines.push(cur);
+      lines.slice(0,3).forEach(function(ln, i){
+        svg += '<text x="'+(n.x+n.w/2)+'" y="'+(n.y+38+i*13)+'" font-size="9.5" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" fill="#555">'+esc(ln)+'</text>';
+      });
+    });
+    svg += '</svg>';
+    var blob = new Blob([svg], {type:'image/svg+xml'});
+    this._download(blob, (this.root.dataset.name || 'flowchart') + '.svg');
+  }
+
+  _download(blob, filename){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+  }
+}
+FlowChart._uid = 1;
+FlowChart.active = null;
+document.addEventListener('keydown', function(e){ if (FlowChart.active) FlowChart.active.handleKeydown(e); });
+
+/* ---------- toolbar builder (shared across all canvases) ---------- */
+function buildToolbar(fc, container){
+  var bar = document.createElement('div');
+  bar.className = 'fc-toolbar';
+  function mk(label, title, onClick, cls){
+    var b = document.createElement('button');
+    b.type = 'button'; b.textContent = label; b.title = title || ''; b.className = 'fc-btn' + (cls ? (' '+cls) : '');
+    b.addEventListener('click', onClick);
+    bar.appendChild(b);
+    return b;
+  }
+  function sep(){ var s = document.createElement('span'); s.className = 'fc-sep'; bar.appendChild(s); }
+
+  mk('+ Box', 'Add a new box', function(){ fc.addNode(); });
+  var connectBtn = mk('\u2934 Connect', 'Click two boxes to draw an arrow between them', function(){ fc.toggleConnect(connectBtn); });
+  mk('Delete', 'Delete the selected box or arrow', function(){
+    if (fc.selected){
+      if (fc.selected.type === 'node') fc.deleteNode(fc.selected.id);
+      else fc.deleteEdge(fc.selected.id);
+    }
+  });
+  sep();
+  mk('\u2212', 'Zoom out', function(){ fc._zoomAt(fc.viewport.clientWidth/2, fc.viewport.clientHeight/2, fc.scale*0.85); });
+  var zoomLabel = document.createElement('span'); zoomLabel.className = 'fc-zoom-label'; zoomLabel.textContent = '100%';
+  bar.appendChild(zoomLabel);
+  mk('+', 'Zoom in', function(){ fc._zoomAt(fc.viewport.clientWidth/2, fc.viewport.clientHeight/2, fc.scale*1.15); });
+  mk('Fit', 'Fit everything in view', function(){ fc.fitView(); });
+  sep();
+  mk('Export SVG', 'Download this flowchart as an SVG file', function(){ fc.exportSVG(); });
+  mk('Export JSON', 'Save your edits to a file so you can reload them later', function(){ fc.exportJSON(); });
+  var fileInput = document.createElement('input');
+  fileInput.type = 'file'; fileInput.accept = '.json,application/json'; fileInput.style.display = 'none';
+  fileInput.addEventListener('change', function(){
+    if (fileInput.files[0]) fc.importJSON(fileInput.files[0]);
+    fileInput.value = '';
+  });
+  bar.appendChild(fileInput);
+  mk('Import JSON', 'Load a previously saved layout', function(){ fileInput.click(); });
+  mk('Reset', 'Reset this flowchart back to its default layout', function(){
+    if (confirm('Reset this flowchart back to the default layout? Your edits here will be lost.')) fc.resetToDefault();
+  }, 'fc-btn-danger');
+
+  container.innerHTML = '';
+  container.appendChild(bar);
+  return bar;
+}
+
+/* =========================================================================
+   DEFAULT GRAPH DATA
+   ========================================================================= */
+function rowLayout(items, y, opts){
+  opts = opts || {};
+  var gap = (opts.gap != null) ? opts.gap : 26;
+  var dW = opts.w || 170, dH = opts.h || 72;
+  var centerX = (opts.centerX != null) ? opts.centerX : 1500;
+  var widths = items.map(function(it){ return it.w || dW; });
+  var totalW = widths.reduce(function(a,b){ return a+b; }, 0) + gap*(items.length-1);
+  var x = centerX - totalW/2;
+  return items.map(function(it, i){
+    var w = widths[i], h = it.h || dH;
+    var node = {id:it.id, label:it.name, sub:it.role, x:x, y:y, w:w, h:h};
+    x += w + gap;
+    return node;
+  });
+}
+function E(from, to, label, dashed){
+  return {id: from+'__'+to+'__'+Math.random().toString(36).slice(2,6), from:from, to:to, label: label||'', dashed: !!dashed};
+}
+
+/* ---- 1. Validation Pipeline ---- */
+function buildPipelineData(){
+  var nodes = [];
+  var rows = [
+    {y:30,  items:[{id:'histdata', name:'Historical BTC Data', role:'2-3+ yrs, multi-regime', w:210}]},
+    {y:180, items:[
+      {id:'baselinebh', name:'Buy & Hold', role:'benchmark', w:150},
+      {id:'stage1', name:'STAGE 1', role:'Historical walk-forward backtest', w:230},
+      {id:'baselinema', name:'MA Crossover', role:'benchmark', w:150}
+    ]},
+    {y:340, items:[{id:'stage2', name:'STAGE 2', role:'Live paper trading, real-time', w:230}]},
+    {y:490, items:[
+      {id:'obsdebate', name:'Debate Layer', role:'observation mode', w:190},
+      {id:'obsoculus', name:'OCULUS', role:'observation mode', w:190}
+    ]},
+    {y:640, items:[{id:'stage3', name:'STAGE 3', role:'Formal evidence review', w:230}]},
+    {y:790, items:[{id:'promote', name:'Promote?', role:'pre-agreed bar, decided before results', w:230}]},
+    {y:940, items:[{id:'stage4', name:'STAGE 4', role:'Live trading, small & staged', w:230}]},
+    {y:1090,items:[{id:'nextcoin', name:'Next Currency', role:'ETH repeats Stage 1', w:210}]}
+  ];
+  rows.forEach(function(r){ nodes = nodes.concat(rowLayout(r.items, r.y, {centerX:900})); });
+  var edges = [
+    E('histdata','stage1'),
+    E('baselinebh','stage1','benchmark vs',true),
+    E('baselinema','stage1','benchmark vs',true),
+    E('stage1','stage2','passes every regime'),
+    E('stage2','obsdebate'),
+    E('stage2','obsoculus'),
+    E('obsdebate','stage3'),
+    E('obsoculus','stage3'),
+    E('stage2','stage3'),
+    E('stage3','promote'),
+    E('promote','stage4','clears bar'),
+    E('promote','obsdebate','stays in observation',true),
+    E('stage4','nextcoin','stable stretch, no failures')
+  ];
+  return {nodes:nodes, edges:edges};
+}
+
+/* ---- 2. Signal Flow ---- */
+function buildSignalFlowData(){
+  var nodes = [];
+  var rows = [
+    {y:30,  items:[{id:'candle', name:'Candle Closes', role:'15m / 1h / 4h per config', w:220}]},
+    {y:170, items:[
+      {id:'prism', name:'PRISM-BTC', role:'OHLCV fetch'},
+      {id:'poseidon', name:'POSEIDON-BTC', role:'funding / OI / liquidations'}
+    ]},
+    {y:310, items:[
+      {id:'archimedes', name:'ARCHIMEDES-BTC', role:'computes indicators'},
+      {id:'mercury', name:'MERCURY-BTC', role:'order-book deltas'}
+    ]},
+    {y:450, items:[{id:'snapshot', name:'DETERMINISTIC SNAPSHOT LOCKED', role:'no LLM can override these numbers from here on', w:420, h:80}]},
+    {y:610, items:[
+      {id:'regime', name:'REGIME-BTC', role:'market state'},
+      {id:'flow', name:'FLOW-BTC', role:'liquidity, stop-hunts'},
+      {id:'momentum', name:'MOMENTUM-BTC', role:'trend alignment'},
+      {id:'volume', name:'VOLUME-BTC', role:'VWAP, vol. profile'},
+      {id:'pattern', name:'PATTERN-BTC', role:'math chart patterns'},
+      {id:'structure', name:'STRUCTURE-BTC', role:'S/R, Fib, pivots'}
+    ]},
+    {y:760, items:[{id:'oculus', name:'OCULUS-BTC', role:'visual chart read (logged)', w:220}]},
+    {y:900, items:[
+      {id:'herald', name:'HERALD', role:'news, semantic search'},
+      {id:'echo', name:'ECHO', role:'social sentiment'},
+      {id:'pulse', name:'PULSE', role:'macro, Fear&Greed'},
+      {id:'hydra', name:'HYDRA', role:'dominance, mkt cap'},
+      {id:'titan', name:'TITAN', role:'on-chain flows'}
+    ]},
+    {y:1040, items:[{id:'prophet', name:'PROPHET-BTC', role:'ML ensemble, 7 models', w:220}]},
+    {y:1180, items:[
+      {id:'bull', name:'BULL-BTC', role:'strongest long case'},
+      {id:'bear', name:'BEAR-BTC', role:'strongest short case'}
+    ]},
+    {y:1320, items:[{id:'socrates', name:'SOCRATES-BTC', role:'adversarial challenge', w:220}]},
+    {y:1460, items:[{id:'magistra', name:'MAGISTRA-BTC', role:'investment thesis (logged)', w:220}]},
+    {y:1600, items:[{id:'oracle', name:'ORACLE-BTC', role:'Bayesian fusion, auto-reweight', w:260}]},
+    {y:1740, items:[{id:'atlas', name:'ATLAS', role:'injects rules + thresholds', w:220}]},
+    {y:1880, items:[{id:'strategist', name:'STRATEGIST-BTC', role:'final trade decision', w:230}]},
+    {y:2020, items:[
+      {id:'guardian', name:'GUARDIAN', role:'pre-trade guard pipeline', w:200},
+      {id:'reject', name:'Rejected', role:'logged, explained back', w:170}
+    ]},
+    {y:2160, items:[
+      {id:'warden', name:'WARDEN', role:'Kelly position sizing'},
+      {id:'sentinel', name:'SENTINEL', role:'portfolio risk check'}
+    ]},
+    {y:2300, items:[
+      {id:'hermes', name:'HERMES', role:'order strategy'},
+      {id:'broker', name:'BROKER', role:'submits (paper/live)'}
+    ]},
+    {y:2440, items:[
+      {id:'argus', name:'ARGUS', role:'monitors, every 30s'},
+      {id:'velox', name:'VELOX', role:'stop-loss hard gate'}
+    ]},
+    {y:2580, items:[{id:'close', name:'Position Closes', role:'', w:200}]},
+    {y:2720, items:[
+      {id:'nemesis', name:'NEMESIS', role:'writes post-mortem'},
+      {id:'cassandra', name:'CASSANDRA', role:'scores ML + scorecards'}
+    ]},
+    {y:2860, items:[{id:'atlas2', name:'ATLAS', role:'stores everything', w:220}]},
+    {y:3000, items:[{id:'nextcycle', name:'Next Cycle', role:'repeats from the top', w:200}]}
+  ];
+  rows.forEach(function(r){ nodes = nodes.concat(rowLayout(r.items, r.y)); });
+  var edges = [
+    E('candle','prism'), E('candle','poseidon'),
+    E('prism','archimedes'), E('prism','mercury'),
+    E('archimedes','snapshot'), E('mercury','snapshot'), E('poseidon','snapshot'),
+    E('snapshot','regime'), E('snapshot','flow'), E('snapshot','momentum'),
+    E('snapshot','volume'), E('snapshot','pattern'), E('snapshot','structure'),
+    E('snapshot','oculus'), E('snapshot','prophet'),
+    E('regime','oracle'), E('flow','oracle'), E('momentum','oracle'), E('volume','oracle'),
+    E('pattern','oracle'), E('structure','oracle'), E('oculus','oracle','if promoted'),
+    E('herald','oracle'), E('echo','oracle'), E('pulse','oracle'), E('hydra','oracle'), E('titan','oracle'),
+    E('prophet','oracle'),
+    E('prophet','bull'), E('snapshot','bull','',true),
+    E('bull','bear'), E('bear','socrates'), E('socrates','magistra'), E('magistra','oracle','if promoted'),
+    E('oracle','strategist'), E('atlas','strategist','brain context'),
+    E('strategist','guardian'),
+    E('guardian','reject','fail',true),
+    E('guardian','warden','approve'),
+    E('warden','sentinel'),
+    E('sentinel','hermes','approve'),
+    E('hermes','broker'),
+    E('broker','argus'),
+    E('argus','velox'),
+    E('argus','close'), E('velox','close'),
+    E('close','nemesis'), E('close','cassandra'),
+    E('nemesis','atlas2'), E('cassandra','atlas2'),
+    E('atlas2','nextcycle',' ',true)
+  ];
+  return {nodes:nodes, edges:edges};
+}
+
+/* ---- 3. Multi-Currency Pipeline Map ---- */
+function buildLayerMapData(){
+  var nodes = [];
+  var rows = [
+    {y:30,  items:[{id:'nexus', name:'NEXUS', role:'tracks validation stage per coin', w:220}]},
+    {y:180, items:[
+      {id:'btcpipe', name:'BTC Pipeline', role:'full agent stack, own instance', w:230, h:90},
+      {id:'ethpipe', name:'ETH Pipeline', role:'same structure, own instance', w:230, h:90},
+      {id:'solpipe', name:'SOL Pipeline', role:'same structure, own instance', w:230, h:90}
+    ]},
+    {y:380, items:[{id:'shared', name:'Shared Services', role:'HYDRA · HERALD · ECHO · PULSE · SPECTRA · TITAN · ATLAS', w:560}]},
+    {y:530, items:[{id:'risk', name:'Portfolio Risk', role:'SENTINEL · WARDEN · GUARDIAN', w:340}]},
+    {y:680, items:[{id:'exec', name:'Execution', role:'HERMES · BROKER', w:260}]},
+    {y:830, items:[{id:'monitor', name:'Monitoring', role:'ARGUS · VELOX', w:260}]},
+    {y:980, items:[{id:'learn', name:'Self-Learning Loop', role:'NEMESIS · KRONOS · CASSANDRA · DARWINEX', w:400}]}
+  ];
+  rows.forEach(function(r){ nodes = nodes.concat(rowLayout(r.items, r.y, {centerX:700})); });
+  var edges = [
+    E('nexus','btcpipe'), E('nexus','ethpipe'), E('nexus','solpipe'),
+    E('btcpipe','shared'), E('ethpipe','shared'), E('solpipe','shared'),
+    E('shared','risk'), E('risk','exec'), E('exec','monitor'), E('monitor','learn'),
+    E('learn','nexus','feedback',true)
+  ];
+  return {nodes:nodes, edges:edges};
+}
+
+/* ---- 4. Master Flowchart — every agent, one box each ---- */
+function buildMasterData(){
+  var nodes = [];
+  var rows = [
+    {y:30,   items:[{id:'nexus', name:'NEXUS', role:'Master supervisor', w:220}]},
+    {y:220,  items:[
+      {id:'prism', name:'PRISM-BTC', role:'OHLCV + order book'},
+      {id:'hydra', name:'HYDRA', role:'Dominance, mkt cap'},
+      {id:'poseidon', name:'POSEIDON-BTC', role:'Funding, OI, liq'},
+      {id:'titan', name:'TITAN', role:'On-chain flows'}
+    ]},
+    {y:410,  items:[
+      {id:'archimedes', name:'ARCHIMEDES-BTC', role:'50+ indicators (JIT)'},
+      {id:'mercury', name:'MERCURY-BTC', role:'Order-book microstructure'}
+    ]},
+    {y:600,  items:[
+      {id:'regime', name:'REGIME-BTC', role:'Market state'},
+      {id:'flow', name:'FLOW-BTC', role:'Liquidity, stop-hunts'},
+      {id:'momentum', name:'MOMENTUM-BTC', role:'Trend alignment'},
+      {id:'volume', name:'VOLUME-BTC', role:'VWAP, vol. profile'},
+      {id:'pattern', name:'PATTERN-BTC', role:'Math chart patterns'},
+      {id:'structure', name:'STRUCTURE-BTC', role:'S/R, Fib, pivots'},
+      {id:'oculus', name:'OCULUS-BTC', role:'Visual chart reader'},
+      {id:'herald', name:'HERALD', role:'News, semantic search'},
+      {id:'echo', name:'ECHO', role:'Social sentiment'},
+      {id:'pulse', name:'PULSE', role:'Macro, Fear&Greed'},
+      {id:'spectra', name:'SPECTRA', role:'Alt-data'}
+    ]},
+    {y:800,  items:[{id:'prophet', name:'PROPHET-BTC', role:'ML ensemble orchestrator', w:230}]},
+    {y:940,  items:[
+      {id:'lstm', name:'LSTM', role:'Short sequences'},
+      {id:'xgboost', name:'XGBoost', role:'Feature-based'},
+      {id:'catboost', name:'CatBoost', role:'Categorical-aware'},
+      {id:'lightgbm', name:'LightGBM', role:'Fast scoring'},
+      {id:'rf', name:'Random Forest', role:'Medium-term'},
+      {id:'gnn', name:'GNN', role:'Inter-asset graph'},
+      {id:'gru', name:'GRU', role:'Ultra-short seq'}
+    ]},
+    {y:1130, items:[{id:'darwinex', name:'DARWINEX-BTC', role:'PPO/SAC sizing agent, off by default', w:260}]},
+    {y:1320, items:[
+      {id:'bull', name:'BULL-BTC', role:'Strongest long case'},
+      {id:'bear', name:'BEAR-BTC', role:'Strongest short case'},
+      {id:'socrates', name:'SOCRATES-BTC', role:'Adversarial challenge'},
+      {id:'magistra', name:'MAGISTRA-BTC', role:'Investment thesis'}
+    ]},
+    {y:1460, items:[
+      {id:'wardenagg', name:'WARDEN-AGGRESSIVE', role:'Maximize returns'},
+      {id:'wardencon', name:'WARDEN-CONSERVATIVE', role:'Protect capital'},
+      {id:'wardenneu', name:'WARDEN-NEUTRAL', role:'Mediates sizing'}
+    ]},
+    {y:1650, items:[{id:'oracle', name:'ORACLE-BTC', role:'Bayesian confidence fusion', w:250}]},
+    {y:1840, items:[{id:'strategist', name:'STRATEGIST-BTC', role:'Final trade decision', w:240}]},
+    {y:2030, items:[
+      {id:'guardian', name:'GUARDIAN', role:'Pre-trade guard pipeline'},
+      {id:'warden', name:'WARDEN', role:'Kelly position sizing'},
+      {id:'sentinel', name:'SENTINEL', role:'Portfolio risk'}
+    ]},
+    {y:2220, items:[
+      {id:'hermes', name:'HERMES', role:'Order strategy'},
+      {id:'broker', name:'BROKER', role:'CCXT exchange gateway'}
+    ]},
+    {y:2410, items:[
+      {id:'argus', name:'ARGUS', role:'Monitors position, 30s'},
+      {id:'velox', name:'VELOX', role:'Stop-loss hard gate'}
+    ]},
+    {y:2600, items:[
+      {id:'nemesis', name:'NEMESIS', role:'Post-mortem writer'},
+      {id:'kronos', name:'KRONOS', role:'Rule synthesis'},
+      {id:'cassandra', name:'CASSANDRA', role:'Scorecards, reweighting'}
+    ]},
+    {y:2790, items:[{id:'atlas', name:'ATLAS', role:'4 memory systems', w:220}]},
+    {y:2980, items:[{id:'aether', name:'AETHER', role:'Live dashboard', w:220}]}
+  ];
+  rows.forEach(function(r){ nodes = nodes.concat(rowLayout(r.items, r.y)); });
+
+  var edges = [
+    E('nexus','prism','',true), E('nexus','sentinel','',true), E('nexus','hermes','',true),
+    E('prism','archimedes'), E('prism','mercury'), E('prism','oculus'),
+    E('archimedes','regime'), E('archimedes','flow'), E('archimedes','momentum'),
+    E('archimedes','volume'), E('archimedes','pattern'), E('archimedes','structure'),
+    E('archimedes','prophet'), E('archimedes','darwinex'),
+    E('mercury','flow'), E('mercury','structure'),
+    E('hydra','oracle'), E('poseidon','oracle'), E('titan','oracle'),
+    E('herald','oracle'), E('echo','oracle'), E('pulse','oracle'), E('spectra','oracle'),
+    E('regime','oracle'), E('flow','oracle'), E('momentum','oracle'), E('volume','oracle'),
+    E('pattern','oracle'), E('structure','oracle'), E('oculus','oracle','if promoted'),
+    E('lstm','prophet'), E('xgboost','prophet'), E('catboost','prophet'), E('lightgbm','prophet'),
+    E('rf','prophet'), E('gnn','prophet'), E('gru','prophet'),
+    E('prophet','oracle'), E('darwinex','oracle','if on'),
+    E('bull','bear'), E('bear','socrates'), E('socrates','magistra'), E('magistra','oracle','if promoted'),
+    E('wardenagg','wardenneu'), E('wardencon','wardenneu'), E('wardenneu','warden','sizing only'),
+    E('oracle','strategist'), E('atlas','strategist','brain context'),
+    E('strategist','guardian'), E('guardian','warden','approved'), E('warden','sentinel'),
+    E('sentinel','hermes','approved'), E('hermes','broker'),
+    E('broker','argus'), E('argus','velox'),
+    E('argus','nemesis','on close'), E('argus','cassandra','on close'),
+    E('nemesis','atlas'), E('cassandra','atlas'),
+    E('atlas','kronos','',true), E('kronos','atlas','rules'),
+    E('cassandra','oculus','scores',true), E('cassandra','magistra','scores',true),
+    E('atlas','prism','next cycle',true),
+    E('cassandra','aether','',true), E('sentinel','aether','',true), E('guardian','aether','',true)
+  ];
+  return {nodes:nodes, edges:edges};
+}
+
+/* =========================================================================
+   INIT
+   ========================================================================= */
+var FLOWCHARTS_BY_TAB = {};
+
+function initFlowcharts(){
+  var canvasPipeline = document.getElementById('canvas-pipeline');
+  var fcPipeline = new FlowChart(canvasPipeline, buildPipelineData(), {worldW:1900, worldH:1300, initialScale:0.5});
+  buildToolbar(fcPipeline, document.getElementById('toolbar-pipeline'));
+
+  var canvasSignal = document.getElementById('canvas-signalflow');
+  var fcSignal = new FlowChart(canvasSignal, buildSignalFlowData(), {worldW:3000, worldH:3150, initialScale:0.32});
+  buildToolbar(fcSignal, document.getElementById('toolbar-signalflow'));
+
+  var canvasLayerMap = document.getElementById('canvas-layermap');
+  var fcLayerMap = new FlowChart(canvasLayerMap, buildLayerMapData(), {worldW:1450, worldH:1150, initialScale:0.45});
+  buildToolbar(fcLayerMap, document.getElementById('toolbar-layermap'));
+
+  var canvasMaster = document.getElementById('canvas-master');
+  var fcMaster = new FlowChart(canvasMaster, buildMasterData(), {worldW:3000, worldH:3200, initialScale:0.3});
+  buildToolbar(fcMaster, document.getElementById('toolbar-master'));
+
+  FLOWCHARTS_BY_TAB = {
+    pipeline: [fcPipeline],
+    signalflow: [fcSignal],
+    agents: [fcLayerMap],
+    master: [fcMaster]
+  };
+}
+
+function populateAgentTable(){
+  var rows = [
+    ['NEXUS','0','Quick LLM','Active'],
+    ['HERMES','0, X','No','Active (paper)'],
+    ['BROKER','X','No','Active (paper)'],
+    ['PRISM-BTC','I','No','Active — core feed'],
+    ['HYDRA','I','No','Active'],
+    ['POSEIDON-BTC','I','No','Active'],
+    ['TITAN','I','No','Off (cost)'],
+    ['ARCHIMEDES-BTC','II','No','Active — core'],
+    ['MERCURY-BTC','II','No','Active'],
+    ['REGIME-BTC','III','Quick LLM','Active'],
+    ['FLOW-BTC','III','Quick LLM','Active'],
+    ['MOMENTUM-BTC','III','Quick LLM','Active'],
+    ['VOLUME-BTC','III','Quick LLM','Active'],
+    ['PATTERN-BTC','III','Quick LLM','Active'],
+    ['STRUCTURE-BTC','III','Quick LLM','Active'],
+    ['OCULUS-BTC','III','Vision LLM','Observation mode'],
+    ['HERALD','III','Quick LLM','Active'],
+    ['ECHO','III','FinBERT/VADER','Active (per-source switch)'],
+    ['PULSE','III','Quick LLM','Active'],
+    ['SPECTRA','III','Quick LLM','Off by default'],
+    ['PROPHET-BTC','IV','No','Active (per-model switch)'],
+    ['DARWINEX-BTC','V','No','Off'],
+    ['BULL / BEAR / SOCRATES-BTC','VI','Quick LLM','Observation mode'],
+    ['MAGISTRA-BTC','VI','Deep LLM','Observation mode'],
+    ['ORACLE-BTC','VII','Deep LLM','Active — core, auto-reweights'],
+    ['STRATEGIST-BTC','VIII','Deep LLM','Active — core'],
+    ['SENTINEL','IX','Deep LLM','Active — always on'],
+    ['WARDEN','IX','No','Active — always on'],
+    ['GUARDIAN','IX','No','Active — always on'],
+    ['ARGUS','XI','No','Active — core'],
+    ['VELOX','XI','No','Active — core safety'],
+    ['NEMESIS','XII','Quick LLM','Active'],
+    ['KRONOS','XII','Deep LLM','Active'],
+    ['CASSANDRA','XII','No','Active — core, runs scorecards'],
+    ['ATLAS','XIII','No','Active — core'],
+    ['AETHER','—','No','Active — core']
+  ];
+  var table = document.getElementById('agent-ref-table');
+  rows.forEach(function(r){
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td class="mono">'+r[0]+'</td><td class="mono">'+r[1]+'</td><td>'+r[2]+'</td><td>'+r[3]+'</td>';
+    table.appendChild(tr);
+  });
+}
+
+function initTabs(){
+  var btns = Array.prototype.slice.call(document.querySelectorAll('.tab-btn'));
+  var panels = Array.prototype.slice.call(document.querySelectorAll('.tab-panel'));
+  var shown = {};
+  btns.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      btns.forEach(function(b){ b.classList.remove('active'); });
+      panels.forEach(function(p){ p.classList.remove('active'); });
+      btn.classList.add('active');
+      var key = btn.dataset.tab;
+      document.getElementById('tab-' + key).classList.add('active');
+      if (!shown[key]){
+        shown[key] = true;
+        requestAnimationFrame(function(){
+          (FLOWCHARTS_BY_TAB[key] || []).forEach(function(fc){ fc.fitView(); });
+        });
+      }
+      window.scrollTo(0,0);
+    });
+  });
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+  populateAgentTable();
+  initFlowcharts();
+  initTabs();
+});
+</script>
+</body>
+</html>

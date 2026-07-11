@@ -1058,11 +1058,13 @@ class FlowChart {
     /* Waypoint handle indicators */
     if (this.selected && this.selected.type === 'edge' && this.selected.id === e.id && e.waypoints) {
       e.waypoints.forEach(function(wp, idx){
+        var isSelectedWP = self.selectedWaypoint && self.selectedWaypoint.edgeId === e.id && self.selectedWaypoint.index === idx;
+
         var handle = document.createElementNS('http://www.w3.org/2000/svg','circle');
         handle.setAttribute('cx', wp.x); handle.setAttribute('cy', wp.y);
         handle.setAttribute('r', '6');
-        handle.setAttribute('class', 'fc-waypoint-handle');
-        handle.setAttribute('fill', '#ffffff');
+        handle.setAttribute('class', 'fc-waypoint-handle' + (isSelectedWP ? ' selected-wp' : ''));
+        handle.setAttribute('fill', isSelectedWP ? '#3d5a80' : '#ffffff');
         handle.setAttribute('stroke', '#111111');
         handle.setAttribute('stroke-width', '1.5');
         handle.setAttribute('pointer-events', 'all');
@@ -1071,6 +1073,19 @@ class FlowChart {
         handle.addEventListener('pointerdown', function(pEv){
           FlowChart.active = self;
           pEv.stopPropagation();
+
+          // Clear previous selection visually
+          var prevSel = self.edgeLayer.querySelectorAll('.fc-waypoint-handle.selected-wp');
+          prevSel.forEach(function(h){
+            h.setAttribute('fill', '#ffffff');
+            h.classList.remove('selected-wp');
+          });
+
+          // Select this waypoint in state
+          self.selectedWaypoint = { edgeId: e.id, index: idx };
+          handle.setAttribute('fill', '#3d5a80');
+          handle.classList.add('selected-wp');
+
           handle.setPointerCapture(pEv.pointerId);
           var sx = pEv.clientX, sy = pEv.clientY, ox = wp.x, oy = wp.y;
 
@@ -1206,6 +1221,7 @@ class FlowChart {
       var el = this._nodeEls[this.selected.id]; if (el) el.classList.remove('selected');
     }
     this.selected = null;
+    this.selectedWaypoint = null;
     if (this.edgeLayer){
       var sel = this.edgeLayer.querySelector('.selected'); if (sel) sel.classList.remove('selected');
     }
@@ -1270,15 +1286,33 @@ class FlowChart {
 
   handleKeydown(e){
     if (document.activeElement && document.activeElement.isContentEditable) return;
-    if (e.key === 'Delete' || e.key === 'Backspace'){
-      if (this.selected){
+    if (e.key === 'Delete' || e.key === 'Backspace' || e.key === 'd' || e.key === 'D'){
+      if (this.selectedWaypoint){
+        e.preventDefault();
+        this._deleteSelectedWaypoint();
+      } else if (this.selected && (e.key === 'Delete' || e.key === 'Backspace')){
         e.preventDefault();
         if (this.selected.type === 'node') this.deleteNode(this.selected.id);
         else this.deleteEdge(this.selected.id);
       }
     } else if (e.key === 'Escape'){
       this._cancelConnect();
+      if (this.selectedWaypoint){
+        this.selectedWaypoint = null;
+        this._renderEdges();
+      }
     }
+  }
+
+  _deleteSelectedWaypoint(){
+    if (!this.selectedWaypoint) return;
+    var wpInfo = this.selectedWaypoint;
+    var edge = this.edges.find(function(ed){ return ed.id === wpInfo.edgeId; });
+    if (edge && edge.waypoints) {
+      edge.waypoints.splice(wpInfo.index, 1);
+    }
+    this.selectedWaypoint = null;
+    this._renderEdges();
   }
 
   loadData(data){

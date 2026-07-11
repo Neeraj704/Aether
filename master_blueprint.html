@@ -240,12 +240,41 @@
   .fc-node:hover .fc-node-del{opacity:1;}
   .fc-root.connect-mode .fc-canvas, .connect-mode{cursor:crosshair !important;}
 
-  /* master (full tab) */
   #embed-master{
     flex:1 1 auto; min-height:0; display:flex; flex-direction:column;
     margin:0; border:none; border-top:1px solid var(--ink);
   }
   #embed-master .fc-canvas{flex:1 1 auto; height:auto;}
+
+  /* Fullscreen adjustments for premium layout */
+  .fc-embed:fullscreen {
+    background:#eaeae6 !important;
+    padding:16px !important;
+    box-sizing:border-box !important;
+    width:100vw !important;
+    height:100vh !important;
+    display:flex !important;
+    flex-direction:column !important;
+  }
+  .fc-embed:fullscreen .fc-toolbar {
+    background:var(--white) !important;
+    border:1.3px solid var(--ink) !important;
+    margin-bottom:8px !important;
+    padding:10px 14px !important;
+    box-shadow:0 2px 8px rgba(0,0,0,0.08) !important;
+  }
+  .fc-embed:fullscreen .fc-hint {
+    background:var(--white) !important;
+    border:1px solid var(--gray-300) !important;
+    margin-bottom:8px !important;
+    padding:8px 12px !important;
+    border-radius:2px !important;
+  }
+  .fc-embed:fullscreen .fc-canvas {
+    flex:1 1 auto !important;
+    height:100% !important;
+    border:1.3px solid var(--ink) !important;
+  }
   .master-head{
     padding:12px 22px 0; display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:6px;
   }
@@ -1193,6 +1222,27 @@ function buildToolbar(fc, container){
   bar.appendChild(zoomLabel);
   mk('+', 'Zoom in', function(){ fc._zoomAt(fc.viewport.clientWidth/2, fc.viewport.clientHeight/2, fc.scale*1.15); });
   mk('Fit', 'Fit everything in view', function(){ fc.fitView(); });
+  var fsBtn = mk('\u26F6 Fullscreen', 'Toggle fullscreen view for easier editing', function(){
+    var embed = fc.root.closest('.fc-embed');
+    if (!embed) return;
+    if (!document.fullscreenElement) {
+      embed.requestFullscreen().catch(function(err){
+        alert('Fullscreen error: ' + err.message);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  });
+  document.addEventListener('fullscreenchange', function(){
+    var embed = fc.root.closest('.fc-embed');
+    if (document.fullscreenElement === embed) {
+      fsBtn.textContent = 'Exit Fullscreen';
+      fsBtn.classList.add('active');
+    } else {
+      fsBtn.textContent = '\u26F6 Fullscreen';
+      fsBtn.classList.remove('active');
+    }
+  });
   sep();
   mk('Export SVG', 'Download this flowchart as an SVG file', function(){ fc.exportSVG(); });
   mk('Export JSON', 'Save your edits to a file so you can reload them later', function(){ fc.exportJSON(); });
@@ -1447,6 +1497,7 @@ function buildMasterData(){
 
   /* ── LAYER III — OCULUS (separate box, observation status) ─────── */
   N('oculus',     'OCULUS-BTC',             'Layer III · Visual chart-pattern reader — renders candlestick chart images for each active timeframe (1m→30d) and sends to vision-capable LLM; outputs pattern name, stage, direction, target, confidence per timeframe → multi-TF synthesis; runs every cycle but OBSERVATION MODE until it clears Stage 3', 80, 1060, 380, 104);
+  N('tech_agg',   'TECH BUNDLER',           'Layer III · JSON Compiler — aggregates outputs from regime, flow, momentum, volume, pattern, structure, and oculus into a structured technical analysis report', 520, 1060, 340, 88);
 
   /* ── LAYER III — Shared context (feeds Oracle from right side) ─── */
   // herald/echo/pulse/spectra/hydra/titan already placed at Layer I — they feed ORACLE directly
@@ -1479,7 +1530,10 @@ function buildMasterData(){
   N('wardenneu',  'WARDEN-NEUTRAL',         'Layer VI Risk Sub-Debate · Mediates between AGGRESSIVE and CONSERVATIVE; outputs a recommended sizing multiplier to WARDEN (Risk Layer)', 790, 1910, 250, 80);
 
   /* ── LAYER VII — CONFIDENCE ENGINE ─────────────────────────────── */
-  N('oracle',     'ORACLE-BTC',             'Layer VII · Bayesian confidence fusion engine — fuses ML ensemble output, RL signal (if on), debate thesis (if promoted), OCULUS visual read (if promoted), sentiment, macro, on-chain into one unified confidence score + direction; auto-reweights around whatever is switched off or not yet promoted — never fakes a neutral value for a missing input', 440, 2090, 380, 104);
+  N('oracle',     'ORACLE-BTC',             'Layer VII · Bayesian confidence fusion engine — fuses ML ensemble output, RL signal (if on), debate thesis (if promoted), aggregated technical signal report, and unified context packet into one unified confidence score + direction; auto-reweights around whatever is switched off or not yet promoted — never fakes a neutral value for a missing input', 440, 2090, 380, 104);
+
+  /* ── LAYER VII — CONTEXT BUNDLER ────────────────────────────────── */
+  N('context_agg','CONTEXT BUNDLER',        'Layer I Context · Context Aggregator — synthesises macro, on-chain, sentiment, and news feeds into a structured context packet via rule-based scoring and LLM summary', 1500, 2090, 580, 104);
 
   /* ── ATLAS MEMORY INJECT ────────────────────────────────────────── */
   N('atlas_inj',  'ATLAS — Brain Inject',   'ATLAS provides memory-enriched context to STRATEGIST: synthesised trading rules from KRONOS, post-mortem lessons from NEMESIS, dynamic confidence thresholds, and rejected-trade feedback — grounding the LLM in real historical performance', 890, 2090, 310, 104);
@@ -1544,22 +1598,28 @@ function buildMasterData(){
     E('archimedes','prophet','computed features'),
     E('archimedes','darwinex','state features',true),
 
-    /* ── Technical analysis agents → ORACLE ── */
-    E('regime','oracle'),
-    E('flow','oracle'),
-    E('momentum','oracle'),
-    E('volume','oracle'),
-    E('pattern','oracle'),
-    E('structure','oracle'),
-    E('oculus','oracle','if promoted'),
+    /* ── Technical analysis agents → TECH BUNDLER ── */
+    E('regime','tech_agg'),
+    E('flow','tech_agg'),
+    E('momentum','tech_agg'),
+    E('volume','tech_agg'),
+    E('pattern','tech_agg'),
+    E('structure','tech_agg'),
+    E('oculus','tech_agg','if promoted'),
 
-    /* ── Context / shared agents → ORACLE (short arrows, same y band) ── */
-    E('hydra','oracle','cross-market'),
-    E('titan','oracle','on-chain'),
-    E('herald','oracle','news summary'),
-    E('echo','oracle','sentiment'),
-    E('pulse','oracle','macro'),
-    E('spectra','oracle','alt-data'),
+    /* ── TECH BUNDLER → ORACLE ── */
+    E('tech_agg','oracle','bundled signals'),
+
+    /* ── Context / shared agents → CONTEXT BUNDLER ── */
+    E('hydra','context_agg'),
+    E('titan','context_agg'),
+    E('herald','context_agg','news summary'),
+    E('echo','context_agg','sentiment'),
+    E('pulse','context_agg'),
+    E('spectra','context_agg'),
+
+    /* ── CONTEXT BUNDLER → ORACLE ── */
+    E('context_agg','oracle','context packet'),
 
     /* ── ML sub-models → PROPHET → ORACLE ── */
     E('lstm','prophet'),
@@ -1638,7 +1698,7 @@ function buildMasterData(){
     G('giv',   'LAYER IV — ML PREDICTION',               58,1218, 1570, 272, '#1a6b5c'),
     G('gv',    'LAYER V — REINFORCEMENT LEARNING',       458,1528,  368, 140, '#b54a0a'),
     G('gvi',   'LAYER VI — DEBATE LAYER',                178,1708, 1230, 306, '#8b2d4a'),
-    G('gctx',  'LAYER I — SHARED CONTEXT AGENTS',       1478,1518,  628, 434, '#2d6a4f'),
+    G('gctx',  'LAYER I — SHARED CONTEXT AGENTS',       1478,1518,  628, 680, '#2d6a4f'),
     G('gvii',  'LAYER VII — CONFIDENCE ENGINE',          418,2068,  808, 148, '#155780'),
     G('gviii', 'LAYER VIII — DECISION',                  418,2248,  430, 140, '#1c1c2e'),
     G('gix',   'LAYER IX — RISK MANAGEMENT',             178,2428, 1018, 290, '#8b1a1a'),

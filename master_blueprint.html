@@ -249,7 +249,7 @@
   /* Fullscreen adjustments for premium layout */
   .fc-embed:fullscreen {
     background:#eaeae6 !important;
-    padding:16px !important;
+    padding:0 !important;
     box-sizing:border-box !important;
     width:100vw !important;
     height:100vh !important;
@@ -257,23 +257,15 @@
     flex-direction:column !important;
   }
   .fc-embed:fullscreen .fc-toolbar {
-    background:var(--white) !important;
-    border:1.3px solid var(--ink) !important;
-    margin-bottom:8px !important;
-    padding:10px 14px !important;
-    box-shadow:0 2px 8px rgba(0,0,0,0.08) !important;
+    display:none !important;
   }
   .fc-embed:fullscreen .fc-hint {
-    background:var(--white) !important;
-    border:1px solid var(--gray-300) !important;
-    margin-bottom:8px !important;
-    padding:8px 12px !important;
-    border-radius:2px !important;
+    display:none !important;
   }
   .fc-embed:fullscreen .fc-canvas {
     flex:1 1 auto !important;
     height:100% !important;
-    border:1.3px solid var(--ink) !important;
+    border:none !important;
   }
   .master-head{
     padding:12px 22px 0; display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:6px;

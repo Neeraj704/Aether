@@ -1368,6 +1368,10 @@ class FlowChart {
       minX = Math.min(minX,n.x); minY = Math.min(minY,n.y);
       maxX = Math.max(maxX,n.x+n.w); maxY = Math.max(maxY,n.y+n.h);
     });
+    (this.groups || []).forEach(function(g){
+      minX = Math.min(minX,g.x); minY = Math.min(minY,g.y);
+      maxX = Math.max(maxX,g.x+g.w); maxY = Math.max(maxY,g.y+g.h);
+    });
     if (!isFinite(minX)){ minX=0; minY=0; maxX=400; maxY=300; }
     var pad = 50; minX -= pad; minY -= pad; maxX += pad; maxY += pad;
     var w = maxX - minX, h = maxY - minY;
@@ -1375,10 +1379,37 @@ class FlowChart {
     var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'" viewBox="'+minX+' '+minY+' '+w+' '+h+'">';
     svg += '<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#222"/></marker></defs>';
     svg += '<rect x="'+minX+'" y="'+minY+'" width="'+w+'" height="'+h+'" fill="#ffffff"/>';
+    
+    // Render Layer Containers / Groups
+    (this.groups || []).forEach(function(g){
+      var fillCol = 'rgba(255,255,255,0.5)';
+      var fillOp = '1';
+      if (g.fill) {
+        if (g.fill.indexOf('rgba') === 0) {
+          var parts = g.fill.match(/rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d\.]+)\s*\)/);
+          if (parts) {
+            fillCol = 'rgb(' + parts[1] + ',' + parts[2] + ',' + parts[3] + ')';
+            fillOp = parts[4];
+          } else {
+            fillCol = g.fill;
+          }
+        } else {
+          fillCol = g.fill;
+        }
+      }
+      svg += '<rect x="'+g.x+'" y="'+g.y+'" width="'+g.w+'" height="'+g.h+'" rx="8" fill="'+fillCol+'" fill-opacity="'+fillOp+'" stroke="'+(g.stroke || '#aaa')+'" stroke-width="1.5" stroke-dasharray="9,4"/>';
+      if (g.label) {
+        var labelW = g.label.length * 6.3 + 22;
+        svg += '<rect x="'+(g.x + 12)+'" y="'+(g.y - 10)+'" width="'+labelW+'" height="19" rx="4" fill="'+(g.stroke || '#888')+'"/>';
+        svg += '<text x="'+(g.x + 23)+'" y="'+(g.y - 0.5)+'" font-size="9.5" font-weight="700" font-family="ui-monospace,SF Mono,Menlo,Consolas,monospace" letter-spacing="0.7" fill="#ffffff" dominant-baseline="central">'+esc(g.label)+'</text>';
+      }
+    });
+
     var self = this;
     this.edges.forEach(function(e){
       var p = self._pathFor(e); if (!p) return;
-      svg += '<path d="'+p.d+'" stroke="#222" stroke-width="1.5" fill="none" marker-end="url(#arrow)"'+(e.dashed?' stroke-dasharray="6,4" stroke="#999"':'')+'/>';
+      var strokeColor = e.dashed ? '#999' : '#222';
+      svg += '<path d="'+p.d+'" stroke="'+strokeColor+'" stroke-width="1.5" fill="none" marker-end="url(#arrow)"'+(e.dashed?' stroke-dasharray="6,4"':'')+'/>';
       if (e.label){
         var lw = Math.max(24, e.label.length*6.2+10);
         svg += '<rect x="'+(p.mid.x-lw/2)+'" y="'+(p.mid.y-8)+'" width="'+lw+'" height="16" fill="#fbfbf9" stroke="#ddd"/>';
@@ -1386,17 +1417,32 @@ class FlowChart {
       }
     });
     this.nodes.forEach(function(n){
-      svg += '<rect x="'+n.x+'" y="'+n.y+'" width="'+n.w+'" height="'+n.h+'" fill="#ffffff" stroke="#111" stroke-width="1.3"/>';
-      svg += '<text x="'+(n.x+n.w/2)+'" y="'+(n.y+20)+'" font-size="12" font-weight="700" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" fill="#111">'+esc(n.label)+'</text>';
+      var maxChars = Math.max(15, Math.floor((n.w - 20) / 5.4));
       var words = (n.sub||'').split(' ');
       var lines = []; var cur = '';
       words.forEach(function(word){
         var test = (cur + ' ' + word).trim();
-        if (test.length > 24){ if(cur) lines.push(cur.trim()); cur = word; } else { cur = test; }
+        if (test.length > maxChars){
+          if(cur) lines.push(cur.trim());
+          cur = word;
+        } else {
+          cur = test;
+        }
       });
       if (cur) lines.push(cur);
-      lines.slice(0,3).forEach(function(ln, i){
-        svg += '<text x="'+(n.x+n.w/2)+'" y="'+(n.y+38+i*13)+'" font-size="9.5" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" fill="#555">'+esc(ln)+'</text>';
+
+      var requiredHeight = 15 + 14 + 4 + (lines.length * 13);
+      var boxH = Math.max(n.h, requiredHeight);
+
+      // Node Box Shadow
+      svg += '<rect x="'+(n.x+2)+'" y="'+(n.y+2)+'" width="'+n.w+'" height="'+boxH+'" rx="4" ry="4" fill="rgba(0,0,0,0.05)" stroke="none"/>';
+      // Node Box
+      svg += '<rect x="'+n.x+'" y="'+n.y+'" width="'+n.w+'" height="'+boxH+'" rx="4" ry="4" fill="#ffffff" stroke="#111" stroke-width="1.3"/>';
+      // Node Name text
+      svg += '<text x="'+(n.x+10)+'" y="'+(n.y+20)+'" font-size="12" font-weight="700" text-anchor="start" font-family="ui-monospace,Menlo,monospace" fill="#111">'+esc(n.label)+'</text>';
+      // Node Role/Subtext
+      lines.forEach(function(ln, i){
+        svg += '<text x="'+(n.x+10)+'" y="'+(n.y+34+i*13)+'" font-size="9.5" text-anchor="start" font-family="-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif" fill="#555">'+esc(ln)+'</text>';
       });
     });
     svg += '</svg>';

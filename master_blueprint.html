@@ -1502,8 +1502,8 @@ function rowLayout(items, y, opts){
     return node;
   });
 }
-function E(from, to, label, dashed){
-  return {id: from+'__'+to+'__'+Math.random().toString(36).slice(2,6), from:from, to:to, label: label||'', dashed: !!dashed};
+function E(from, to, label, dashed, wps){
+  return {id: from+'__'+to+'__'+Math.random().toString(36).slice(2,6), from:from, to:to, label: label||'', dashed: !!dashed, waypoints: wps || []};
 }
 
 /* ---- 1. Validation Pipeline ---- */
@@ -1691,20 +1691,20 @@ function buildMasterData(){
   N('prism',      'PRISM-BTC',              'Layer I · Fetches live OHLCV across all timeframes + raw order book snapshot via exchange WebSocket', 700, 40, 250, 85);
   N('poseidon',   'POSEIDON-BTC',           'Layer I · Fetches funding rate, open interest, long/short ratio, liquidation heat-map from perpetuals & Coinglass', 990, 40, 270, 85);
 
-  N('archimedes', 'ARCHIMEDES-BTC',         'Layer II · Numba JIT indicator engine — computes RSI, MACD, ATR, ADX, VWAP, Bollinger, Ichimoku, Supertrend, OBV, MFI, Hurst, 50+ more, across every timeframe in milliseconds', 1400, 40, 300, 90);
-  N('mercury',    'MERCURY-BTC',            'Layer II · Order-book microstructure — bid/ask depth, cross-candle delta, spread, imbalance ratio, absorption zones', 1400, 170, 280, 85);
+  N('archimedes', 'ARCHIMEDES-BTC',         'Layer II · Numba JIT indicator engine — computes RSI, MACD, ATR, ADX, VWAP, Bollinger, Ichimoku, Supertrend, OBV, MFI, Hurst, 50+ more, across every timeframe in milliseconds', 1403.6239427232956, 47.24788544659131, 300, 90);
+  N('mercury',    'MERCURY-BTC',            'Layer II · Order-book microstructure — bid/ask depth, cross-candle delta, spread, imbalance ratio, absorption zones', 1404.97425113297, 175.3887720607176, 280, 85);
 
-  N('snapshot',   'DETERMINISTIC SNAPSHOT LOCKED',  'All indicators & price data computed and frozen here — NO LLM (not OCULUS, not the debate layer) can contradict or overwrite these numbers for the rest of this cycle', 1800, 100, 560, 100);
+  N('snapshot',   'DETERMINISTIC SNAPSHOT LOCKED',  'All indicators & price data computed and frozen here — NO LLM (not OCULUS, not the debate layer) can contradict or overwrite these numbers for the rest of this cycle', 1913.128489166, -200.9167197502765, 560, 100);
 
   /* ── BAND 1 — INTELLIGENCE AGENTS (Layer III), directly under the snapshot ── */
   N('regime',     'REGIME-BTC',             'Layer III · Classifies current market state: strong trend / weak trend / ranging / volatile breakout / distribution', 1220, 420, 240, 88);
-  N('flow',       'FLOW-BTC',               'Layer III · Identifies liquidity pools, stop-hunt zones, order blocks, fair-value gaps from order-book + ARCHIMEDES data', 1510, 420, 240, 88);
+  N('flow',       'FLOW-BTC',               'Layer III · Identifies liquidity pools, stop-hunt zones, order blocks, fair-value gaps from order-book + ARCHIMEDES data', 1503.183972048429, 418.7607221906235, 240, 88);
   N('momentum',   'MOMENTUM-BTC',           'Layer III · Multi-timeframe trend alignment: EMA stacks, MACD trajectory, RSI divergence, momentum confirmation', 1800, 420, 240, 88);
   N('volume',     'VOLUME-BTC',             'Layer III · VWAP anchoring, volume profile, accumulation/distribution scoring, OBV divergence detection', 2090, 420, 240, 88);
   N('pattern',    'PATTERN-BTC',            'Layer III · Math-only chart pattern detector (H&S, double tops, flags, wedges, engulfing candles) — computed from price-series geometry, no vision LLM', 2380, 420, 260, 88);
   N('structure',  'STRUCTURE-BTC',          'Layer III · Maps support/resistance via swing-point analysis, Fibonacci retracements, pivot points, round-number levels', 2670, 420, 250, 88);
 
-  N('oculus',     'OCULUS-BTC',             'Layer III · Visual chart-pattern reader — renders candlestick chart images for each active timeframe (1m→30d) and sends to vision-capable LLM; outputs pattern name, stage, direction, target, confidence per timeframe → multi-TF synthesis; runs every cycle but OBSERVATION MODE until it clears Stage 3', 1685, 578, 380, 104);
+  N('oculus',     'OCULUS-BTC',             'Layer III · Visual chart-pattern reader — renders candlestick chart images for each active timeframe (1m→30d) and sends to vision-capable LLM; outputs pattern name, stage, direction, target, confidence per timeframe → multi-TF synthesis; runs every cycle but OBSERVATION MODE until it clears Stage 3', 1602.3333333333333, 572.6666666666666, 380, 104);
   N('tech_agg',   'TECH BUNDLER',           'Layer III · JSON Compiler — aggregates outputs from regime, flow, momentum, volume, pattern, structure, and oculus into a structured technical analysis report', 2135, 578, 340, 88);
 
   /* ── BAND 2 — ML ENSEMBLE + RL AGENT (side by side) ── */
@@ -1717,17 +1717,17 @@ function buildMasterData(){
   N('gru',        'GRU',                    'Layer IV · Gated Recurrent Unit — ultra-short sequence modelling; faster than LSTM, used for very-short-horizon reads', 2638, 822, 175, 80);
 
   N('prophet',    'PROPHET-BTC',            'Layer IV · ML ensemble orchestrator — runs 7 models in parallel, aggregates directional predictions with confidence weights; each model has its own individual kill switch', 1925, 962, 310, 80);
-  N('darwinex',   'DARWINEX-BTC',           'Layer V · PPO/SAC reinforcement-learning agent — learns optimal position actions (enter/exit/hold/size) from reward signal; OFF by default; when on, retrains in scheduled offline batches only — never continuous online updates against open positions', 2933, 962, 320, 96);
+  N('darwinex',   'DARWINEX-BTC',           'Layer V · PPO/SAC reinforcement-learning agent — learns optimal position actions (enter/exit/hold/size) from reward signal; OFF by default; when on, retrains in scheduled offline batches only — never continuous online updates against open positions', 690.3291457624766, 815.4840469792559, 320, 96);
 
   /* ── BAND 3 — DEBATE LAYER (left) and SHARED CONTEXT AGENTS (right), side by side ── */
-  N('bull',       'BULL-BTC',               'Layer VI · Builds the strongest long case: entry catalysts, support structure, upside targets — runs every cycle even in observation mode', 1220, 1238, 240, 80);
-  N('bear',       'BEAR-BTC',               'Layer VI · Builds the strongest short case: resistance zones, distribution signals, macro headwinds, downside risk', 1510, 1238, 240, 80);
-  N('socrates',   'SOCRATES-BTC',           'Layer VI · Adversarial cross-examiner — challenges both the bull and bear cases, flags contradictions, forces sharper argument from each side', 1800, 1238, 260, 80);
-  N('magistra',   'MAGISTRA-BTC',           'Layer VI · Reads the full BULL→BEAR→SOCRATES exchange and synthesises a structured investment thesis: direction, conviction level, key risks, primary driver; OBSERVATION MODE until Stage 3', 2110, 1238, 280, 96);
+  N('bull',       'BULL-BTC',               'Layer VI · Builds the strongest long case: entry catalysts, support structure, upside targets — runs every cycle even in observation mode', 1288.5925476116536, 1234.9738581936035, 240, 80);
+  N('bear',       'BEAR-BTC',               'Layer VI · Builds the strongest short case: resistance zones, distribution signals, macro headwinds, downside risk', 1646.4502833443678, 1224.6239226212988, 240, 80);
+  N('socrates',   'SOCRATES-BTC',           'Layer VI · Adversarial cross-examiner — challenges both the bull and bear cases, flags contradictions, forces sharper argument from each side', 1989.6382198675128, 1230.9390024517415, 260, 80);
+  N('magistra',   'MAGISTRA-BTC',           'Layer VI · Reads the full BULL→BEAR→SOCRATES exchange and synthesises a structured investment thesis: direction, conviction level, key risks, primary driver; OBSERVATION MODE until Stage 3', 1626.6569836706851, 1359.6690949652182, 280, 96);
 
-  N('wardenagg',  'WARDEN-AGGRESSIVE',      'Layer VI Risk Sub-Debate · Argues for maximising returns — presents the case for a larger position size given the signal strength', 1390, 1404, 235, 80);
-  N('wardencon',  'WARDEN-CONSERVATIVE',    'Layer VI Risk Sub-Debate · Argues for protecting capital — presents the case for a smaller or no position given uncertainty', 1675, 1404, 245, 80);
-  N('wardenneu',  'WARDEN-NEUTRAL',         'Layer VI Risk Sub-Debate · Mediates between AGGRESSIVE and CONSERVATIVE; outputs a recommended sizing multiplier to WARDEN (Risk Layer)', 1970, 1404, 250, 80);
+  N('wardenagg',  'WARDEN-AGGRESSIVE',      'Layer VI Risk Sub-Debate · Argues for maximising returns — presents the case for a larger position size given the signal strength', 1326.914073632416, 1504.8217878766657, 235, 80);
+  N('wardencon',  'WARDEN-CONSERVATIVE',    'Layer VI Risk Sub-Debate · Argues for protecting capital — presents the case for a smaller or no position given uncertainty', 2001.5585882318762, 1503.4603007394167, 245, 80);
+  N('wardenneu',  'WARDEN-NEUTRAL',         'Layer VI Risk Sub-Debate · Mediates between AGGRESSIVE and CONSERVATIVE; outputs a recommended sizing multiplier to WARDEN (Risk Layer)', 1644.0201772406822, 1501.6826499348815, 250, 80);
 
   N('hydra',      'HYDRA',                  'Layer I · BTC dominance, global market cap, DeFi TVL, altcoin season index — shared across all currencies, runs continuously', 2530, 1238, 260, 88);
   N('titan',      'TITAN',                  'Layer I · On-chain data — exchange net flows, whale movements, active addresses, SOPR, MVRV (off by default, saves API cost)', 2830, 1238, 260, 88);
@@ -1745,22 +1745,21 @@ function buildMasterData(){
   N('strategist', 'STRATEGIST-BTC',         'Layer VIII · Reads ORACLE\'s confidence report + ATLAS brain context; outputs ONE final decision: BUY / SELL / SHORT / EXIT / WAIT / NO_TRADE with full reasoning, entry price, stop-loss, take-profit, and a complete config-snapshot log of exactly which agents were active', 1405, 2026, 380, 96);
 
   /* ── BAND 6 — RISK MANAGEMENT (left) and EXECUTION (right), side by side ── */
-  N('guardian',   'GUARDIAN',               'Layer IX · Sequential fail-fast pre-trade guard pipeline: cooldown window → symbol whitelist → max position size → daily loss stop → margin sufficiency → minimum risk/reward; every rejection is logged and fed back to STRATEGIST', 1220, 2292, 270, 96);
-  N('warden',     'WARDEN',                 'Layer IX · Position sizing via fractional Kelly Criterion: kelly=(win_rate×avg_win/avg_loss)−(1−win_rate), then ×0.25 conservative fraction, further scaled by current volatility and ORACLE confidence tier', 1540, 2292, 280, 96);
-  N('sentinel',   'SENTINEL',               'Layer IX · Global portfolio risk manager: max daily loss, max drawdown, per-currency exposure cap, cross-asset correlation limits, total portfolio heat — runs identically in paper & live mode; these three Risk agents are NEVER switchable off for live trading', 1870, 2292, 290, 96);
-  N('reject',     'REJECTED',               'Layer IX · Trade rejected — reason is logged with full context; STRATEGIST is notified so future prompts are informed by what failed the guard', 1245, 2448, 220, 72);
+  N('guardian',   'GUARDIAN',               'Layer IX · Sequential fail-fast pre-trade guard pipeline: cooldown window → symbol whitelist → max position size → daily loss stop → margin sufficiency → minimum risk/reward; every rejection is logged and fed back to STRATEGIST', 1141.2123613634662, 2285.3104835119925, 270, 96);
+  N('warden',     'WARDEN',                 'Layer IX · Position sizing via fractional Kelly Criterion: kelly=(win_rate×avg_win/avg_loss)−(1−win_rate), then ×0.25 conservative fraction, further scaled by current volatility and ORACLE confidence tier', 1497.2276370009213, 2289.905302917897, 280, 96);
+  N('sentinel',   'SENTINEL',               'Layer IX · Global portfolio risk manager: max daily loss, max drawdown, per-currency exposure cap, cross-asset correlation limits, total portfolio heat — runs identically in paper & live mode; these three Risk agents are NEVER switchable off for live trading', 1880.4059145369006, 2290.5134407804426, 290, 96);
+  N('reject',     'REJECTED',               'Layer IX · Trade rejected — reason is logged with full context; STRATEGIST is notified so future prompts are informed by what failed the guard', 1297.0295726845034, 2445.972873791513, 220, 72);
 
   N('hermes',     'HERMES',                 'Layer X · Execution commander — picks order strategy (TWAP / VWAP / Limit / Market / Iceberg) based on order size, current liquidity, and urgency; the single gateway into the exchange', 2310, 2292, 280, 88);
   N('broker',     'BROKER',                 'Layer X · CCXT exchange-abstraction layer (Binance / Bybit / OKX / Kraken) — handles auth, rate-limit queuing, WebSocket fill confirmations; runs in paper mode until Stage 4', 2310, 2420, 280, 88);
 
   /* ── BAND 7 — MONITORING (left) and SELF-LEARNING (right), side by side ── */
-  N('argus',      'ARGUS',                  'Layer XI · Checks every open position\'s P&L, distance-to-stop, distance-to-target, trailing-stop conditions, and time-based exit rules every 30 seconds — triggers early exit if any threshold is breached', 1220, 2690, 280, 96);
-  N('velox',      'VELOX',                  'Layer XI · Stop-loss hard-rule enforcer — a stop-loss CANNOT be tightened (moved against the trade) unless price has genuinely progressed toward the target by a learned threshold; this rule cannot be overridden by any LLM', 1560, 2690, 290, 96);
+  N('argus',      'ARGUS',                  'Layer XI · Checks every open position\'s P&L, distance-to-stop, distance-to-target, trailing-stop conditions, and time-based exit rules every 30 seconds — triggers early exit if any threshold is breached', 1200.8890458459125, 2689.317465923068, 280, 96);
+  N('velox',      'VELOX',                  'Layer XI · Stop-loss hard-rule enforcer — a stop-loss CANNOT be tightened (moved against the trade) unless price has genuinely progressed toward the target by a learned threshold; this rule cannot be overridden by any LLM', 1580.4760223079509, 2689.317465923068, 290, 96);
   N('posclose',   'POSITION CLOSES',        'Trade closed — by stop-loss hit, take-profit hit, ARGUS time-based rule, or manual override; timestamp and final P&L recorded', 1385, 2846, 290, 72);
-
-  N('nemesis',    'NEMESIS',                'Layer XII · Writes a structured post-mortem after every closed trade: verdict (correct / incorrect), expected-vs-actual outcome, signal-quality assessment, AI-mistake classification, and a plain-language lesson — stored in ATLAS for future retrieval', 2000, 2690, 280, 96);
+  N('nemesis',    'NEMESIS',                'Layer XII · Writes a structured post-mortem after every closed trade: verdict (correct / incorrect), expected-vs-actual outcome, signal-quality assessment, AI-mistake classification, and a plain-language lesson — stored in ATLAS for future retrieval', 2005.501738212562, 2678.996523574876, 280, 96);
   N('kronos',     'KRONOS',                 'Layer XII · Periodically clusters closed trades using vector similarity and synthesises plain-language rules (best-practice, anti-pattern, corrective, AI-mistake-type) that get injected into future STRATEGIST and ORACLE prompts via ATLAS', 2330, 2690, 280, 96);
-  N('cassandra',  'CASSANDRA',              'Layer XII · Tracks each ML model\'s rolling accuracy and reweights the PROPHET ensemble accordingly; flags weak models for retraining; SEPARATELY runs the scorecards for OCULUS and the Debate Layer — tracking divergence win-rate, R-multiple, trend-adjusted edge; auto-demotes if a promoted component later drops below the bar', 2660, 2690, 310, 104);
+  N('cassandra',  'CASSANDRA',              'Layer XII · Tracks each ML model\'s rolling accuracy and reweights the PROPHET ensemble accordingly; flags weak models for retraining; SEPARATELY runs the scorecards for OCULUS and the Debate Layer — tracking divergence win-rate, R-multiple, trend-adjusted edge; auto-demotes if a promoted component later drops below the bar', 2660.6174790362024, 2681.9727725293706, 310, 104);
 
   /* ── BAND 8 — MEMORY (left) and DASHBOARD (right), side by side ── */
   N('atlas',      'ATLAS',                  'Layer XIII · Coordinates four memory systems: (1) ChromaDB vector store of trade experiences for semantic retrieval, (2) SQLite relational audit trail & full trade history, (3) Redis fast in-memory cache for live-cycle data, (4) FAISS semantic index for HERALD news retrieval; feeds STRATEGIST every cycle via brain inject', 1520, 3088, 380, 96);
@@ -1775,7 +1774,7 @@ function buildMasterData(){
     /* ── Data collection → Feature Engineering ── */
     E('prism','archimedes','OHLCV'),
     E('prism','mercury','order book'),
-    E('prism','oculus','raw OHLCV'),         /* OCULUS renders directly from price data */
+    E('prism','oculus','raw OHLCV'),
     E('poseidon','archimedes','deriv. data'),
 
     /* ── Feature Engineering → Snapshot (lock) ── */
@@ -1792,7 +1791,7 @@ function buildMasterData(){
 
     /* ── ARCHIMEDES directly feeds ML + RL (shorter arrow) ── */
     E('archimedes','prophet','computed features'),
-    E('archimedes','darwinex','state features',true),
+    E('archimedes','darwinex','state features',true,[{x:1076,y:415}]),
 
     /* ── Technical analysis agents → TECH BUNDLER ── */
     E('regime','tech_agg'),
@@ -1815,7 +1814,7 @@ function buildMasterData(){
     E('spectra','context_agg'),
 
     /* ── CONTEXT BUNDLER → ORACLE ── */
-    E('context_agg','oracle','context packet'),
+    E('context_agg','oracle','context packet',false,[{x:2140,y:1965}]),
 
     /* ── ML sub-models → PROPHET → ORACLE ── */
     E('lstm','prophet'),
@@ -1825,15 +1824,17 @@ function buildMasterData(){
     E('rf','prophet'),
     E('gnn','prophet'),
     E('gru','prophet'),
-    E('prophet','oracle','ensemble vote'),
+    E('prophet','oracle','ensemble vote',false,[{x:958,y:1560}]),
 
     /* ── RL agent → ORACLE ── */
     E('darwinex','oracle','if on'),
 
-    /* ── Debate chain ── */
+    /* ── Parallel Debate chain ── */
     E('prophet','bull','ML signal'),
-    E('bull','bear'),
-    E('bear','socrates'),
+    E('prophet','bear'),
+    E('prophet','socrates'),
+    E('bear','magistra'),
+    E('bull','magistra'),
     E('socrates','magistra'),
     E('magistra','oracle','if promoted'),
 
@@ -1844,7 +1845,7 @@ function buildMasterData(){
 
     /* ── ORACLE + ATLAS → STRATEGIST → Risk pipeline ── */
     E('oracle','strategist','confidence report'),
-    E('atlas_inj','strategist','brain context'),
+    E('atlas_inj','strategist','brain context',false,[{x:1617,y:1944}]),
     E('strategist','guardian','proposed trade'),
     E('guardian','reject','blocked'),
     E('guardian','warden','approved'),
@@ -1856,11 +1857,11 @@ function buildMasterData(){
     E('broker','argus','fill confirmed'),
     E('argus','velox','stop check'),
     E('argus','posclose','exit trigger'),
-    E('velox','posclose','hard stop'),
+    E('velox','posclose','hard stop',false,[{x:1527,y:2785}]),
 
     /* ── Post-trade learning loop ── */
-    E('posclose','nemesis','outcome'),
-    E('posclose','cassandra','outcome'),
+    E('posclose','nemesis','outcome',false,[{x:1891,y:2815}]),
+    E('posclose','cassandra','outcome',false,[{x:2387,y:2872}]),
     E('nemesis','atlas','post-mortem'),
     E('cassandra','atlas','scores'),
     E('atlas','kronos','clusters',true),

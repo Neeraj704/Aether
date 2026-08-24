@@ -1,0 +1,241 @@
+# AETHER — Page-by-Page Feature Specifications
+
+This is the detailed spec for every page: layout zones, every button/control, and the empty/loading/error states each page needs. Read alongside `02_Complete_Sitemap_and_Routes.md` for the URL map.
+
+---
+
+## 1. Landing Page (`/`)
+
+**Layout, top to bottom:**
+
+1. **Nav bar**: Logo · Product · Pricing · Marketplace · Docs · (spacer) · Log in (text link) · Sign up free (filled button)
+2. **Hero**: Headline ("Build a trading agent by dragging boxes, not writing infra") · subheadline · primary CTA "Start building — free" · secondary CTA "Watch 90-sec demo" (opens video modal) · hero visual: animated preview of nodes connecting on a canvas
+3. **Stats bar** *(optional, use placeholders until real data exists)*: bots built, backtests run, community presets
+4. **"How it works" — 4 steps**: Pick your layers → Connect them on the canvas → Backtest instantly → Save, share, or go live. Each step has an icon + one-line description.
+5. **Feature grid** (6 cards): Drag-and-drop builder · 13 customizable layers · Instant backtesting · Self-learning memory (bots improve from their own trade history) · Fork & share presets · Pay only for what you unlock
+6. **Layer showcase carousel**: horizontally scrollable cards, one per layer (Data Collection, Feature Engineering, Intelligence Agents, Risk Management, Execution, Self-Learning, Memory...), each with a short description and a "lock" or "free" badge
+7. **Live mini-demo embed** *(stretch goal)*: a simplified, read-only interactive canvas visitors can click around in without logging in
+8. **Pricing teaser**: 3 plan cards (Free / Pro / Pay-as-you-go) with a "See full pricing" link
+9. **Marketplace teaser**: 3–4 trending community preset cards with author name, thumbnail graph, and headline backtest stat
+10. **Testimonials** *(placeholder until real users exist)*
+11. **FAQ accordion**: "Is this financial advice?" (No — answer clearly) · "Does this trade with real money?" · "What data sources are supported?" · "How does pricing work?"
+12. **Final CTA banner**: "Build your first bot in 5 minutes" + Sign up button
+13. **Footer**: Product/Company/Legal link columns, social icons, risk disclosure link (small print), copyright
+
+**States**: none beyond standard responsive breakpoints — this page has no auth-dependent content.
+
+---
+
+## 2. Pricing Page (`/pricing`)
+
+- **Billing toggle**: Monthly ⇄ Annual (shows "save X%" badge on annual)
+- **Plan cards** (recommend 3–4):
+  - **Free** — Buttons: "Get started"
+  - **Starter** — Buttons: "Start free trial" / "Subscribe"
+  - **Pro** — Buttons: "Subscribe" (highlighted as "Most popular")
+  - **Pay-as-you-go** — separate card explaining credit-based unlocks, no subscription commitment
+- **Feature comparison table**: rows = individual layers/features (Data Sources: X of Y, Risk Management: basic/advanced, Backtests/month, Live paper trading, Marketplace publishing, Real-fund execution), columns = plans, cells = ✅ / ❌ / a number
+- **FAQ section**: billing cycle questions, refund policy link, "can I unlock a single layer without subscribing?" (yes → explains pay-as-you-go)
+- Every "Subscribe"/"Get started" button → Razorpay Checkout (subscriptions) or, if logged out, → `/signup?plan=starter` first
+
+---
+
+## 3. Signup (`/signup`)
+
+- Fields: Full name, Email, Password (+ confirm), OR OAuth buttons (Google, GitHub)
+- Checkbox (required): "I agree to the Terms of Service, Privacy Policy, and Risk Disclosure" — each a link, opens in new tab
+- Primary button: "Create account"
+- Secondary link: "Already have an account? Log in"
+- **States**: inline validation errors (weak password, email taken), loading spinner on submit, success → redirect to `/verify-email` notice or straight to `/onboarding/welcome` if email verification is deferred
+
+## 4. Login (`/login`)
+
+- Fields: Email, Password, OAuth buttons
+- "Forgot password?" link
+- Primary button: "Log in"
+- Secondary link: "New here? Create an account"
+- **States**: wrong-credentials error, account-locked state (after N failed attempts), loading state
+
+## 5. Forgot / Reset Password
+
+- `/forgot-password`: email field → "Send reset link" button → confirmation message
+- `/reset-password/:token`: new password + confirm fields → "Reset password" button → success → redirect to login
+
+---
+
+## 6. Onboarding Flow (`/onboarding/*`)
+
+**Step 1 — Welcome**: "How would you describe yourself?" — Beginner / Intermediate / Advanced (radio cards). This sets default UI density (Beginner hides advanced config panels by default).
+
+**Step 2 — Starting point**: Two large choice cards — "Start from a template" (shows 3 curated starter presets) vs. "Start from a blank canvas." Button: "Continue."
+
+**Step 3 — Product tour**: Spotlight/tooltip overlay sequence over the real app shell, pointing at: the component library sidebar, the canvas, the Run Backtest button, the Save as Preset button, the credits/plan badge. Each tooltip has "Next" / "Skip tour."
+
+**Step 4 — First interaction**: A guided micro-task box: "Drag a Data Source node onto the canvas to continue" — the app watches for that specific action and unlocks "Next" only once done (or has a "Skip" escape hatch).
+
+**Step 5 — Done**: Confetti/success moment, "Your bot is ready — let's run a backtest" button → lands in `/app/bots/:botId/backtest` with sensible pre-filled defaults so the user gets a result immediately.
+
+---
+
+## 7. Dashboard (`/app`)
+
+- **Header**: "Welcome back, {name}" + 4 stat cards: Active bots · Backtests run this month · Best-performing bot (name + return %) · Credits remaining
+- **"Continue building"** row: cards for the 3 most recently edited bots, each with "Open in builder" button
+- **Quick actions row**: "+ New bot" · "Browse marketplace" · "Run a backtest"
+- **Activity feed**: reverse-chronological list — "Backtest completed on {bot}" · "{preset} was forked by another user" · "Self-learning added a new rule to {bot}" · each item links to the relevant detail page
+- **Upgrade banner** (conditional): shown only when a free-plan user is near a usage limit, e.g. "You've used 8/10 backtests this month — Upgrade for unlimited"
+- **Empty state** (brand-new user who skipped onboarding's guided bot): illustration + "You haven't built a bot yet" + "+ New bot" CTA
+
+---
+
+## 8. Builder / Canvas (`/app/builder/:botId`) — the centerpiece page
+
+Full mechanics are in `04_Builder_Canvas_Deep_Dive.md`. Layout summary:
+
+- **Top toolbar**: editable bot name · Save · Save as Preset (dropdown) · Version history · Undo/Redo · Validate · Share · **Run Backtest** (primary button) · Go Live (secondary, gated) · zoom controls · fit-to-screen
+- **Left panel — Component Library**: search box, category tabs matching the 13 layers, draggable component cards, lock icons on gated components, hover tooltip with description + unlock cost
+- **Center — Canvas**: infinite pan/zoom surface, colored translucent "layer bands" behind grouped nodes (visual callback to the original architecture diagram), nodes with input/output ports, connectors between them, minimap (bottom-right), grid background
+- **Right panel — Node Inspector** (appears when a node is selected): node name, description, all config fields for that specific component, an on/off toggle, a "Remove from canvas" button
+- **Bottom panel — Console** (collapsible): validation warnings/errors, real-time log during a run
+- **States**: empty canvas (first-time), node error state (red outline + tooltip on hover), locked-node click → upsell modal, unsaved-changes indicator + browser "leave without saving?" guard
+
+---
+
+## 9. My Bots (`/app/bots`)
+
+- View toggle: Grid / List
+- Each bot card: name, mini graph thumbnail, status badge (Draft / Backtested / Live / Paused / Error), last modified date, headline metric (best backtest return)
+- Filter bar: status, tags, date range
+- Sort dropdown: Last modified, Name, Performance
+- Bulk selection checkboxes → bulk actions bar: Archive, Duplicate, Delete
+- "+ New bot" button (top right)
+- **Empty state**: "No bots yet" + CTA
+
+## 10. Bot Overview (`/app/bots/:botId`)
+
+- Header: bot name, status badge, "Open in builder" button
+- Tabs: Overview | Backtests | Live | Settings
+- Overview tab: graph thumbnail (click to open builder), summary stats, list of recent backtest runs with quick links, "Publish to marketplace" button
+
+## 11. Backtest Page (`/app/bots/:botId/backtest`)
+
+- **Config panel**: date range picker, asset/pair selector, starting capital input, fee/slippage assumption inputs, random seed field, test-type tabs (Historical / Walk-forward / Monte Carlo / Paper trading / A/B compare)
+- **Run button** → progress bar + live log stream
+- **Results dashboard** (appears after run):
+  - Equity curve chart (line chart)
+  - Metric cards: Total return, Win rate, Max drawdown, Sharpe ratio, Number of trades, Avg R-multiple
+  - Trade log table: entry/exit time, size, P&L, which layer/node triggered the decision, confidence score — sortable, filterable
+  - Per-layer contribution panel: "Risk Gate blocked 12 trades, estimated avoided loss ₹X" style breakdown
+  - Self-learning insights panel: new rules derived this run, notable post-mortems on losing trades
+  - Buttons: Export report (PDF/CSV), Save as new preset, Compare to previous run, Promote to live
+- **Empty/first-run state**: friendly explanation of what a backtest does before the first run
+
+## 12. Live Run Monitor / "Aether View" (`/app/bots/:botId/live`)
+
+- Status control: Running / Paused / Stopped toggle + big, unmistakable **"Stop Bot"** kill-switch button
+- Real-time equity/P&L chart (streaming)
+- Open positions table
+- Live activity log (streaming console of agent decisions)
+- Risk limits display: max daily loss, position size caps (edit requires re-confirmation)
+- Alert settings shortcut (links to `/app/account/notifications`)
+- Clear, persistent banner: "Paper trading — no real funds are being used" (unless/until the account has an explicitly verified real-fund tier active, in which case the banner instead clearly states real capital is at risk)
+
+## 13. Bot Settings (`/app/bots/:botId/settings`)
+
+- Rename bot, description field
+- Visibility: Private / Unlisted (link-only) / Public
+- Collaborators (optional, future: invite others to view/edit)
+- Danger zone: Archive bot, Delete bot (confirmation modal)
+
+---
+
+## 14. My Presets (`/app/presets`)
+
+- List of saved presets with: name, thumbnail, created date, visibility badge
+- Row actions: Load into builder, Duplicate, Rename, Delete, Publish to marketplace, Share (generates link + visibility control)
+- Version history per preset (expandable)
+
+## 15. Marketplace (`/app/marketplace` and public `/marketplace`)
+
+- Search bar + filters: by layer composition, price (Free/Paid), popularity, most forked, newest, performance tier
+- Preset cards: title, author avatar+name, graph thumbnail, headline backtest stat (with a small "past performance ≠ future results" disclaimer), price, fork count, star rating
+- Sort dropdown
+- **Detail page** (`/app/marketplace/:presetId`): full description, author's notes, layer breakdown diagram, sample backtest report, reviews/comments section, **"Clone to my bots"** button (may deduct credits or trigger a Razorpay purchase), "Report" link (moderation)
+- Public (logged-out) version of detail page: everything except "Clone" is visible; that button becomes "Sign up to clone"
+
+## 16. Publish Flow (`/app/marketplace/publish/:botId`)
+
+- Step 1: Choose visibility (Public free / Public paid / Unlisted)
+- Step 2: If paid — set price, agree to marketplace revenue-share terms
+- Step 3: Write description, tag categories
+- Step 4: Attach a backtest report as proof (required — no publishing without at least one saved backtest run)
+- Step 5: Review & publish
+
+## 17. Creator Dashboard (`/app/creator/dashboard`)
+
+- Earnings summary (total, this month), payout status via Razorpay Route
+- Table: each published preset — downloads/clones, revenue, rating, reviews
+- "Request payout" button (if not fully automated)
+
+---
+
+## 18. Compare (`/app/compare`)
+
+- Selector: add up to 4 bots/presets/backtest runs
+- Overlaid equity curve chart (one line per selection)
+- Side-by-side metrics table (rows = metrics, columns = selections)
+- Diff view: highlights which nodes/config differ between two selected bots
+
+## 19. Component Library (`/app/library`)
+
+- Grid/list of every component across all layers, independent of any bot
+- Filter by layer, by plan tier
+- Click → `/app/library/:componentId` detail page: description, inputs/outputs, config options, example use case, which plan includes it, "Try it in a new bot" button
+
+---
+
+## 20. Billing (`/app/billing`)
+
+- Current plan card + "Change plan" button → `/app/billing/plans`
+- Usage meters (progress bars): backtests this month, active bots, live bots, storage
+- Credit balance + "Top up" button → `/app/billing/topup`
+- Recent invoices preview + "View all" → `/app/billing/history`
+- Payment method preview + "Manage" → `/app/billing/payment-methods`
+
+### 20a. Plans page (`/app/billing/plans`)
+Same comparison table as public pricing, but buttons say "Upgrade" / "Downgrade" / "Current plan" and trigger Razorpay subscription change flows directly (no need to re-enter card details if already saved).
+
+### 20b. Top-up page (`/app/billing/topup`)
+- Preset credit bundles (e.g., ₹99 / ₹499 / ₹999) + custom amount field
+- "Buy credits" → Razorpay Checkout
+- Explanation of what credits can be spent on (temporary layer unlocks, marketplace clones, extra backtest runs)
+
+### 20c. History (`/app/billing/history`)
+- Table: date, description, amount, status, downloadable invoice/receipt
+
+### 20d. Payment methods (`/app/billing/payment-methods`)
+- Saved cards/UPI mandates list, "Add new" (Razorpay), "Remove," default-method selector
+
+---
+
+## 21. Account Settings
+
+- **Profile** (`/app/account/profile`): avatar upload, display name, bio, "Make my profile public" toggle (needed if they publish to marketplace as a creator)
+- **Security** (`/app/account/security`): change password, enable/disable 2FA, list of active sessions with "Log out" per session, "Log out everywhere" button
+- **Notifications** (`/app/account/notifications`): per-event toggles (Email / In-app / Webhook) for: backtest complete, bot error, live trade executed, risk limit breached, preset forked, preset review received, payment receipt
+- **API Keys** (`/app/account/api-keys`, gated): generate key, name it, set scopes, revoke, last-used timestamp
+- **Danger zone** (`/app/account/danger-zone`): export all data (JSON download), delete account (multi-step confirmation)
+
+---
+
+## 22. Support
+
+- **Notifications center** (`/app/notifications`): full-page version of the bell dropdown, mark-as-read, filter by type
+- **Help** (`/app/help`): searchable FAQ/docs, "Contact support" form, link to status page
+- **Global search** (`/app/search`, Cmd/Ctrl+K anywhere): results grouped by type (Bots, Presets, Marketplace, Docs), keyboard navigable
+
+---
+
+## 23. Legal Pages
+
+- **Risk Disclosure** is the one to get right: must explicitly state that (a) the platform is a tool, not investment advice, (b) default mode is paper trading with no real funds, (c) any real-fund execution tier carries genuine risk of loss and requires explicit, separate opt-in and acknowledgment, (d) past backtest performance does not guarantee future results — this line should also appear inline wherever backtest results are displayed, not just buried in the legal page.

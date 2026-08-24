@@ -1,0 +1,120 @@
+# AETHER — Builder / Canvas Deep Dive ("The Loom")
+
+The canvas is the product. Everything else exists to feed it, save it, monetize it, or run it. This doc specs the drag-and-drop mechanics in detail — modeled on n8n/Figma-style infinite canvases, adapted for a layered trading-agent architecture.
+
+---
+
+## 1. Canvas fundamentals
+
+- **Infinite pan/zoom surface**, grid background, snap-to-grid toggle
+- **Pan**: space + drag, or middle-mouse drag, or two-finger trackpad scroll
+- **Zoom**: scroll wheel / pinch, with zoom-percentage indicator and "fit to screen" button
+- **Minimap**: bottom-right corner, shows full graph + current viewport, click-to-jump
+- **Multi-select**: marquee (click-drag on empty canvas) or shift-click; supports group move, group delete, group disable
+- **Alignment helpers**: snap guides when dragging a node near another's edge; "Align" / "Distribute" options in the multi-select toolbar
+
+## 2. Layer bands
+
+Nodes are visually grouped into **colored, translucent horizontal/vertical bands**, each labeled (e.g. "LAYER I — DATA COLLECTION," "LAYER IX — RISK MANAGEMENT") — a direct visual callback to the original architecture diagram's color-coded layer system. This is a genuinely useful UX pattern, not just decoration: it lets a user instantly see which stage of the pipeline they're editing and immediately spot an empty/misconfigured layer.
+
+- Bands auto-expand to fit their contents
+- A band can be **collapsed** (click the label) to hide its nodes and show just a compact summary chip (e.g. "3 nodes, 2 enabled")
+- The left sidebar has a matching **"Layer visibility"** checklist to toggle whole bands on/off at once
+
+## 3. Nodes
+
+Every node represents one component (a data source, a model, a risk rule, an execution action, a memory system, etc.)
+
+**Anatomy of a node:**
+- Icon + name + layer-color accent border
+- Input port(s) on the left, output port(s) on the right (typed — see §5)
+- An **on/off toggle switch** in the node's header — this is the literal "enable/disable" mechanic you asked for
+- A small **status dot**: grey (disabled), green (enabled, valid), amber (enabled, needs config), red (error)
+- A **lock badge** in place of the toggle if the node is plan-gated and not yet unlocked
+
+**Node states:**
+| State | Visual |
+|---|---|
+| Enabled, valid | Solid border, green dot, normal color |
+| Disabled | Greyed out, dashed outline, connections to it become dashed |
+| Locked (paywalled) | Padlock icon overlay, greyed, clicking opens the Unlock modal instead of the config panel |
+| Needs configuration | Amber dot, warning icon, tooltip lists missing fields |
+| Error (during a run) | Red border, pulsing, tooltip shows the error message |
+| Active (during a live run) | Subtle pulse/glow animation while actively processing |
+
+**Node interactions:**
+- **Click** → opens the right-hand Node Inspector panel
+- **Double-click** → same as click, but also focuses the first config field
+- **Drag** → move on canvas
+- **Right-click** → context menu: Duplicate, Disable/Enable, Delete, View docs, Save as mini-preset
+- **Drag from a port** → starts drawing a connection
+
+## 4. Component Library (left sidebar)
+
+- Search box at top
+- Tabs/accordion sections matching the layers (Data Collection, Feature Engineering, Intelligence Agents, ML Prediction, Reinforcement Learning, Debate Layer, Confidence Engine, Risk Management, Execution, Trade Monitoring, Self-Learning, Memory)
+- Each entry is a **draggable card**: icon, name, one-line description, lock badge + unlock price if gated
+- Hover → tooltip with fuller description, inputs/outputs, and a "Learn more" link to `/app/library/:componentId`
+- Drag a card onto the canvas to instantiate a node; it auto-snaps into the correct layer band based on its type
+
+## 5. Connections & the type system
+
+- Drag from an output port to a compatible input port to connect
+- Ports are **typed** (e.g. `MarketData`, `NewsFeed`, `FeatureVector`, `Signal`, `RiskDecision`, `ExecutionOrder`, `TradeOutcome`) — the canvas visually indicates compatible ports (highlighted) while dragging a connection, and simply refuses an incompatible drop with an inline toast explaining why
+- **Structural validation rules** (examples, not exhaustive):
+  - Execution nodes cannot connect directly to raw Data Collection nodes — a Risk Management node must sit between them
+  - A Self-Learning node needs at least one Trade Monitoring output as input to have anything to learn from
+  - Memory nodes can connect to multiple consumers (fan-out allowed); most other nodes are single-input
+- Disabled nodes' connections render as dashed/greyed lines and are excluded from any run
+- **"Validate Bot"** button in the toolbar runs the full rule set and lists every problem in the bottom Console panel with click-to-jump-to-node links
+
+## 6. Node Inspector (right panel)
+
+Appears when a node is selected. Contents vary per node type but always include:
+- Node name (editable) and description
+- On/off toggle (mirrors the node header toggle)
+- All configuration fields for that component — examples:
+  - **News Source node**: checkboxes for which channels/APIs to pull from, API key field, refresh interval slider
+  - **Risk Gate node**: threshold sliders, explicit false-positive vs. false-negative cost weighting, max position size
+  - **Self-Learning node**: sub-module toggles (post-mortem writer / rule clustering / model reweighting), retraining frequency
+  - **Execution node**: which venue/API, order type, slippage tolerance
+- "Remove from canvas" button (with confirmation if the node has connections)
+
+## 7. Paywall interaction
+
+- Clicking a locked node opens an **Unlock modal**: component name, what it does, its price (one-time / subscription-included / credit cost), and an embedded Razorpay checkout — no full-page redirect, so the user never loses their place on the canvas
+- On successful payment, the modal closes, the node's lock badge is replaced by the normal toggle, and a toast confirms "Unlocked — {component} is ready to configure"
+- If the user cancels/fails payment, the node stays locked with no interruption to the rest of their work
+
+## 8. Sub-flows / mini-presets
+
+- A user can select a connected group of nodes (e.g. "my custom risk gate: 2 nodes + their connection") and **"Save as mini-preset"**
+- Mini-presets appear in a personal section of the Component Library ("My saved blocks") and can be dragged into any other bot as a single unit, then expanded/edited
+- This is what makes "share your preset with other users" meaningful at a sub-component level, not just whole-bot level
+
+## 9. Toolbar reference
+
+| Button | Action |
+|---|---|
+| Bot name (inline editable) | Rename |
+| Save | Saves current graph state (autosave also runs periodically) |
+| Save as Preset ▾ | Save as new preset / update existing preset |
+| Version history | Dropdown list of saved versions, click to preview, "Restore" button |
+| Undo / Redo | Standard graph-edit history |
+| Validate | Runs structural rule checks, opens Console with results |
+| Templates | Quick-insert common sub-graphs (e.g. "standard debate layer," "basic risk gate") |
+| Share | Generates a link, sets visibility (Private/Unlisted/Public) |
+| Run Backtest | Navigates to/opens the backtest config panel pre-filled with this bot |
+| Go Live (gated) | Starts paper-trading (or, on the verified real-fund tier, real) execution |
+| Zoom controls | +, −, fit-to-screen, percentage display |
+
+## 10. Empty & first-time states
+
+- Blank canvas shows a light watermark hint: "Drag a component from the left to get started" with an arrow pointing at the library panel
+- If a user tries to Run Backtest on an incomplete graph, they get a friendly blocking modal listing exactly what's missing (not just "invalid graph")
+
+## 11. Performance/UX notes worth deciding early
+
+- Large graphs (50+ nodes) need virtualization so the canvas doesn't lag — likely only relevant once the platform matures past MVP
+- Autosave + explicit "unsaved changes" indicator with a browser-navigation guard, so users never lose work
+- Keyboard shortcuts: Delete (remove selected), Cmd/Ctrl+D (duplicate), Cmd/Ctrl+Z/Shift+Z (undo/redo), Cmd/Ctrl+S (save), Space+drag (pan)

@@ -1,0 +1,131 @@
+# AETHER — Complete Sitemap & Route Reference
+
+Legend: **[PUB]** = public/no login required · **[AUTH]** = requires login · **[GATED]** = requires specific plan/credits
+
+---
+
+## A. Public / Marketing Site
+
+| Route | Purpose |
+|---|---|
+| `/` **[PUB]** | Landing page — pitch, demo, feature grid, pricing teaser, marketplace teaser |
+| `/how-it-works` **[PUB]** | Deeper explainer with visuals of the layer system and the build → test → deploy loop |
+| `/pricing` **[PUB]** | Full plan comparison, FAQ, Razorpay checkout entry points |
+| `/marketplace` **[PUB, read-only]** | Public, browsable community preset gallery (login required to clone/use) |
+| `/marketplace/:presetId` **[PUB, read-only]** | Public preset detail page with backtest stats; "Sign up to clone" CTA |
+| `/docs` **[PUB]** | Documentation home / knowledge base |
+| `/docs/:section` **[PUB]** | Individual doc pages (getting started, layer reference, API reference) |
+| `/blog` **[PUB]** *(optional)* | Product updates, strategy write-ups |
+| `/legal/terms` **[PUB]** | Terms of Service |
+| `/legal/privacy` **[PUB]** | Privacy Policy |
+| `/legal/risk-disclosure` **[PUB]** | Explicit risk/no-advice disclosure — required reading before enabling live mode |
+| `/legal/refund-policy` **[PUB]** | Refund policy (required for Razorpay merchant compliance) |
+| `/login` **[PUB]** | Login |
+| `/signup` **[PUB]** | Signup |
+| `/forgot-password` **[PUB]** | Password reset request |
+| `/reset-password/:token` **[PUB]** | Password reset form |
+| `/verify-email/:token` **[PUB]** | Email verification landing |
+
+---
+
+## B. Onboarding (first login only, authenticated but pre-dashboard)
+
+| Route | Purpose |
+|---|---|
+| `/onboarding/welcome` **[AUTH]** | Welcome + experience-level selection (Beginner/Intermediate/Advanced) |
+| `/onboarding/start` **[AUTH]** | Choose: start from template vs. blank canvas |
+| `/onboarding/tour` **[AUTH]** | Interactive spotlight tour of the main app shell |
+| `/onboarding/first-node` **[AUTH]** | Guided micro-task: drag one node onto canvas to get first interaction |
+| `/onboarding/done` **[AUTH]** | Completion screen → redirects to `/app` or directly into the tour-created bot's builder |
+
+---
+
+## C. Core Application (authenticated shell: top bar + left sidebar persist across all `/app/*` routes)
+
+### Dashboard
+| Route | Purpose |
+|---|---|
+| `/app` **[AUTH]** | Home dashboard — stats, recent bots, quick actions, activity feed |
+
+### Builder
+| Route | Purpose |
+|---|---|
+| `/app/builder/new` **[AUTH]** | Create a new bot — opens blank canvas |
+| `/app/builder/:botId` **[AUTH]** | Edit an existing bot's graph |
+| `/app/builder/:botId/version/:versionId` **[AUTH]** | View/restore a specific saved version (read-only unless restored) |
+
+### Bots
+| Route | Purpose |
+|---|---|
+| `/app/bots` **[AUTH]** | List/manage all of a user's bots (grid/list, filter, sort) |
+| `/app/bots/:botId` **[AUTH]** | Bot overview page — summary, tabs into backtest/live/settings |
+| `/app/bots/:botId/backtest` **[AUTH]** | Backtest configuration + results |
+| `/app/bots/:botId/backtest/:runId` **[AUTH]** | A specific historical backtest run's full report |
+| `/app/bots/:botId/live` **[AUTH, GATED]** | Live/paper-trading monitor ("Aether View") |
+| `/app/bots/:botId/settings` **[AUTH]** | Bot name, visibility, sharing, danger zone (archive/delete) |
+
+### Presets
+| Route | Purpose |
+|---|---|
+| `/app/presets` **[AUTH]** | User's own saved presets (private templates/snapshots) |
+| `/app/presets/:presetId` **[AUTH]** | Preset detail — load/duplicate/publish/share |
+| `/app/marketplace` **[AUTH]** | Authenticated marketplace view (adds "Clone," purchase, review actions vs. the public read-only version) |
+| `/app/marketplace/:presetId` **[AUTH]** | Authenticated preset detail with clone/purchase actions |
+| `/app/marketplace/publish/:botId` **[AUTH, GATED]** | Flow to publish one of your bots as a public/paid preset |
+| `/app/creator/dashboard` **[AUTH, GATED]** | Earnings, downloads, reviews for presets you've published (only shown if user has ≥1 published preset) |
+
+### Compare & Library
+| Route | Purpose |
+|---|---|
+| `/app/compare` **[AUTH]** | Select and compare 2–4 bots/presets/backtest runs side by side |
+| `/app/library` **[AUTH]** | Full browsable catalog of every layer/component, independent of any specific bot |
+| `/app/library/:componentId` **[AUTH]** | Deep-dive doc page for one component (what it does, config options, plan requirement) |
+
+### Billing
+| Route | Purpose |
+|---|---|
+| `/app/billing` **[AUTH]** | Current plan, usage meters, credit balance, quick top-up |
+| `/app/billing/plans` **[AUTH]** | Full plan comparison + upgrade/downgrade (Razorpay Subscriptions checkout) |
+| `/app/billing/topup` **[AUTH]** | Pay-as-you-go credit purchase (Razorpay Checkout) |
+| `/app/billing/history` **[AUTH]** | Invoice & payment history, downloadable receipts |
+| `/app/billing/payment-methods` **[AUTH]** | Saved cards / UPI mandates via Razorpay |
+
+### Account
+| Route | Purpose |
+|---|---|
+| `/app/account/profile` **[AUTH]** | Name, avatar, bio, public creator-profile toggle |
+| `/app/account/security` **[AUTH]** | Password change, 2FA, active sessions |
+| `/app/account/notifications` **[AUTH]** | Notification channel preferences per event type |
+| `/app/account/api-keys` **[AUTH, GATED]** | Programmatic API key management |
+| `/app/account/danger-zone` **[AUTH]** | Export data, delete account |
+
+### Support & Misc
+| Route | Purpose |
+|---|---|
+| `/app/notifications` **[AUTH]** | In-app notification center (bell icon dropdown expands to full page) |
+| `/app/help` **[AUTH]** | Searchable help center + contact/support form |
+| `/app/search` **[AUTH]** | Global search results (bots, presets, docs, marketplace) — also triggerable via Cmd/Ctrl+K anywhere in-app |
+
+---
+
+## D. Route access matrix (summary)
+
+| Area | Logged out | Free plan | Paid plan |
+|---|---|---|---|
+| Landing, pricing, docs, public marketplace | ✅ full | ✅ full | ✅ full |
+| Builder (basic layers) | ❌ redirect to signup | ✅ | ✅ |
+| Builder (premium layers) | ❌ | 🔒 locked, upsell modal | ✅ |
+| Backtest (historical) | ❌ | ✅ limited runs/month | ✅ unlimited |
+| Live/paper trading monitor | ❌ | 🔒 | ✅ |
+| Publish to marketplace | ❌ | 🔒 (or limited) | ✅ |
+| Real-fund execution | ❌ | 🔒 | 🔒 separate opt-in tier w/ extra verification |
+
+---
+
+## E. Global UI elements present across all `/app/*` routes
+
+- **Top bar**: logo → `/app`, global search (Cmd/Ctrl+K), credits/plan badge → `/app/billing`, notification bell → `/app/notifications`, avatar menu → profile/security/logout
+- **Left sidebar**: Dashboard, Builder (opens bot picker or last-edited bot), My Bots, Presets, Marketplace, Compare, Library, Billing, Help — collapsible to icon-only rail
+- **Command palette** (Cmd/Ctrl+K): jump to any bot, preset, doc page, or action ("new bot", "run backtest")
+- **Toast/notification system**: non-blocking confirmations (saved, unlocked, backtest complete)
+- **Theme toggle**: light/dark, persisted per user

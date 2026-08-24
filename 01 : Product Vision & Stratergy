@@ -1,0 +1,80 @@
+# AETHER — Product Vision & Strategy
+
+> Working name: **AETHER** (reused from the original bot's dashboard layer, kept as the platform brand for continuity — the in-app live-monitoring screen is literally called "Aether View" as a callback).
+
+---
+
+## 1. One-line pitch
+
+**AETHER is a visual, drag-and-drop builder for algorithmic trading agents** — instead of coding a trading bot from scratch, users assemble one from pre-built, toggleable components (data sources, risk gates, execution logic, self-learning modules), backtest it instantly, and pay only for the layers and compute they actually use.
+
+Think **n8n / Zapier**, but every node is a piece of a trading agent instead of a workflow automation step.
+
+---
+
+## 2. The problem
+
+Building a serious trading agent today requires:
+- Fluency in Python/ML to wire together data feeds, models, and execution logic
+- Weeks of infrastructure work before you can test a single idea
+- No easy way to isolate *which* component of your strategy is actually adding value
+- No easy way to share, sell, or fork a working strategy configuration
+
+Most people who have a *trading idea* (e.g. "I think news sentiment + a tighter stop-loss would help") have no fast way to test that idea without building an entire pipeline first.
+
+## 3. The insight
+
+A trading bot is really a **graph of interchangeable components** grouped into layers (data → features → decision models → risk gates → execution → learning → memory). If you expose that graph visually and make every node swappable, you turn "building a trading bot" into "assembling one," the same way no-code tools turned "building a workflow integration" into a drag-and-drop exercise.
+
+## 4. Who this is for
+
+| Segment | What they want |
+|---|---|
+| **Hobbyist/retail builders** | Want to test a strategy idea without writing infra code |
+| **Quant-curious developers** | Want to swap in their own models/data sources without rebuilding the scaffolding |
+| **Strategy creators** | Want to package and sell/share a working configuration |
+| **Learners** | Want to understand *why* a strategy works by seeing which layer contributed what |
+
+## 5. Core value propositions
+
+1. **Composability** — every layer (data, features, models, risk, execution, learning, memory) is a swappable, toggleable node.
+2. **Instant feedback** — backtest results update as you edit the graph; you *see* what each component is worth.
+3. **Pay for what you use** — free tier for basic composition and paper testing; pay-as-you-go or subscription to unlock advanced layers (RL, ensemble models, live self-learning) — powered by Razorpay.
+4. **A marketplace, not a black box** — users can publish, fork, and (optionally) sell working configurations, with transparent backtest stats attached.
+5. **Honest metrics, not vibes** — every backtest reports win rate, drawdown, false-positive-style costs, and what the self-learning loop actually learned — no cherry-picked "look, it's up 40%" screenshots.
+
+## 6. What AETHER is explicitly *not*
+
+- **Not** a signals service telling people what to buy — it's a *tool*, the strategy is theirs.
+- **Not** connected to real funds by default — the default and demo mode is **paper trading only**. Live execution with real capital is a clearly gated, opt-in, higher-tier capability with its own risk disclosures — this matters both ethically and because of how India's regulatory environment treats crypto-adjacent products.
+- **Not** investment advice, anywhere in the product copy.
+
+## 7. Competitive framing (for context, not for the pitch deck)
+
+- **n8n / Zapier / Make** — proved the "visual node graph for logic" pattern works at scale, but for generic workflows, not decision-making agents with feedback loops.
+- **TradingView Pine Script / QuantConnect** — powerful but code-first; steep learning curve, no visual composability.
+- **3Commas / Pionex** — pre-built bot templates, but closed-box; you tweak parameters, not architecture.
+- **AETHER's gap to fill**: visual composability *of the architecture itself*, not just parameters — plus a self-learning/memory layer that most retail tools don't expose at all.
+
+## 8. Monetization philosophy
+
+Money should flow at the point where a user gets **real incremental value**, not before:
+- Assembling and paper-backtesting a *basic* bot (a handful of layers) is free — this is the "aha" moment and must never be paywalled, or nobody discovers the value.
+- Depth (ensembles, RL, multi-agent debate, always-on self-learning, higher-frequency live paper trading, real-fund execution) is where the paywall lives.
+- A **marketplace revenue share** lets strategy creators earn from presets others fork/subscribe to — Razorpay Route can split payments between platform and creator automatically.
+
+Full mechanics are in `06_Monetization_and_Razorpay_Integration.md`.
+
+## 9. Why this fits an Open Innovation track
+
+It doesn't try to force a merchant-commerce or fraud-detection narrative onto a trading bot (that would be dishonest scoping). Instead it's honestly framed as: **a no-code platform with a real, Razorpay-powered subscription and marketplace payment business model** — which is a legitimate product a payments company would recognize as relevant to their own ecosystem, without pretending the underlying tool is something it isn't.
+
+## 10. Success criteria for a hackathon demo
+
+A judge should be able to watch, in under 5 minutes:
+1. A bot assembled from scratch by dragging 3–4 nodes and connecting them
+2. A backtest run live on screen with real (or realistic historical) data, showing a results dashboard
+3. A locked/premium layer being unlocked via an actual Razorpay checkout, and the graph changing as a result
+4. The bot saved as a preset and shared/forked by a "second user" (can be a second browser tab/demo account)
+
+See `07_MVP_Scope_and_Buildathon_Demo_Plan.md` for exactly how to scope this in a week.

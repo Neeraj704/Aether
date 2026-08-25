@@ -272,6 +272,20 @@
   .reveal-init {
     opacity: 0;
   }
+
+  /* Hides scrollbars on internal scroll regions (library, console, log tails). */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

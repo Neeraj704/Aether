@@ -89,6 +89,8 @@ interface BuilderState {
 
   /** Last rejected connection, surfaced as an inline canvas toast. */
   rejection: string | null
+  /** Bumped whenever selection is driven from outside the canvas. */
+  focusToken: number
 
   load: (botId: string, nodes: BotNode[], edges: BotEdge[]) => void
   addNode: (componentId: string, x: number, y: number) => string | null
@@ -101,6 +103,8 @@ interface BuilderState {
   connect: (source: string, target: string) => boolean
   disconnect: (edgeIds: string[]) => void
   setSelection: (ids: string[]) => void
+  /** Selects nodes from outside the canvas (Console jump) and forces a re-sync. */
+  focusNodes: (ids: string[]) => void
   toggleLayer: (layer: LayerId) => void
   alignSelection: (mode: 'left' | 'center' | 'right') => void
   distributeSelection: () => void
@@ -141,6 +145,7 @@ export const useBuilder = create<BuilderState>((set, get) => {
     consoleTab: 'issues',
     log: [],
     rejection: null,
+    focusToken: 0,
 
     load: (botId, nodes, edges) =>
       set({
@@ -259,6 +264,21 @@ export const useBuilder = create<BuilderState>((set, get) => {
       commit({ edges: get().edges.filter((e) => !edgeIds.includes(e.id)) }),
 
     setSelection: (selection) => set({ selection }),
+
+    focusNodes: (ids) => {
+      // Expand any collapsed layer holding a focused node, else it stays hidden.
+      const layers = new Set(
+        ids.map((id) => {
+          const node = get().nodes.find((n) => n.id === id)
+          return node ? COMPONENT_MAP[node.componentId]?.layer : undefined
+        }),
+      )
+      set({
+        selection: ids,
+        focusToken: get().focusToken + 1,
+        collapsedLayers: get().collapsedLayers.filter((l) => !layers.has(l)),
+      })
+    },
 
     toggleLayer: (layer) => {
       const current = get().collapsedLayers

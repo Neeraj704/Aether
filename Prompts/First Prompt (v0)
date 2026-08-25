@@ -1,45 +1,45 @@
-# AETHER — Master Frontend Build Prompt
+# AETHER  Master Frontend Build Prompt
 
-You are a senior frontend engineer and product designer. Your job is to build the **entire frontend** for **AETHER** — a visual, drag-and-drop builder for algorithmic trading agents (think n8n/Zapier, but every node is a piece of a trading bot: data sources, risk gates, execution logic, self-learning modules). Users assemble a bot from toggleable components, backtest it instantly, and unlock deeper layers via subscription/credits.
+You are a senior frontend engineer and product designer. Your job is to build the **entire frontend** for **AETHER**  a visual, drag-and-drop builder for algorithmic trading agents (think n8n/Zapier, but every node is a piece of a trading bot: data sources, risk gates, execution logic, self-learning modules). Users assemble a bot from toggleable components, backtest it instantly, and unlock deeper layers via subscription/credits.
 
-This is a **frontend-only build**. There is no backend yet. Read this entire prompt before writing code — it is long because it is meant to be the only spec you need.
+This is a **frontend-only build**. There is no backend yet. Read this entire prompt before writing code  it is long because it is meant to be the only spec you need.
 
 ---
 
 ## 0. The two things that matter most
 
-1. **Visual quality.** This must look and feel like an Apple product page / Apple product (apple.com, macOS System Settings, visionOS glass panels) applied to a fintech tool — sleek, quiet, confident, glassy, generous whitespace, restrained color, obsessive spacing/typography discipline. Not a generic SaaS dashboard with a blue gradient slapped on it.
-2. **Completeness.** Every route in the sitemap below must exist and be navigable, fully laid out with real (mocked) content — not lorem ipsum, not "TODO," not blank placeholder boxes. Every state (empty, loading, error, success) described per page must be implemented, even if triggered by a dev toggle for now.
+1. **Visual quality.** This must look and feel like an Apple product page / Apple product (apple.com, macOS System Settings, visionOS glass panels) applied to a fintech tool  sleek, quiet, confident, glassy, generous whitespace, restrained color, obsessive spacing/typography discipline. Not a generic SaaS dashboard with a blue gradient slapped on it.
+2. **Completeness.** Every route in the sitemap below must exist and be navigable, fully laid out with real (mocked) content  not lorem ipsum, not "TODO," not blank placeholder boxes. Every state (empty, loading, error, success) described per page must be implemented, even if triggered by a dev toggle for now.
 
 ---
 
 ## 1. Ground rules (read this twice)
 
-- **You cannot do any real functionality yet** — no real auth, no real database, no real payments, no real ML/backtesting compute, no real market data, no real websockets to an exchange. **Everything is mocked.** Section 9 tells you exactly how.
-- Every button, form, and flow must still be **fully wired up on the frontend** — clicking "Run Backtest" should trigger a fake progress bar and then render a fully populated (fake, but realistic) results dashboard. Nothing should be a dead end or a console.log with no visual result.
+- **You cannot do any real functionality yet**  no real auth, no real database, no real payments, no real ML/backtesting compute, no real market data, no real websockets to an exchange. **Everything is mocked.** Section 9 tells you exactly how.
+- Every button, form, and flow must still be **fully wired up on the frontend**  clicking "Run Backtest" should trigger a fake progress bar and then render a fully populated (fake, but realistic) results dashboard. Nothing should be a dead end or a console.log with no visual result.
 - Build every page as a **real route** in the router, not a Figma-style static mockup. Navigation between all pages must actually work.
-- Where a page needs auth state (logged in vs out, plan tier, onboarding complete), fake that state with a simple global store (see §9) and add a small dev-only switcher (a floating panel, hidden behind a keyboard shortcut like `Ctrl+Shift+D`) to toggle: logged in/out, plan (Free/Starter/Pro), onboarding complete, dark/light. This is your own tool for building and demoing — make it, but keep it visually out of the way.
-- Do not invent new pages beyond what's listed. Do not skip pages either. If something is ambiguous, make the most Apple-like, most polished choice and move on — don't ask, just build.
+- Where a page needs auth state (logged in vs out, plan tier, onboarding complete), fake that state with a simple global store (see §9) and add a small dev-only switcher (a floating panel, hidden behind a keyboard shortcut like `Ctrl+Shift+D`) to toggle: logged in/out, plan (Free/Starter/Pro), onboarding complete, dark/light. This is your own tool for building and demoing  make it, but keep it visually out of the way.
+- Do not invent new pages beyond what's listed. Do not skip pages either. If something is ambiguous, make the most Apple-like, most polished choice and move on  don't ask, just build.
 
 ---
 
 ## 2. Tech stack
 
-- **Framework**: React + TypeScript, via Next.js (App Router) — gives you file-based routing that maps cleanly to the sitemap, and you'll want it later for real backend integration.
+- **Framework**: React + TypeScript, via Next.js (App Router)  gives you file-based routing that maps cleanly to the sitemap, and you'll want it later for real backend integration.
 - **Styling**: Tailwind CSS, extended with a custom design-token theme (see §3). Use CSS variables for every color/radius/shadow token so light/dark mode is a variable swap, not a duplicated class set.
-- **Component primitives**: shadcn/ui (Radix-based) as the unstyled behavioral base for dialogs, dropdowns, tabs, accordions, tooltips, popovers — then re-skin every one of them with the Apple glass theme. Do not ship shadcn's default look.
+- **Component primitives**: shadcn/ui (Radix-based) as the unstyled behavioral base for dialogs, dropdowns, tabs, accordions, tooltips, popovers  then re-skin every one of them with the Apple glass theme. Do not ship shadcn's default look.
 - **Animation**: **GSAP** (+ ScrollTrigger) for the marketing site's scroll storytelling, and **Framer Motion** for component-level transitions, layout animation, and micro-interactions across the whole app. Full rules in §4.
-- **Canvas / node graph**: **React Flow (`@xyflow/react`)** as the foundation for the Builder canvas. Do not hand-roll an infinite pan/zoom graph engine from scratch — customize React Flow's node types, edge types, background, and controls to match the spec in §7.4. This is the single most important library decision in this build.
-- **Charts**: Recharts, for equity curves, drawdown charts, and comparison overlays — themed to match (thin lines, glass tooltips, gradient area fills).
+- **Canvas / node graph**: **React Flow (`@xyflow/react`)** as the foundation for the Builder canvas. Do not hand-roll an infinite pan/zoom graph engine from scratch  customize React Flow's node types, edge types, background, and controls to match the spec in §7.4. This is the single most important library decision in this build.
+- **Charts**: Recharts, for equity curves, drawdown charts, and comparison overlays  themed to match (thin lines, glass tooltips, gradient area fills).
 - **Icons**: `lucide-react`, thin stroke (1.5px), used consistently as the SF Symbols stand-in.
-- **State**: Zustand (with the `persist` middleware writing to `localStorage`) for all mock app state — bots, presets, billing, notifications, onboarding progress, dev-toggle auth state. This is what makes the demo feel persistent without a backend.
-- **Fonts**: system font stack — `-apple-system, BlinkMacSystemFont, "Inter", "Helvetica Neue", sans-serif` — with **Inter** self-hosted as the actual web font (closest free substitute to SF Pro; non-Apple devices will render Inter, Apple devices will render actual SF Pro via `-apple-system`). Use `font-feature-settings: "cv11", "ss01"` and tight negative tracking on large display sizes.
+- **State**: Zustand (with the `persist` middleware writing to `localStorage`) for all mock app state  bots, presets, billing, notifications, onboarding progress, dev-toggle auth state. This is what makes the demo feel persistent without a backend.
+- **Fonts**: system font stack  `-apple-system, BlinkMacSystemFont, "Inter", "Helvetica Neue", sans-serif`  with **Inter** self-hosted as the actual web font (closest free substitute to SF Pro; non-Apple devices will render Inter, Apple devices will render actual SF Pro via `-apple-system`). Use `font-feature-settings: "cv11", "ss01"` and tight negative tracking on large display sizes.
 
 ---
 
-## 3. Design system — "Aether Glass"
+## 3. Design system  "Aether Glass"
 
-Think apple.com product pages crossed with macOS Big Sur/Sonoma System Settings crossed with visionOS panels — applied to a serious financial tool, so it must also read as **trustworthy and precise**, not just pretty.
+Think apple.com product pages crossed with macOS Big Sur/Sonoma System Settings crossed with visionOS panels  applied to a serious financial tool, so it must also read as **trustworthy and precise**, not just pretty.
 
 ### 3.1 Color tokens
 
@@ -72,7 +72,7 @@ Define as CSS variables, both light and dark:
 - Locked/paywalled: neutral grey `#8E8E93` + gold-ish lock accent `#C9A44C` used sparingly, never as a full fill
 - Info: the accent blue
 
-**The one moment of color drama**: AETHER's brand mark is an aurora-like mesh gradient — blue → violet → soft pink (`#2997FF → #7B61FF → #FF6AC1`), evoking "ether/sky." Use this **only** as: the hero background glow on the landing page, the logo mark itself, and subtle accents on premium/locked-layer badges. Never as a full-section background on app/dashboard pages — those stay neutral glass so trading data stays legible and calm.
+**The one moment of color drama**: AETHER's brand mark is an aurora-like mesh gradient  blue → violet → soft pink (`#2997FF → #7B61FF → #FF6AC1`), evoking "ether/sky." Use this **only** as: the hero background glow on the landing page, the logo mark itself, and subtle accents on premium/locked-layer badges. Never as a full-section background on app/dashboard pages  those stay neutral glass so trading data stays legible and calm.
 
 ### 3.2 Typography
 
@@ -85,13 +85,13 @@ Define as CSS variables, both light and dark:
 
 ### 3.3 Shape & elevation
 
-- Radius scale: `--radius-sm: 10px` (chips, small buttons), `--radius-md: 16px` (cards, inputs), `--radius-lg: 24px` (panels, modals), `--radius-pill: 980px` (primary CTA buttons — Apple's signature pill "Buy" button shape).
-- Shadows are soft, large-blur, low-opacity, no hard edges: e.g. `0 20px 60px rgba(0,0,0,0.08)` light / `0 20px 60px rgba(0,0,0,0.55)` dark. Never use small tight drop-shadows — everything should look like it's gently floating.
+- Radius scale: `--radius-sm: 10px` (chips, small buttons), `--radius-md: 16px` (cards, inputs), `--radius-lg: 24px` (panels, modals), `--radius-pill: 980px` (primary CTA buttons  Apple's signature pill "Buy" button shape).
+- Shadows are soft, large-blur, low-opacity, no hard edges: e.g. `0 20px 60px rgba(0,0,0,0.08)` light / `0 20px 60px rgba(0,0,0,0.55)` dark. Never use small tight drop-shadows  everything should look like it's gently floating.
 - Glass panels get a 1px inset top-border highlight (`rgba(255,255,255,0.4)` light / `rgba(255,255,255,0.06)` dark) to fake a light-catching glass edge.
 
 ### 3.4 Glassmorphism usage rules
 
-Apply real `backdrop-filter: blur()` glass to: the marketing nav bar (blurs page content as you scroll under it), the app top bar, the left sidebar, all modals/dialogs, the command palette, the node inspector panel, dropdown menus, toasts, and the Unlock-layer modal on the canvas. Do **not** apply glass to dense data tables or chart backgrounds — those stay on solid `--bg-elevated` so numbers stay crisp and readable. Glass is for chrome and overlays, not for the content you're trying to read.
+Apply real `backdrop-filter: blur()` glass to: the marketing nav bar (blurs page content as you scroll under it), the app top bar, the left sidebar, all modals/dialogs, the command palette, the node inspector panel, dropdown menus, toasts, and the Unlock-layer modal on the canvas. Do **not** apply glass to dense data tables or chart backgrounds  those stay on solid `--bg-elevated` so numbers stay crisp and readable. Glass is for chrome and overlays, not for the content you're trying to read.
 
 ### 3.5 Iconography
 
@@ -101,23 +101,23 @@ Lucide icons throughout, 1.5px stroke, no fill, sized 16/20/24px depending on co
 
 ## 4. Motion system
 
-Two distinct motion languages — do not mix them up:
+Two distinct motion languages  do not mix them up:
 
-**A. Marketing motion language** (landing page, how-it-works, pricing, marketplace public pages) — cinematic, scroll-driven, generous, built with **GSAP + ScrollTrigger**:
+**A. Marketing motion language** (landing page, how-it-works, pricing, marketplace public pages)  cinematic, scroll-driven, generous, built with **GSAP + ScrollTrigger**:
 - Hero: on load, headline characters/words fade+rise in with a slight blur-to-sharp transition (staggered, ~40ms per word); the animated node-graph hero visual draws its connector lines with an SVG stroke-dashoffset animation.
 - As the user scrolls past the "How it works" 4-step section, pin the section and crossfade/slide between the 4 steps tied to scroll progress (ScrollTrigger `scrub`).
 - Feature grid cards and the layer-showcase carousel: staggered fade+rise reveal on scroll-into-view (`ScrollTrigger` with `start: "top 80%"`), stagger 60–80ms.
 - Stats bar numbers count up from 0 when scrolled into view.
-- Layer showcase carousel: horizontal scroll section, can be scroll-jacked (scrolling vertically translates the row horizontally) — a classic Apple product-page technique — OR a native horizontal drag/swipe row with scroll-snap; pick the scroll-jacked version for desktop, fall back to native swipe on touch/mobile.
+- Layer showcase carousel: horizontal scroll section, can be scroll-jacked (scrolling vertically translates the row horizontally)  a classic Apple product-page technique  OR a native horizontal drag/swipe row with scroll-snap; pick the scroll-jacked version for desktop, fall back to native swipe on touch/mobile.
 - Easing: a custom Apple-like curve, `cubic-bezier(0.16, 1, 0.3, 1)`, on nearly everything. Durations 500–900ms for section reveals.
 
-**B. Application motion language** (everything under `/app/*`) — fast, functional, subtle, built with **Framer Motion**:
+**B. Application motion language** (everything under `/app/*`)  fast, functional, subtle, built with **Framer Motion**:
 - Page/route transitions: quick crossfade + 8px vertical slide, 200–250ms.
 - Sidebar active-item indicator: a pill background that slides between nav items using `layoutId` (shared layout animation), not an abrupt swap.
 - Modals/dialogs: scale from 0.96→1 + fade, spring (`stiffness: 300, damping: 30`).
 - Toasts: slide in from the bottom-right + fade, auto-dismiss with a shrinking progress bar.
 - Buttons: subtle scale-down (0.97) on press, no bounce.
-- Node drag on the canvas: handled by React Flow natively — don't fight it with extra Framer wrappers, just theme it.
+- Node drag on the canvas: handled by React Flow natively  don't fight it with extra Framer wrappers, just theme it.
 - Skeleton loaders: gentle shimmer sweep, not a spinner, for card/list content while "loading" (simulated delay).
 
 **Both languages must respect `prefers-reduced-motion`**: fall back to simple opacity fades, no parallax/pinning/scroll-jacking, no scale/spring.
@@ -129,7 +129,7 @@ Two distinct motion languages — do not mix them up:
 ### 5.1 Marketing shell (all `[PUB]` routes)
 Sticky glass nav bar (blurs content behind it once you scroll past ~40px): Logo · Product · Pricing · Marketplace · Docs · (spacer) · Log in (text link) · **Sign up free** (pill button, accent). Footer: 3–4 link columns (Product / Company / Legal / Resources), social icons, small-print risk-disclosure link, copyright line.
 
-### 5.2 Authenticated app shell (all `/app/*` routes) — persists across every app route
+### 5.2 Authenticated app shell (all `/app/*` routes)  persists across every app route
 - **Top bar** (glass, 56–64px tall): logo (→ `/app`) · global search field (click or `Cmd/Ctrl+K` opens the full Command Palette) · credits/plan badge pill (e.g. "Pro · 842 credits", → `/app/billing`) · notification bell with unread-count dot (dropdown preview → `/app/notifications`) · avatar menu (Profile / Security / Theme toggle / Log out).
 - **Left sidebar** (240px expanded / 64px icon-only rail, collapsible, state persisted): Dashboard, Builder (opens bot picker or last-edited bot), My Bots, Presets, Marketplace, Compare, Library, Billing, Help. Active item shown with the sliding pill highlight from §4. Bottom of sidebar: collapse toggle.
 - **Command palette** (`Cmd/Ctrl+K`, any app route): centered glass modal, fuzzy-searchable, results grouped by type (Bots, Presets, Docs, Actions like "New bot" / "Run backtest"), full keyboard navigation.
@@ -155,21 +155,21 @@ Build every one of these as a real, navigable route.
 
 ## 7. Page-by-page build specification
 
-For every page: build the full layout, all controls listed, and all states. Populate with realistic mock data (see §9) — never leave a section visibly empty unless "empty state" is the state being demonstrated.
+For every page: build the full layout, all controls listed, and all states. Populate with realistic mock data (see §9)  never leave a section visibly empty unless "empty state" is the state being demonstrated.
 
 ### 7.1 Landing page (`/`)
 The showpiece. Build in this order top to bottom:
 1. Nav (§5.1).
-2. **Hero**: headline "Build a trading agent by dragging boxes, not writing infra," subheadline, primary CTA "Start building — free" (pill, accent), secondary CTA "Watch 90-sec demo" (opens a glass video modal — mock/placeholder video player is fine). Hero visual: an animated preview of 4–5 nodes connecting on a mini canvas, built as an SVG/Framer Motion loop — glowing connector lines drawing themselves, nodes pulsing gently, aurora gradient glow behind it.
+2. **Hero**: headline "Build a trading agent by dragging boxes, not writing infra," subheadline, primary CTA "Start building  free" (pill, accent), secondary CTA "Watch 90-sec demo" (opens a glass video modal  mock/placeholder video player is fine). Hero visual: an animated preview of 4–5 nodes connecting on a mini canvas, built as an SVG/Framer Motion loop  glowing connector lines drawing themselves, nodes pulsing gently, aurora gradient glow behind it.
 3. **Stats bar**: 3 big tabular-nums stats (bots built, backtests run, community presets) that count up on scroll.
-4. **How it works, 4 steps**: Pick your layers → Connect them on the canvas → Backtest instantly → Save, share, or go live — pinned scroll section per §4.
+4. **How it works, 4 steps**: Pick your layers → Connect them on the canvas → Backtest instantly → Save, share, or go live  pinned scroll section per §4.
 5. **Feature grid**, 6 cards: Drag-and-drop builder · 13 customizable layers · Instant backtesting · Self-learning memory · Fork & share presets · Pay only for what you unlock. Glass cards, icon + title + one-liner, staggered scroll reveal.
 6. **Layer showcase carousel**: one card per layer (Data Collection, Feature Engineering, Intelligence Agents, ML Prediction, Reinforcement Learning, Debate Layer, Confidence Engine, Risk Management, Execution, Trade Monitoring, Self-Learning, Memory), each with description + a "Free" or "Locked" badge. Scroll-jacked horizontal row.
-7. **Live mini-demo embed**: a small read-only React Flow canvas with a few pre-placed nodes visitors can pan/zoom (not edit) without logging in — a real interactive element, not a screenshot.
+7. **Live mini-demo embed**: a small read-only React Flow canvas with a few pre-placed nodes visitors can pan/zoom (not edit) without logging in  a real interactive element, not a screenshot.
 8. **Pricing teaser**: 3 plan cards (Free / Pro / Pay-as-you-go), "See full pricing →" link to `/pricing`.
 9. **Marketplace teaser**: 3–4 trending preset cards (author, thumbnail graph, headline backtest stat).
 10. **Testimonials**: 3–4 quote cards, clearly placeholder-quality content but styled as real.
-11. **FAQ accordion**: "Is this financial advice?" (No, answered plainly), "Does this trade with real money?", "What data sources are supported?", "How does pricing work?" — shadcn Accordion, re-skinned.
+11. **FAQ accordion**: "Is this financial advice?" (No, answered plainly), "Does this trade with real money?", "What data sources are supported?", "How does pricing work?"  shadcn Accordion, re-skinned.
 12. **Final CTA banner**: gradient/aurora background, "Build your first bot in 5 minutes," sign-up button.
 13. Footer (§5.1).
 
@@ -180,48 +180,48 @@ Deeper explainer, same visual language: a scroll-driven walk through the layer s
 Monthly⇄Annual toggle (annual shows a "Save X%" badge). Plan cards: Free ("Get started"), Starter ("Start free trial"/"Subscribe"), Pro (highlighted "Most popular," "Subscribe"), Pay-as-you-go (separate card, credit-based, no subscription). Full feature comparison table below (rows = layers/features, columns = plans, cells = check/cross/number). FAQ section. Every Subscribe/Get-started button opens a **mock Razorpay checkout modal** (see §9.3) if logged in, or routes to `/signup?plan=X` if logged out.
 
 ### 7.4 Signup / Login / Password (`/signup`, `/login`, `/forgot-password`, `/reset-password/:token`, `/verify-email/:token`)
-Centered glass card on a subtle aurora-glow background. Signup: name, email, password+confirm, OAuth buttons (Google/GitHub, visually real, non-functional), required ToS/Privacy/Risk-Disclosure checkbox linking to the legal pages, "Create account" button, inline validation states (weak password, taken email — trigger these from fixed mock rules, e.g. `test@test.com` is always "taken"), loading spinner, success routes to `/verify-email/:token` notice screen. Login: email/password/OAuth, "Forgot password?" link, wrong-credentials and account-locked mock states, loading state. Forgot/reset: simple two-step flow with confirmation screens.
+Centered glass card on a subtle aurora-glow background. Signup: name, email, password+confirm, OAuth buttons (Google/GitHub, visually real, non-functional), required ToS/Privacy/Risk-Disclosure checkbox linking to the legal pages, "Create account" button, inline validation states (weak password, taken email  trigger these from fixed mock rules, e.g. `test@test.com` is always "taken"), loading spinner, success routes to `/verify-email/:token` notice screen. Login: email/password/OAuth, "Forgot password?" link, wrong-credentials and account-locked mock states, loading state. Forgot/reset: simple two-step flow with confirmation screens.
 
-### 7.5 Marketplace — public (`/marketplace`, `/marketplace/:presetId`)
-Search + filters (layer composition, Free/Paid, popularity, most forked, newest, performance tier). Grid of preset cards: title, author avatar+name, graph thumbnail, headline backtest stat with a small "past performance ≠ future results" disclaimer, price, fork count, star rating. Detail page: full description, author notes, layer breakdown diagram, sample backtest report, reviews/comments, and — since this is logged out — the clone button reads **"Sign up to clone"** and routes to signup.
+### 7.5 Marketplace  public (`/marketplace`, `/marketplace/:presetId`)
+Search + filters (layer composition, Free/Paid, popularity, most forked, newest, performance tier). Grid of preset cards: title, author avatar+name, graph thumbnail, headline backtest stat with a small "past performance ≠ future results" disclaimer, price, fork count, star rating. Detail page: full description, author notes, layer breakdown diagram, sample backtest report, reviews/comments, and  since this is logged out  the clone button reads **"Sign up to clone"** and routes to signup.
 
 ### 7.6 Docs (`/docs`, `/docs/:section`) and Blog (`/blog`)
-Docs home: searchable, categorized knowledge base (Getting Started / Layer Reference / API Reference), left nav + content pane, styled like a clean technical doc site (still glassy nav, but content pane goes to plain high-contrast text for readability). Blog: simple article-grid, optional but build it — card grid with title/date/excerpt.
+Docs home: searchable, categorized knowledge base (Getting Started / Layer Reference / API Reference), left nav + content pane, styled like a clean technical doc site (still glassy nav, but content pane goes to plain high-contrast text for readability). Blog: simple article-grid, optional but build it  card grid with title/date/excerpt.
 
 ### 7.7 Legal pages (`/legal/terms`, `/legal/privacy`, `/legal/risk-disclosure`, `/legal/refund-policy`)
-Plain, readable long-form text layout (not glass-heavy — legal content needs to read as serious and simple). **Risk Disclosure** must clearly state, near the top: (a) this is a tool, not investment advice, (b) default mode is paper trading with no real funds, (c) any real-fund tier is a separate, explicit opt-in with genuine risk of loss, (d) past backtest performance never guarantees future results. Write real, sensible placeholder legal copy for all four — don't leave them blank.
+Plain, readable long-form text layout (not glass-heavy  legal content needs to read as serious and simple). **Risk Disclosure** must clearly state, near the top: (a) this is a tool, not investment advice, (b) default mode is paper trading with no real funds, (c) any real-fund tier is a separate, explicit opt-in with genuine risk of loss, (d) past backtest performance never guarantees future results. Write real, sensible placeholder legal copy for all four  don't leave them blank.
 
 ### 7.8 Onboarding (`/onboarding/*`)
-Full-bleed, centered, distraction-free (no sidebar yet — this is pre-dashboard).
-- **Welcome**: "How would you describe yourself?" — Beginner/Intermediate/Advanced radio cards.
-- **Start**: two large choice cards — "Start from a template" (shows 3 curated starter presets) vs "Start from a blank canvas."
+Full-bleed, centered, distraction-free (no sidebar yet  this is pre-dashboard).
+- **Welcome**: "How would you describe yourself?"  Beginner/Intermediate/Advanced radio cards.
+- **Start**: two large choice cards  "Start from a template" (shows 3 curated starter presets) vs "Start from a blank canvas."
 - **Tour**: spotlight/tooltip overlay sequence over the real app shell (component library, canvas, Run Backtest button, Save as Preset, credits badge), Next/Skip on each.
-- **First node**: guided micro-task box "Drag a Data Source node onto the canvas to continue" — watch for that exact drag-drop action on a real (mock) canvas to unlock Next; include a Skip escape hatch.
-- **Done**: confetti/success moment (Framer Motion particle burst is fine), "Your bot is ready — let's run a backtest" → lands in the backtest page with defaults pre-filled.
+- **First node**: guided micro-task box "Drag a Data Source node onto the canvas to continue"  watch for that exact drag-drop action on a real (mock) canvas to unlock Next; include a Skip escape hatch.
+- **Done**: confetti/success moment (Framer Motion particle burst is fine), "Your bot is ready  let's run a backtest" → lands in the backtest page with defaults pre-filled.
 
 ### 7.9 Dashboard (`/app`)
 Header: "Welcome back, {name}" + 4 stat cards (Active bots · Backtests this month · Best-performing bot w/ return % · Credits remaining). "Continue building" row: cards for the 3 most recently edited bots with "Open in builder." Quick actions row: "+ New bot" · "Browse marketplace" · "Run a backtest." Activity feed: reverse-chronological, each item routes to its detail page. Conditional upgrade banner near usage limits. Empty state for brand-new users: illustration + "You haven't built a bot yet" + CTA.
 
-### 7.10 Builder / Canvas — "The Loom" (`/app/builder/new`, `/app/builder/:botId`, `/app/builder/:botId/version/:versionId`)
-**This is the centerpiece page — spend the most effort here.** Build on React Flow.
+### 7.10 Builder / Canvas  "The Loom" (`/app/builder/new`, `/app/builder/:botId`, `/app/builder/:botId/version/:versionId`)
+**This is the centerpiece page  spend the most effort here.** Build on React Flow.
 
 **Toolbar** (top, glass bar): editable bot name (inline text edit) · Save · "Save as Preset ▾" dropdown (new/update existing) · Version history dropdown (preview + Restore) · Undo/Redo · Validate · Templates (quick-insert common sub-graphs) · Share (link + visibility) · **Run Backtest** (primary pill button) · Go Live (secondary, gated/locked style if plan doesn't allow) · zoom controls (+/−/fit-to-screen/% readout).
 
-**Left panel — Component Library**: search box, category tabs/accordion for all 12 layers (Data Collection, Feature Engineering, Intelligence Agents, ML Prediction, Reinforcement Learning, Debate Layer, Confidence Engine, Risk Management, Execution, Trade Monitoring, Self-Learning, Memory). Each entry: draggable glass card with icon, name, one-liner, lock badge + unlock price if gated. Hover shows a tooltip with fuller description, inputs/outputs, "Learn more →" link to `/app/library/:componentId`. Dragging a card onto the canvas instantiates a node that auto-snaps into its correct layer band.
+**Left panel  Component Library**: search box, category tabs/accordion for all 12 layers (Data Collection, Feature Engineering, Intelligence Agents, ML Prediction, Reinforcement Learning, Debate Layer, Confidence Engine, Risk Management, Execution, Trade Monitoring, Self-Learning, Memory). Each entry: draggable glass card with icon, name, one-liner, lock badge + unlock price if gated. Hover shows a tooltip with fuller description, inputs/outputs, "Learn more →" link to `/app/library/:componentId`. Dragging a card onto the canvas instantiates a node that auto-snaps into its correct layer band.
 
-**Center — Canvas** (React Flow): infinite pan (space+drag, middle-mouse, two-finger scroll) / zoom (scroll/pinch), grid background with snap-to-grid toggle, minimap bottom-right (click-to-jump), marquee + shift-click multi-select with group move/delete/disable, snap guides + Align/Distribute toolbar on multi-select.
+**Center  Canvas** (React Flow): infinite pan (space+drag, middle-mouse, two-finger scroll) / zoom (scroll/pinch), grid background with snap-to-grid toggle, minimap bottom-right (click-to-jump), marquee + shift-click multi-select with group move/delete/disable, snap guides + Align/Distribute toolbar on multi-select.
 
-- **Layer bands**: colored, translucent horizontal bands behind grouped nodes, each labeled ("LAYER I — DATA COLLECTION," etc.), auto-expanding to fit contents, collapsible (click label → compact chip "3 nodes, 2 enabled"). Matching "Layer visibility" checklist in the left sidebar to toggle whole bands.
+- **Layer bands**: colored, translucent horizontal bands behind grouped nodes, each labeled ("LAYER I  DATA COLLECTION," etc.), auto-expanding to fit contents, collapsible (click label → compact chip "3 nodes, 2 enabled"). Matching "Layer visibility" checklist in the left sidebar to toggle whole bands.
 - **Node anatomy**: icon + name + layer-color accent border, input ports left / output ports right (color-coded by type: `MarketData`, `NewsFeed`, `FeatureVector`, `Signal`, `RiskDecision`, `ExecutionOrder`, `TradeOutcome`), on/off toggle switch in the header, status dot (grey=disabled, green=enabled+valid, amber=needs config, red=error), lock badge overlay replacing the toggle when gated.
 - **Node states**: enabled/valid (solid border, green dot); disabled (greyed, dashed outline, dashed connections); locked (padlock overlay, click opens Unlock modal not the inspector); needs-config (amber dot + warning tooltip listing missing fields); error during a run (red pulsing border + tooltip); active during a live run (subtle pulse/glow).
 - **Node interactions**: click → opens right Node Inspector; double-click → same + focuses first field; drag → move; right-click → context menu (Duplicate, Disable/Enable, Delete, View docs, Save as mini-preset); drag from a port → draw a connection.
 - **Connections**: dragging from an output to a compatible input connects them; while dragging, compatible ports highlight and incompatible drops are refused with an inline toast explaining why. Mock a few structural rules (e.g. Execution can't connect directly to raw Data Collection; Self-Learning needs a Trade Monitoring input) and surface violations via the **Validate** button, which lists every problem in the bottom Console with click-to-jump links.
 
-**Right panel — Node Inspector**: appears on node select. Name (editable), description, on/off toggle (mirrors header), all config fields for that node type (e.g. News Source: channel checkboxes, API key field, refresh interval slider; Risk Gate: threshold sliders, false-positive/negative cost weighting, max position size; Self-Learning: sub-module toggles, retraining frequency; Execution: venue/API select, order type, slippage tolerance), "Remove from canvas" (confirm if connected).
+**Right panel  Node Inspector**: appears on node select. Name (editable), description, on/off toggle (mirrors header), all config fields for that node type (e.g. News Source: channel checkboxes, API key field, refresh interval slider; Risk Gate: threshold sliders, false-positive/negative cost weighting, max position size; Self-Learning: sub-module toggles, retraining frequency; Execution: venue/API select, order type, slippage tolerance), "Remove from canvas" (confirm if connected).
 
-**Bottom panel — Console** (collapsible): validation warnings/errors, live log stream during a (simulated) run.
+**Bottom panel  Console** (collapsible): validation warnings/errors, live log stream during a (simulated) run.
 
-**Paywall interaction**: clicking a locked node opens an Unlock modal (glass, centered, no full-page redirect) — component name, description, price, embedded mock Razorpay checkout (§9.3). On mock success: modal closes, lock badge → normal toggle, toast "Unlocked — {component} is ready to configure." On cancel/fail: node stays locked, no interruption.
+**Paywall interaction**: clicking a locked node opens an Unlock modal (glass, centered, no full-page redirect)  component name, description, price, embedded mock Razorpay checkout (§9.3). On mock success: modal closes, lock badge → normal toggle, toast "Unlocked  {component} is ready to configure." On cancel/fail: node stays locked, no interruption.
 
 **Sub-flows**: select a connected group → "Save as mini-preset" → appears under "My saved blocks" in the library, draggable as a single unit elsewhere.
 
@@ -238,10 +238,10 @@ Grid/List toggle. Bot card: name, mini graph thumbnail (a tiny static render of 
 Header: name, status badge, "Open in builder." Tabs: Overview | Backtests | Live | Settings. Overview tab: graph thumbnail (click → builder), summary stats, recent backtest runs list, "Publish to marketplace" button.
 
 ### 7.13 Backtest (`/app/bots/:botId/backtest`, `/app/bots/:botId/backtest/:runId`)
-Config panel: date range picker, asset/pair selector, starting capital, fee/slippage inputs, random seed, test-type tabs (Historical/Walk-forward/Monte Carlo/Paper trading/A-B compare). Run button → progress bar + streaming fake log lines → **Results dashboard**: equity curve (Recharts area/line), metric cards (Total return, Win rate, Max drawdown, Sharpe ratio, # trades, Avg R-multiple), sortable/filterable trade log table (entry/exit time, size, P&L, triggering node, confidence score), per-layer contribution panel ("Risk Gate blocked 12 trades, estimated avoided loss ₹X"), self-learning insights panel (new rules derived, notable post-mortems), action buttons (Export report PDF/CSV — mock the download, Save as new preset, Compare to previous run, Promote to live). First-run empty state explains what a backtest does. Always show the "past performance does not guarantee future results" line near results.
+Config panel: date range picker, asset/pair selector, starting capital, fee/slippage inputs, random seed, test-type tabs (Historical/Walk-forward/Monte Carlo/Paper trading/A-B compare). Run button → progress bar + streaming fake log lines → **Results dashboard**: equity curve (Recharts area/line), metric cards (Total return, Win rate, Max drawdown, Sharpe ratio, # trades, Avg R-multiple), sortable/filterable trade log table (entry/exit time, size, P&L, triggering node, confidence score), per-layer contribution panel ("Risk Gate blocked 12 trades, estimated avoided loss ₹X"), self-learning insights panel (new rules derived, notable post-mortems), action buttons (Export report PDF/CSV  mock the download, Save as new preset, Compare to previous run, Promote to live). First-run empty state explains what a backtest does. Always show the "past performance does not guarantee future results" line near results.
 
-### 7.14 Live monitor — "Aether View" (`/app/bots/:botId/live`)
-Status control (Running/Paused/Stopped) + unmistakable big red **"Stop Bot"** kill-switch. Streaming equity/P&L chart (animate new points in via Framer Motion/Recharts). Open positions table. Live activity log (auto-scrolling console of decisions). Risk limits display (max daily loss, position size caps — edits require re-confirmation modal). Alert-settings shortcut → `/app/account/notifications`. Persistent banner: "Paper trading — no real funds are being used" (styled as a calm blue/glass banner) — swap to a bold red "Real capital is at risk" banner only if the mock account state has a verified real-fund tier active.
+### 7.14 Live monitor  "Aether View" (`/app/bots/:botId/live`)
+Status control (Running/Paused/Stopped) + unmistakable big red **"Stop Bot"** kill-switch. Streaming equity/P&L chart (animate new points in via Framer Motion/Recharts). Open positions table. Live activity log (auto-scrolling console of decisions). Risk limits display (max daily loss, position size caps  edits require re-confirmation modal). Alert-settings shortcut → `/app/account/notifications`. Persistent banner: "Paper trading  no real funds are being used" (styled as a calm blue/glass banner)  swap to a bold red "Real capital is at risk" banner only if the mock account state has a verified real-fund tier active.
 
 ### 7.15 Bot settings (`/app/bots/:botId/settings`)
 Rename, description, visibility (Private/Unlisted/Public radio), collaborators section (build the UI, can be visually "coming soon"), danger zone (Archive, Delete with confirm modal).
@@ -249,11 +249,11 @@ Rename, description, visibility (Private/Unlisted/Public radio), collaborators s
 ### 7.16 My Presets (`/app/presets`, `/app/presets/:presetId`)
 List: name, thumbnail, created date, visibility badge. Row actions: Load into builder, Duplicate, Rename, Delete, Publish to marketplace, Share (generate link + visibility). Expandable version history per preset.
 
-### 7.17 Marketplace — authenticated (`/app/marketplace`, `/app/marketplace/:presetId`)
+### 7.17 Marketplace  authenticated (`/app/marketplace`, `/app/marketplace/:presetId`)
 Same layout as the public marketplace but detail pages now show a real **"Clone to my bots"** button (may show a credit-deduction confirm or open the mock Razorpay modal), plus a "Report" moderation link and a reviews/comments section with a comment composer.
 
 ### 7.18 Publish flow (`/app/marketplace/publish/:botId`)
-Multi-step wizard (stepper UI, animated step transitions): 1) visibility (Public free/Public paid/Unlisted), 2) if paid — price + revenue-share terms agreement, 3) description + category tags, 4) attach a required backtest report (block progress if the bot has zero saved runs), 5) review & publish summary screen.
+Multi-step wizard (stepper UI, animated step transitions): 1) visibility (Public free/Public paid/Unlisted), 2) if paid  price + revenue-share terms agreement, 3) description + category tags, 4) attach a required backtest report (block progress if the bot has zero saved runs), 5) review & publish summary screen.
 
 ### 7.19 Creator dashboard (`/app/creator/dashboard`)
 Only meaningfully shown when the mock user has ≥1 published preset. Earnings summary (total, this month) + payout status, table of published presets (downloads/clones, revenue, rating, reviews), "Request payout" button.
@@ -268,7 +268,7 @@ Grid/list of every component across all layers, filterable by layer and plan tie
 - **Home**: current plan card + "Change plan," usage meters (progress bars: backtests this month, active bots, live bots, storage), credit balance + "Top up," recent invoices preview + "View all," payment method preview + "Manage."
 - **Plans**: same comparison table as public pricing, buttons read Upgrade/Downgrade/Current plan, trigger the mock Razorpay subscription-change flow.
 - **Topup**: preset credit bundles (₹99/₹499/₹999) + custom amount field, "Buy credits" → mock Razorpay checkout, explanation of what credits buy.
-- **History**: table (date, description, amount, status, downloadable invoice — mock PDF download).
+- **History**: table (date, description, amount, status, downloadable invoice  mock PDF download).
 - **Payment methods**: saved cards/UPI mandates list, "Add new" (mock Razorpay), remove, default-method selector.
 
 ### 7.23 Account (`/app/account/*`)
@@ -279,7 +279,7 @@ Grid/list of every component across all layers, filterable by layer and plan tie
 - **Danger zone**: export all data (mock JSON download), delete account (multi-step confirm, type-to-confirm pattern).
 
 ### 7.24 Support (`/app/notifications`, `/app/help`, `/app/search`)
-Notifications center: full-page bell-dropdown equivalent, mark-as-read, filter by type. Help: searchable FAQ/docs + "Contact support" form + status-page link. Global search: results grouped by type (Bots/Presets/Marketplace/Docs), fully keyboard-navigable — this is the same engine as the Cmd/Ctrl+K palette, just full-page.
+Notifications center: full-page bell-dropdown equivalent, mark-as-read, filter by type. Help: searchable FAQ/docs + "Contact support" form + status-page link. Global search: results grouped by type (Bots/Presets/Marketplace/Docs), fully keyboard-navigable  this is the same engine as the Cmd/Ctrl+K palette, just full-page.
 
 ---
 
@@ -293,32 +293,32 @@ Reference the access matrix while building empty/locked states: logged-out users
 
 Nothing in this app calls a real API. Build it exactly like a real app, minus the server:
 
-1. **`/mock` or `/data` directory** with realistic JSON/TS fixtures: users, bots (with realistic node/edge graphs), backtest runs (with generated equity-curve series, trade logs, metrics), marketplace presets (with authors, stats, reviews), the full 12-layer component catalog (name, description, layer, lock status, price, inputs/outputs per component — invent ~6–10 components per layer), notifications, invoices, plans/pricing.
-2. **Zustand stores with `persist`** so anything the user "creates" (a new bot, a saved preset, an unlocked node, a changed setting) survives a refresh — this is what makes the demo feel real.
+1. **`/mock` or `/data` directory** with realistic JSON/TS fixtures: users, bots (with realistic node/edge graphs), backtest runs (with generated equity-curve series, trade logs, metrics), marketplace presets (with authors, stats, reviews), the full 12-layer component catalog (name, description, layer, lock status, price, inputs/outputs per component  invent ~6–10 components per layer), notifications, invoices, plans/pricing.
+2. **Zustand stores with `persist`** so anything the user "creates" (a new bot, a saved preset, an unlocked node, a changed setting) survives a refresh  this is what makes the demo feel real.
 3. **Simulated latency**: wrap mock "API calls" in a small `await delay(400–900ms)` so loading/skeleton states are actually visible and feel real, not instant.
-4. **Simulated backtest engine**: on "Run Backtest," don't just show static canned results — generate a plausible randomized-but-bounded equity curve and metric set each time (seeded by the config inputs) so repeated runs feel alive, with a real animated progress bar and streaming fake log lines.
-5. **Simulated Razorpay**: build a checkout modal that looks like a real Razorpay Checkout overlay (card/UPI tabs, amount, pay button) but has an obvious dev affordance — e.g. buttons for "Simulate success" / "Simulate failure" — instead of loading the real SDK. Wire real success/failure handling (toasts, state updates, modal close) to those simulated outcomes.
+4. **Simulated backtest engine**: on "Run Backtest," don't just show static canned results  generate a plausible randomized-but-bounded equity curve and metric set each time (seeded by the config inputs) so repeated runs feel alive, with a real animated progress bar and streaming fake log lines.
+5. **Simulated Razorpay**: build a checkout modal that looks like a real Razorpay Checkout overlay (card/UPI tabs, amount, pay button) but has an obvious dev affordance  e.g. buttons for "Simulate success" / "Simulate failure"  instead of loading the real SDK. Wire real success/failure handling (toasts, state updates, modal close) to those simulated outcomes.
 6. **Simulated live stream**: on the Aether View live monitor, use a `setInterval` to append fake ticks/log lines/position updates while "Running" is active, and stop cleanly on "Stop Bot."
 
 ---
 
 ## 10. UI writing voice
 
-Keep copy tight, plain, and consistent — this is a serious tool, not a landing-page brochure once you're past the marketing site:
+Keep copy tight, plain, and consistent  this is a serious tool, not a landing-page brochure once you're past the marketing site:
 - Name things by what the user controls, not how the system is built (e.g. "Notifications," never "webhook config" in user-facing copy).
 - Buttons say exactly what happens: "Save changes," not "Submit." Whatever a button says, the resulting toast should echo it ("Publish" → "Published").
-- Errors state what happened and how to fix it, plainly — no apologizing, no vague "Something went wrong" without a next step.
+- Errors state what happened and how to fix it, plainly  no apologizing, no vague "Something went wrong" without a next step.
 - Empty states are an invitation to act, not a mood: a short line + a clear primary action, every time.
 - The Risk Disclosure language ("not investment advice," "paper trading by default," etc.) should echo consistently in every place backtest/live results are shown, not just the legal page.
 
 ---
 
-## 11. Quality floor — non-negotiable across every page
+## 11. Quality floor  non-negotiable across every page
 
-- Fully responsive down to mobile for every marketing/dashboard/account/billing page. The Builder canvas is desktop-primary (like a pro creative tool) — on small screens show a clean "Best experienced on a larger screen" state rather than a broken cramped canvas.
+- Fully responsive down to mobile for every marketing/dashboard/account/billing page. The Builder canvas is desktop-primary (like a pro creative tool)  on small screens show a clean "Best experienced on a larger screen" state rather than a broken cramped canvas.
 - Visible keyboard focus states everywhere (glass-appropriate focus ring, not a browser-default blue outline that clashes with the theme).
 - `prefers-reduced-motion` respected everywhere per §4.
-- Color contrast checked especially on glass surfaces — text must stay legible over blur.
+- Color contrast checked especially on glass surfaces  text must stay legible over blur.
 - Every icon-only button has an `aria-label`. Every form field has a real label. Modals trap focus and are dismissible via `Escape`.
 
 ---

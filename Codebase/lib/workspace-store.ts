@@ -332,7 +332,7 @@ export const useWorkspace = create<WorkspaceState>()(
       version: 1,
       partialize: ({ hydrated, ...rest }) => rest,
       onRehydrateStorage: () => (state) => {
-        if (state && (!state.bots || state.bots.length === 0)) {
+        if (!state || !state.bots || state.bots.length === 0) {
           useWorkspace.setState(seed())
         }
         useWorkspace.setState({ hydrated: true })

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import type { ComponentDef } from '@/mock/layers'
 import { useBuilder } from '@/lib/builder-store'
-import { useBot, useWorkspace } from '@/lib/workspace-store'
+import { useBot, useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { issueCounts, validateGraph, type Issue } from '@/lib/validate'
 import { toast, useSession } from '@/lib/store'
 import { BuilderToolbar } from '@/components/builder/builder-toolbar'
@@ -30,7 +30,7 @@ export default function BuilderPage() {
   const { botId } = useParams<{ botId: string }>()
   const router = useRouter()
   const bot = useBot(botId)
-  const hydrated = useWorkspace((s) => s.hydrated)
+  const hydrated = useHydrated()
   const { saveGraph, updateBot, savePreset, snapshotVersion } = useWorkspace()
   const { plan, unlocked } = useSession()
 

@@ -1,322 +1,602 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background,
   BackgroundVariant,
+  ConnectionLineType,
+  ConnectionMode,
+  MiniMap,
   ReactFlow,
   ReactFlowProvider,
-  useNodesState,
+  SelectionMode,
   useReactFlow,
-  useViewport,
   type Edge,
+  type EdgeChange,
   type Node,
   type NodeChange,
-  type OnSelectionChangeParams,
+  type OnConnect,
+  type OnConnectEnd,
+  type OnConnectStart,
+  type ReactFlowInstance,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { AlertTriangle } from 'lucide-react'
-import { COMPONENT_MAP, LAYER_MAP, LAYERS, PORT_COLORS } from '@/mock/layers'
-import {
-  BAND_H,
-  NODE_H,
-  NODE_W,
-  computeBands,
-  nodePosition,
-  useBuilder,
-  type BandLayout,
-} from '@/lib/builder-store'
-import { portsCompatible } from '@/lib/validate'
+
+import { COMPONENT_MAP, LAYERS, LAYER_MAP } from '@/mock/layers'
 import { hasComponent } from '@/lib/entitlements'
 import { useSession } from '@/lib/store'
-import { useWorkspace } from '@/lib/workspace-store'
-import { LoomNode, type LoomNodeData } from '@/components/builder/node-card'
-import { DRAG_MIME, DRAG_PRESET_MIME } from '@/components/builder/library-panel'
+import {
+  CANVAS_HEIGHT,
+  LANE_H,
+  NODE_H,
+  NODE_W,
+  computeLanes,
+  useBuilder,
+} from '@/lib/builder-store'
+import { canConnect } from '@/lib/validate'
+import { cn } from '@/lib/utils'
+import { NodeCard, type NodeCardData } from './node-card'
+import { StickyNote } from './sticky-note'
+import { FrameBox } from './frame-box'
+import { CanvasContextMenu } from './canvas-context-menu'
+import { ViewportHud } from './viewport-hud'
 
-const nodeTypes = { loom: LoomNode }
+const nodeTypes = { component: NodeCard, note: StickyNote, frame: FrameBox }
 
-/** Tinted horizontal bands, drawn in flow space behind the nodes. */
-function LayerBands({ bands, width }: { bands: BandLayout[]; width: number }) {
-  const { x, y, zoom } = useViewport()
+const GRID_VARIANT: Record<string, BackgroundVariant | null> = {
+  dots: BackgroundVariant.Dots,
+  lines: BackgroundVariant.Lines,
+  off: null,
+}
+
+function LaneGuides() {
+  const lanes = useMemo(computeLanes, [])
+  const { collapsedLayers, toggleLayer } = useBuilder()
 
   return (
-    <div
-      aria-hidden
-      className="pointer-events-none absolute inset-0 overflow-hidden"
-      style={{ zIndex: 0 }}
-    >
-      <div
-        className="absolute top-0 left-0 origin-top-left"
-        style={{ transform: `translate(${x}px, ${y}px) scale(${zoom})` }}
-      >
-        {bands.map((band) => {
-          const layer = LAYER_MAP[band.layer]
-          return (
+    <div className="pointer-events-none absolute inset-0" aria-hidden>
+      {lanes.map((lane) => {
+        const meta = LAYER_MAP[lane.layer]
+        const collapsed = collapsedLayers.includes(lane.layer)
+        return (
+          <div
+            key={lane.layer}
+            className="absolute left-0 flex w-[100000px] items-stretch"
+            style={{ top: lane.top, height: lane.height }}
+          >
             <div
-              key={band.layer}
-              className="absolute left-0 border-b border-dashed"
+              className="absolute inset-0 transition-opacity duration-300"
               style={{
-                top: band.top,
-                height: band.height,
-                width,
-                borderColor: `${layer.hue}20`,
-                background: `linear-gradient(90deg, ${layer.hue}0a, transparent 45%)`,
+                background: `linear-gradient(90deg, color-mix(in oklab, ${meta.hue} 4%, transparent) 0%, transparent 60%)`,
+                borderTop: '1px stroke color-mix(in oklab, var(--foreground) 5%, transparent)',
               }}
+            />
+            <button
+              type="button"
+              onClick={() => toggleLayer(lane.layer)}
+              className={cn(
+                'pointer-events-auto absolute top-3 left-4 flex items-center gap-2 rounded-[var(--radius-pill)] border border-border/60 px-2.5 py-1 text-left backdrop-blur-md transition-all hover:scale-105',
+                collapsed ? 'bg-secondary' : 'bg-background/70 hover:bg-secondary',
+              )}
             >
               <span
-                className="absolute top-2 left-3 flex items-baseline gap-2 text-[11px] font-medium whitespace-nowrap"
-                style={{ color: `${layer.hue}b0` }}
+                className="tabular text-[9.5px] font-bold tracking-[0.1em]"
+                style={{ color: meta.hue }}
               >
-                <span className="tabular">{layer.roman}</span>
-                <span>{layer.name}</span>
-                {band.collapsed ? <span className="opacity-70">· collapsed</span> : null}
+                {meta.roman}
               </span>
-            </div>
-          )
-        })}
-      </div>
+              <span className="text-[10.5px] font-medium tracking-[0.02em] text-muted-foreground">
+                {meta.name}
+              </span>
+            </button>
+          </div>
+        )
+      })}
     </div>
   )
 }
 
-function CanvasInner() {
+function FlowCanvas({
+  onRequestUnlock,
+}: {
+  onRequestUnlock: (componentId: string) => void
+}) {
   const {
-    nodes: storeNodes,
-    edges: storeEdges,
+    nodes,
+    edges,
+    notes,
+    frames,
     selection,
+    selectedEdges,
+    tool,
+    view,
     collapsedLayers,
-    issues,
-    validated,
-    rejection,
     focusToken,
     addNode,
-    addBlock,
     moveNodes,
-    connect,
+    moveNote,
     setSelection,
-    clearRejection,
+    setSelectedEdges,
+    connect,
+    paste,
+    addNote,
+    addFrame,
+    nudgeSelection,
+    removeNodes,
+    duplicateSelection,
+    copySelection,
+    selectAll,
+    undo,
+    redo,
+    disconnect,
   } = useBuilder()
 
   const { plan, unlocked } = useSession()
-  const myPresets = useWorkspace((s) => s.myPresets)
-  const { screenToFlowPosition } = useReactFlow()
+  const flow = useReactFlow()
   const wrapper = useRef<HTMLDivElement>(null)
+  const [instance, setInstance] = useState<ReactFlowInstance | null>(null)
+  const [connectingFrom, setConnectingFrom] = useState<string | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; nodeId?: string } | null>(null)
 
-  const access = useMemo(() => ({ plan, unlocked }), [plan, unlocked])
-  const bands = useMemo(() => computeBands(new Set(collapsedLayers)), [collapsedLayers])
+  const hiddenLayers = useMemo(() => new Set(collapsedLayers), [collapsedLayers])
 
-  /** Node ids flagged by the last validation pass, so cards can show red. */
-  const errorIds = useMemo(
-    () =>
-      new Set(
-        validated
-          ? issues.filter((i) => i.level === 'error').flatMap((i) => i.nodeIds ?? [])
-          : [],
-      ),
-    [issues, validated],
+  /** Converts a pointer event into canvas coordinates. */
+  const toCanvas = useCallback(
+    (clientX: number, clientY: number) => flow.screenToFlowPosition({ x: clientX, y: clientY }),
+    [flow],
   )
 
-  const canvasWidth = useMemo(
-    () => Math.max(2400, ...storeNodes.map((n) => n.x + NODE_W + 400)),
-    [storeNodes],
-  )
+  /* ---------------- Graph → React Flow ---------------- */
 
-  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<Node<LoomNodeData>>([])
+  const rfNodes = useMemo<Node[]>(() => {
+    const frameNodes: Node[] = frames.map((f) => ({
+      id: f.id,
+      type: 'frame',
+      position: { x: f.x, y: f.y },
+      data: { ...f },
+      draggable: tool === 'select',
+      selectable: false,
+      zIndex: -1,
+    }))
 
-  /**
-   * React Flow owns positions while dragging, so the store is only mirrored in
-   * when something structural actually changes. This signature is that trigger.
-   */
-  const signature = useMemo(
-    () =>
-      JSON.stringify([
-        storeNodes.map((n) => [n.id, n.x, n.enabled, n.needsConfig, n.componentId]),
-        collapsedLayers,
-        [...errorIds],
-        unlocked.length,
-        plan,
-        focusToken,
-      ]),
-    [storeNodes, collapsedLayers, errorIds, unlocked.length, plan, focusToken],
-  )
-
-  useEffect(() => {
-    setRfNodes(
-      storeNodes.map((n) => {
+    const componentNodes: Node[] = nodes
+      .filter((n) => {
         const comp = COMPONENT_MAP[n.componentId]
-        const collapsed = comp ? collapsedLayers.includes(comp.layer) : false
+        return comp ? !hiddenLayers.has(comp.layer) : true
+      })
+      .map((n) => {
+        const comp = COMPONENT_MAP[n.componentId]
+        const locked = comp ? !hasComponent(comp.id, { plan, unlocked }) : false
+        const source = connectingFrom ? nodes.find((x) => x.id === connectingFrom) : null
+        const candidate =
+          source && source.id !== n.id ? canConnect(source, n).ok : undefined
+
         return {
           id: n.id,
-          type: 'loom',
-          position: nodePosition(n, bands),
+          type: 'component',
+          position: { x: n.x, y: n.y },
           selected: selection.includes(n.id),
-          hidden: collapsed,
+          draggable: tool === 'select',
           data: {
             componentId: n.componentId,
             enabled: n.enabled,
-            needsConfig: n.needsConfig ?? false,
-            locked: !hasComponent(n.componentId, access),
-            hasError: errorIds.has(n.id),
-          },
+            needsConfig: n.needsConfig,
+            locked,
+            candidate: candidate === true,
+            blocked: candidate === false,
+          } satisfies NodeCardData,
         }
-      }),
-    )
-    // `selection` is deliberately excluded: React Flow drives selection itself.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature, bands, access, setRfNodes])
+      })
 
-  const edges = useMemo<Edge[]>(
+    const noteNodes: Node[] = notes.map((nt) => ({
+      id: nt.id,
+      type: 'note',
+      position: { x: nt.x, y: nt.y },
+      data: { ...nt },
+      draggable: tool === 'select',
+      selectable: false,
+      zIndex: 20,
+    }))
+
+    return [...frameNodes, ...componentNodes, ...noteNodes]
+  }, [
+    frames,
+    nodes,
+    notes,
+    selection,
+    tool,
+    hiddenLayers,
+    plan,
+    unlocked,
+    connectingFrom,
+  ])
+
+  const rfEdges = useMemo<Edge[]>(
     () =>
-      storeEdges.map((e) => {
-        const source = storeNodes.find((n) => n.id === e.source)
-        const target = storeNodes.find((n) => n.id === e.target)
-        const shared =
-          source && target ? portsCompatible(source.componentId, target.componentId) : []
-        const port = shared[0]
-        const stroke = port ? PORT_COLORS[port] : 'var(--border)'
-        const muted = source && target ? !source.enabled || !target.enabled : false
-
-        return {
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          sourceHandle: port ?? null,
-          targetHandle: port ?? null,
-          animated: !muted,
-          style: { stroke, strokeWidth: 1.5, opacity: muted ? 0.3 : 0.85 },
-        }
-      }),
-    [storeEdges, storeNodes],
+      edges
+        .filter((e) => {
+          const s = nodes.find((n) => n.id === e.source)
+          const t = nodes.find((n) => n.id === e.target)
+          if (!s || !t) return false
+          const sl = COMPONENT_MAP[s.componentId]?.layer
+          const tl = COMPONENT_MAP[t.componentId]?.layer
+          return !(sl && hiddenLayers.has(sl)) && !(tl && hiddenLayers.has(tl))
+        })
+        .map((e) => {
+          const active = selectedEdges.includes(e.id)
+          const touching = selection.includes(e.source) || selection.includes(e.target)
+          const source = nodes.find((n) => n.id === e.source)
+          const hue = source
+            ? LAYER_MAP[COMPONENT_MAP[source.componentId]?.layer ?? 'data'].hue
+            : 'var(--brand)'
+          return {
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            type:
+              view.edgeKind === 'bezier'
+                ? 'default'
+                : view.edgeKind === 'straight'
+                  ? 'straight'
+                  : 'smoothstep',
+            animated: view.animateEdges && (touching || active),
+            selected: active,
+            style: {
+              stroke: active ? 'var(--brand)' : hue,
+              strokeWidth: active ? 2.25 : touching ? 1.9 : 1.4,
+              opacity: active || touching ? 1 : 0.5,
+            },
+          }
+        }),
+    [edges, nodes, selectedEdges, selection, view.edgeKind, view.animateEdges, hiddenLayers],
   )
 
-  /** Commits horizontal movement only — vertical position belongs to the band. */
-  const handleNodeDragStop = useCallback(() => {
-    const moves = rfNodes
-      .map((n) => {
-        const original = storeNodes.find((s) => s.id === n.id)
-        return original && Math.round(n.position.x) !== original.x
-          ? { id: n.id, x: n.position.x }
-          : null
-      })
-      .filter((m): m is { id: string; x: number } => m !== null)
-    if (moves.length > 0) moveNodes(moves)
-  }, [rfNodes, storeNodes, moveNodes])
+  /* ---------------- Interaction ---------------- */
 
-  const handleSelectionChange = useCallback(
-    ({ nodes }: OnSelectionChangeParams) => setSelection(nodes.map((n) => n.id)),
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      const moves = changes
+        .filter(
+          (c): c is NodeChange & { type: 'position'; id: string; position: { x: number; y: number } } =>
+            c.type === 'position' && 'position' in c && !!c.position && c.dragging === false,
+        )
+        .map((c) => ({ id: c.id, x: c.position.x, y: c.position.y }))
+
+      if (moves.length > 0) {
+        const noteIds = new Set(notes.map((n) => n.id))
+        const frameIds = new Set(frames.map((f) => f.id))
+        const nodeMoves = moves.filter((m) => !noteIds.has(m.id) && !frameIds.has(m.id))
+
+        for (const m of moves) {
+          if (noteIds.has(m.id)) moveNote(m.id, m.x, m.y)
+        }
+        if (nodeMoves.length > 0) moveNodes(nodeMoves)
+      }
+
+      const selChanges = changes.filter(
+        (c): c is NodeChange & { type: 'select'; id: string; selected: boolean } => c.type === 'select',
+      )
+      if (selChanges.length > 0) {
+        const picked = selChanges.filter((c) => c.selected).map((c) => c.id)
+        if (picked.length > 0) {
+          setSelection(picked)
+        }
+      }
+    },
+    [moveNodes, moveNote, notes, frames, setSelection],
+  )
+
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      const picked = changes
+        .filter((c): c is EdgeChange & { type: 'select'; id: string; selected: boolean } => c.type === 'select')
+        .filter((c) => c.selected)
+        .map((c) => c.id)
+      if (changes.some((c) => c.type === 'select')) setSelectedEdges(picked)
+    },
+    [setSelectedEdges],
+  )
+
+  const onConnect = useCallback<OnConnect>(
+    (params) => {
+      if (params.source && params.target) connect(params.source, params.target)
+    },
+    [connect],
+  )
+
+  const onConnectStart = useCallback<OnConnectStart>(
+    (_, { nodeId }) => setConnectingFrom(nodeId ?? null),
+    [],
+  )
+
+  const onConnectEnd = useCallback<OnConnectEnd>(() => setConnectingFrom(null), [])
+
+  /** Library drops and tool-driven clicks both create canvas content. */
+  const onDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault()
+      const componentId =
+        event.dataTransfer.getData('application/x-aether-component') ||
+        event.dataTransfer.getData('application/aether-component')
+      const pos = toCanvas(event.clientX, event.clientY)
+
+      if (componentId) {
+        addNode(componentId, pos.x - NODE_W / 2, pos.y - NODE_H / 2)
+      }
+    },
+    [addNode, toCanvas],
+  )
+
+  const onNodeClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      setSelection([node.id])
+    },
     [setSelection],
   )
 
-  const handleNodesChange = useCallback(
-    (changes: NodeChange<Node<LoomNodeData>>[]) => {
-      // Removals are routed through the store so history stays correct.
-      const removals = changes.filter((c) => c.type === 'remove').map((c) => c.id)
-      if (removals.length > 0) {
-        useBuilder.getState().removeNodes(removals)
-        return
+  const onPaneClick = useCallback(
+    (event: React.MouseEvent) => {
+      setMenu(null)
+      const pos = toCanvas(event.clientX, event.clientY)
+      if (tool === 'note') addNote('note', pos.x, pos.y)
+      else if (tool === 'comment') addNote('comment', pos.x, pos.y)
+      else if (tool === 'frame') addFrame(pos.x, pos.y)
+      else {
+        setSelection([])
+        setSelectedEdges([])
       }
-      onNodesChange(changes)
     },
-    [onNodesChange],
+    [tool, toCanvas, addNote, addFrame, setSelection, setSelectedEdges],
   )
 
-  const handleDrop = useCallback(
-    (event: React.DragEvent) => {
+  const onPaneContextMenu = useCallback((event: React.MouseEvent | MouseEvent) => {
+    event.preventDefault()
+    const rect = wrapper.current?.getBoundingClientRect()
+    setMenu({
+      x: event.clientX - (rect?.left ?? 0),
+      y: event.clientY - (rect?.top ?? 0),
+    })
+  }, [])
+
+  const onNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: Node) => {
       event.preventDefault()
-      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
-
-      const componentId = event.dataTransfer.getData(DRAG_MIME)
-      if (componentId) {
-        addNode(componentId, position.x - NODE_W / 2, position.y)
-        return
-      }
-
-      const presetId = event.dataTransfer.getData(DRAG_PRESET_MIME)
-      if (presetId) {
-        const preset = myPresets.find((p) => p.id === presetId)
-        if (preset?.nodes?.length) addBlock(preset.nodes, preset.edges ?? [])
-      }
+      const rect = wrapper.current?.getBoundingClientRect()
+      if (!selection.includes(node.id)) setSelection([node.id])
+      setMenu({
+        x: event.clientX - (rect?.left ?? 0),
+        y: event.clientY - (rect?.top ?? 0),
+        nodeId: node.id,
+      })
     },
-    [screenToFlowPosition, addNode, addBlock, myPresets],
+    [selection, setSelection],
   )
+
+  const onNodeDoubleClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      const graphNode = nodes.find((n) => n.id === node.id)
+      if (!graphNode) return
+      const comp = COMPONENT_MAP[graphNode.componentId]
+      if (comp && !hasComponent(comp.id, { plan, unlocked })) onRequestUnlock(comp.id)
+    },
+    [nodes, plan, unlocked, onRequestUnlock],
+  )
+
+  /* ---------------- Keyboard ---------------- */
 
   useEffect(() => {
-    if (!rejection) return
-    const timer = setTimeout(clearRejection, 3600)
-    return () => clearTimeout(timer)
-  }, [rejection, clearRejection])
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (
+        target &&
+        (target.isContentEditable ||
+          ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+      )
+        return
+
+      const mod = e.metaKey || e.ctrlKey
+
+      if (mod && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        e.shiftKey ? redo() : undo()
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        selectAll()
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'c') {
+        copySelection()
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'v') {
+        paste()
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        duplicateSelection()
+        return
+      }
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        e.preventDefault()
+        if (selectedEdges.length > 0) disconnect(selectedEdges)
+        if (selection.length > 0) removeNodes(selection)
+        return
+      }
+      if (e.key.startsWith('Arrow')) {
+        e.preventDefault()
+        const step = e.shiftKey ? 40 : 8
+        const map: Record<string, [number, number]> = {
+          ArrowLeft: [-step, 0],
+          ArrowRight: [step, 0],
+          ArrowUp: [0, -step],
+          ArrowDown: [0, step],
+        }
+        const [dx, dy] = map[e.key] ?? [0, 0]
+        nudgeSelection(dx, dy)
+      }
+    }
+
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [
+    undo,
+    redo,
+    selectAll,
+    copySelection,
+    paste,
+    duplicateSelection,
+    removeNodes,
+    disconnect,
+    nudgeSelection,
+    selection,
+    selectedEdges,
+  ])
+
+  /** Pans to the selection whenever something outside the canvas changes it. */
+  useEffect(() => {
+    if (!instance || selection.length === 0) return
+    const picked = nodes.filter((n) => selection.includes(n.id))
+    if (picked.length === 0) return
+    instance.fitBounds(
+      {
+        x: Math.min(...picked.map((n) => n.x)) - 160,
+        y: Math.min(...picked.map((n) => n.y)) - 120,
+        width: Math.max(...picked.map((n) => n.x + NODE_W)) - Math.min(...picked.map((n) => n.x)) + 320,
+        height: Math.max(...picked.map((n) => n.y + NODE_H)) - Math.min(...picked.map((n) => n.y)) + 240,
+      },
+      { duration: 420, padding: 0.1 },
+    )
+    // Only react to explicit focus requests, not every selection click.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusToken])
+
+  const gridVariant = GRID_VARIANT[view.grid]
 
   return (
-    <div ref={wrapper} className="relative min-h-0 flex-1">
+    <div
+      ref={wrapper}
+      className={cn(
+        'relative h-full min-h-0 flex-1',
+        tool === 'hand' && 'cursor-grab active:cursor-grabbing',
+        (tool === 'note' || tool === 'comment' || tool === 'frame') && 'cursor-crosshair',
+      )}
+      onDrop={onDrop}
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+      }}
+    >
       <ReactFlow
         nodes={rfNodes}
-        edges={edges}
+        edges={rfEdges}
         nodeTypes={nodeTypes}
-        onNodesChange={handleNodesChange}
-        onNodeDragStop={handleNodeDragStop}
-        onSelectionChange={handleSelectionChange}
-        onConnect={({ source, target }) => source && target && connect(source, target)}
-        onEdgesDelete={(deleted) => useBuilder.getState().disconnect(deleted.map((e) => e.id))}
-        onDrop={handleDrop}
-        onDragOver={(e) => {
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'copy'
-        }}
-        onPaneClick={() => setSelection([])}
-        defaultViewport={{ x: 40, y: 24, zoom: 0.85 }}
-        minZoom={0.25}
-        maxZoom={1.75}
-        selectionOnDrag
-        panOnDrag={[1, 2]}
+        onInit={setInstance}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
+        onConnectStart={onConnectStart}
+        onConnectEnd={onConnectEnd}
+        onPaneClick={onPaneClick}
+        onPaneContextMenu={onPaneContextMenu}
+        onNodeClick={onNodeClick}
+        onNodeContextMenu={onNodeContextMenu}
+        onNodeDoubleClick={onNodeDoubleClick}
+        connectionMode={ConnectionMode.Loose}
+        connectionLineType={ConnectionLineType.Bezier}
+        connectionLineStyle={{ stroke: 'var(--brand)', strokeWidth: 2, strokeDasharray: '4 3' }}
+        selectionMode={SelectionMode.Partial}
+        selectionOnDrag={tool === 'select'}
+        panOnDrag={tool === 'hand' ? true : [1, 2]}
         panOnScroll
         zoomOnDoubleClick={false}
-        deleteKeyCode={['Backspace', 'Delete']}
-        multiSelectionKeyCode={['Meta', 'Shift', 'Control']}
+        minZoom={0.2}
+        maxZoom={2.5}
+        defaultViewport={{ x: 40, y: 40, zoom: 0.75 }}
         proOptions={{ hideAttribution: true }}
-        className="[&_.react-flow\_\_handle]:!border-black/20"
+        deleteKeyCode={null}
+        multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
+        className="[&_.react-flow\_\_attribution]:hidden"
       >
-        <LayerBands bands={bands} width={canvasWidth} />
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={24}
-          size={1}
-          className="!text-border"
-          color="currentColor"
-        />
+        {view.lanes ? <LaneGuides /> : null}
+
+        {gridVariant ? (
+          <Background
+            variant={gridVariant}
+            gap={view.grid === 'lines' ? 64 : 24}
+            size={view.grid === 'lines' ? 1 : 1.2}
+            color="color-mix(in oklab, var(--foreground) 12%, transparent)"
+          />
+        ) : null}
+
+        {view.minimap ? (
+          <MiniMap
+            pannable
+            zoomable
+            position="bottom-right"
+            className="!bottom-20 !right-4 z-20 !m-0 overflow-hidden !rounded-[12px] !border !border-border/80 !bg-background/85 !shadow-lg !backdrop-blur-xl"
+            maskColor="color-mix(in oklab, var(--background) 75%, transparent)"
+            nodeColor={(n) => {
+              if (n.type !== 'component') return 'transparent'
+              const id = (n.data as NodeCardData).componentId
+              const layer = COMPONENT_MAP[id]?.layer
+              return layer ? LAYER_MAP[layer].hue : 'var(--brand)'
+            }}
+            nodeStrokeWidth={1.5}
+            nodeStrokeColor="color-mix(in oklab, var(--foreground) 20%, transparent)"
+            nodeBorderRadius={3}
+            style={{ width: 168, height: 108 }}
+          />
+        ) : null}
       </ReactFlow>
 
-      {storeNodes.length === 0 ? (
+      <ViewportHud />
+
+      {menu ? (
+        <CanvasContextMenu
+          x={menu.x}
+          y={menu.y}
+          nodeId={menu.nodeId}
+          onClose={() => setMenu(null)}
+          onUnlock={onRequestUnlock}
+          toCanvas={(cx, cy) => {
+            const rect = wrapper.current?.getBoundingClientRect()
+            return toCanvas(cx + (rect?.left ?? 0), cy + (rect?.top ?? 0))
+          }}
+        />
+      ) : null}
+
+      {nodes.length === 0 ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="glass max-w-xs rounded-[var(--radius-lg)] p-5 text-center">
-            <p className="text-sm font-medium">Empty canvas</p>
-            <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-              Drag a node from the library to begin. Most bots start with an{' '}
-              <span className="font-medium text-foreground">OHLCV Price Feed</span> in Layer I.
+          <div className="max-w-xs text-center">
+            <p className="text-[13px] font-medium">Empty canvas</p>
+            <p className="mt-1 text-xs leading-relaxed text-tertiary">
+              Drag a component from the library on the left, or press{' '}
+              <kbd className="rounded-[5px] border border-border bg-secondary px-1 font-mono text-[10px]">
+                /
+              </kbd>{' '}
+              to search everything.
             </p>
           </div>
         </div>
       ) : null}
-
-      {rejection ? (
-        <div
-          role="status"
-          className="glass absolute bottom-4 left-1/2 flex max-w-md -translate-x-1/2 items-start gap-2.5 rounded-[var(--radius-md)] border-warning/40 p-3"
-        >
-          <AlertTriangle className="mt-px size-4 shrink-0 text-warning" />
-          <p className="text-[13px] leading-relaxed">{rejection}</p>
-        </div>
-      ) : null}
     </div>
   )
 }
 
-/** Vertical span of all bands, used to size the scrollable canvas. */
-export const CANVAS_HEIGHT = LAYERS.length * BAND_H + NODE_H
+/** Height of the full lane stack, exported for layout callers. */
+export const CANVAS_LANE_HEIGHT = CANVAS_HEIGHT
+export const CANVAS_LANE_SIZE = LANE_H
+export const CANVAS_LAYER_COUNT = LAYERS.length
 
-export function LoomCanvas() {
+export function Canvas(props: { onRequestUnlock?: (componentId: string) => void }) {
   return (
     <ReactFlowProvider>
-      <CanvasInner />
+      <FlowCanvas onRequestUnlock={props.onRequestUnlock ?? (() => {})} />
     </ReactFlowProvider>
   )
 }
+
+export { Canvas as LoomCanvas }

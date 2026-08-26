@@ -32,6 +32,7 @@ import { SliderWithValue } from '@/components/ui/slider'
 import { CheckboxRow } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/misc'
 import { Tooltip } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 
 /** One config control, driven entirely by the component's FieldDef. */
 function ConfigField({
@@ -204,7 +205,7 @@ function MultiSelectPanel({
   count: number
   onSaveBlock: () => void
 }) {
-  const { alignSelection, distributeSelection, duplicateSelection, removeNodes, setEnabled, selection } =
+  const { align, distribute, duplicateSelection, removeNodes, setEnabled, selection } =
     useBuilder()
 
   return (
@@ -220,19 +221,19 @@ function MultiSelectPanel({
         <p className="mb-2 text-[11px] font-medium tracking-wide text-tertiary uppercase">Align</p>
         <div className="flex gap-1">
           <Tooltip content="Align left">
-            <Button variant="outline" size="icon-sm" onClick={() => alignSelection('left')}>
+            <Button variant="outline" size="icon-sm" onClick={() => align('left')}>
               <AlignStartVertical />
               <span className="sr-only">Align left</span>
             </Button>
           </Tooltip>
           <Tooltip content="Align centre">
-            <Button variant="outline" size="icon-sm" onClick={() => alignSelection('center')}>
+            <Button variant="outline" size="icon-sm" onClick={() => align('center-h')}>
               <AlignCenterHorizontal />
               <span className="sr-only">Align centre</span>
             </Button>
           </Tooltip>
           <Tooltip content="Align right">
-            <Button variant="outline" size="icon-sm" onClick={() => alignSelection('right')}>
+            <Button variant="outline" size="icon-sm" onClick={() => align('right')}>
               <AlignEndVertical />
               <span className="sr-only">Align right</span>
             </Button>
@@ -242,7 +243,7 @@ function MultiSelectPanel({
               variant="outline"
               size="icon-sm"
               disabled={count < 3}
-              onClick={distributeSelection}
+              onClick={() => distribute('h')}
             >
               <Rows3 />
               <span className="sr-only">Distribute evenly</span>
@@ -425,21 +426,22 @@ export function Inspector({
   const selected = nodes.filter((n) => selection.includes(n.id))
   const single = selected.length === 1 ? selected[0] : null
   const comp = single ? COMPONENT_MAP[single.componentId] : null
+  const hasSelection = selected.length > 0
 
   return (
-    <aside className="flex h-full w-80 shrink-0 flex-col border-l border-border bg-background">
-      {selected.length > 1 ? (
-        <MultiSelectPanel count={selected.length} onSaveBlock={onSaveBlock} />
-      ) : single && comp ? (
-        <SingleNodePanel node={single} comp={comp} onUnlockRequest={onUnlockRequest} />
-      ) : (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-          <p className="text-sm font-medium">Nothing selected</p>
-          <p className="text-xs leading-relaxed text-tertiary">
-            Click a node to configure it. Shift-click or drag a box to select several at once.
-          </p>
-        </div>
+    <aside
+      className={cn(
+        'flex h-full shrink-0 flex-col bg-background transition-[width,border-color] duration-200 ease-out overflow-hidden',
+        hasSelection ? 'w-80 border-l border-border' : 'w-0 border-l-0',
       )}
+    >
+      <div className="w-80 h-full flex flex-col">
+        {selected.length > 1 ? (
+          <MultiSelectPanel count={selected.length} onSaveBlock={onSaveBlock} />
+        ) : single && comp ? (
+          <SingleNodePanel node={single} comp={comp} onUnlockRequest={onUnlockRequest} />
+        ) : null}
+      </div>
     </aside>
   )
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import type { ComponentDef } from '@/mock/layers'
+import { COMPONENT_MAP, type ComponentDef } from '@/mock/layers'
 import { useBuilder } from '@/lib/builder-store'
 import { useBot, useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { issueCounts, validateGraph, type Issue } from '@/lib/validate'
@@ -38,6 +38,8 @@ export default function BuilderPage() {
     load,
     nodes,
     edges,
+    notes,
+    frames,
     selection,
     dirty,
     setIssues,
@@ -61,32 +63,32 @@ export default function BuilderPage() {
   useEffect(() => {
     if (!bot || loadedFor.current === bot.id) return
     loadedFor.current = bot.id
-    load(bot.id, bot.nodes, bot.edges)
+    load(bot.id, bot.nodes, bot.edges, bot.notes, bot.frames)
   }, [bot, load])
 
   const save = useCallback(
     (silent = false) => {
       if (!bot) return
-      saveGraph(bot.id, nodes, edges)
+      saveGraph(bot.id, nodes, edges, { notes, frames })
       markSaved()
       if (!silent) {
         pushLog('info', 'Graph saved.')
         toast.success('Bot saved', `${nodes.length} nodes, ${edges.length} connections.`)
       }
     },
-    [bot, nodes, edges, saveGraph, markSaved, pushLog],
+    [bot, nodes, edges, notes, frames, saveGraph, markSaved, pushLog],
   )
 
   /* Autosave a couple of seconds after the graph settles. */
   useEffect(() => {
     if (!dirty || !bot) return
     const timer = setTimeout(() => {
-      saveGraph(bot.id, nodes, edges)
+      saveGraph(bot.id, nodes, edges, { notes, frames })
       markSaved()
       pushLog('info', 'Autosaved.')
     }, 2500)
     return () => clearTimeout(timer)
-  }, [dirty, bot, nodes, edges, saveGraph, markSaved, pushLog])
+  }, [dirty, bot, nodes, edges, notes, frames, saveGraph, markSaved, pushLog])
 
   /* Warn on hard navigation while there are unsaved edits. */
   useEffect(() => {
@@ -196,7 +198,9 @@ export default function BuilderPage() {
         <LibraryPanel onUnlockRequest={setUnlockTarget} />
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <LoomCanvas />
+          <LoomCanvas
+            onRequestUnlock={(comp) => setUnlockTarget(COMPONENT_MAP[comp] ?? null)}
+          />
           <ConsolePanel onJump={handleJump} />
         </div>
 

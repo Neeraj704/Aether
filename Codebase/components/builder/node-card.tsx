@@ -1,122 +1,136 @@
 'use client'
 
+import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { AlertTriangle, Lock, Settings2 } from 'lucide-react'
-import { COMPONENT_MAP, LAYER_MAP, PORT_COLORS, type PortType } from '@/mock/layers'
-import { NODE_H, NODE_W } from '@/lib/builder-store'
+import { AlertTriangle, EyeOff, Lock } from 'lucide-react'
+import { COMPONENT_MAP, LAYER_MAP, PORT_COLORS } from '@/mock/layers'
+import { NODE_W } from '@/lib/builder-store'
 import { cn } from '@/lib/utils'
 
-export interface LoomNodeData {
+export interface NodeCardData {
   componentId: string
   enabled: boolean
-  needsConfig: boolean
+  needsConfig?: boolean
   locked: boolean
-  hasError: boolean
+  /** True while a connection drag is in flight and this node is a legal target. */
+  candidate?: boolean
+  /** True while a connection drag is in flight and this node is an illegal target. */
+  blocked?: boolean
   [key: string]: unknown
 }
 
-/** Evenly spaces N handles down the card edge. */
-function handleTop(index: number, count: number) {
-  return `${((index + 1) / (count + 1)) * 100}%`
-}
-
-function PortHandle({
-  type,
-  position,
-  index,
-  count,
-}: {
-  type: PortType
-  position: Position
-  index: number
-  count: number
-}) {
-  const isTarget = position === Position.Left
+/** Small coloured dot strip describing a node's port types. */
+function Ports({ types, side }: { types: string[]; side: 'in' | 'out' }) {
+  if (types.length === 0) return null
   return (
-    <Handle
-      id={type}
-      type={isTarget ? 'target' : 'source'}
-      position={position}
-      title={type}
-      style={{
-        top: handleTop(index, count),
-        background: PORT_COLORS[type],
-        borderColor: 'color-mix(in oklab, black 25%, transparent)',
-      }}
-      className="!size-2.5 !border"
-    />
+    <span
+      className={cn(
+        'absolute top-1/2 flex -translate-y-1/2 flex-col gap-1',
+        side === 'in' ? '-left-px' : '-right-px',
+      )}
+      aria-hidden
+    >
+      {types.slice(0, 4).map((t) => (
+        <span
+          key={t}
+          className="size-1 rounded-full"
+          style={{ background: PORT_COLORS[t as keyof typeof PORT_COLORS] ?? 'currentColor' }}
+        />
+      ))}
+    </span>
   )
 }
 
-export function LoomNode({ data, selected }: NodeProps & { data: LoomNodeData }) {
-  const comp = COMPONENT_MAP[data.componentId]
+export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps) {
+  const d = data as NodeCardData
+  const comp = COMPONENT_MAP[d.componentId]
   if (!comp) return null
 
   const layer = LAYER_MAP[comp.layer]
-  const dimmed = !data.enabled || data.locked
+  const dim = !d.enabled || d.locked
 
   return (
     <div
-      style={{ width: NODE_W, height: NODE_H, '--layer': layer.hue } as React.CSSProperties}
       className={cn(
-        'group relative flex flex-col justify-center gap-1 rounded-[var(--radius-md)] border bg-card px-3 py-2.5',
-        'transition-[border-color,box-shadow,opacity] duration-150',
-        // The layer colour reads as a left spine rather than a full tint.
-        'border-l-[3px]',
-        dimmed ? 'opacity-55' : 'opacity-100',
-        data.hasError
-          ? 'border-destructive shadow-[0_0_0_1px_var(--destructive)]'
-          : selected
-            ? 'border-brand shadow-[0_0_0_1px_var(--brand),var(--shadow-md)]'
-            : 'border-border hover:border-tertiary',
+        'group/node relative flex flex-col rounded-[14px] border backdrop-blur-xl text-left transition-all duration-200 shadow-md hover:-translate-y-0.5',
+        selected
+          ? 'border-brand bg-background/90 shadow-[0_0_0_2px_var(--brand),0_12px_32px_-8px_rgba(0,0,0,0.5)]'
+          : 'border-border/80 bg-background/75 hover:border-border hover:shadow-lg',
+        d.candidate && 'border-success shadow-[0_0_0_2px_var(--success)]',
+        d.blocked && 'opacity-40',
+        dim && 'opacity-60',
       )}
+      style={{ width: NODE_W }}
     >
+      {/* Top light catching glass edge highlight */}
       <span
         aria-hidden
-        className="absolute inset-y-0 left-[-3px] w-[3px] rounded-l-[var(--radius-md)]"
-        style={{ background: layer.hue }}
+        className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[14px] bg-gradient-to-r from-transparent via-foreground/15 to-transparent"
       />
 
-      {comp.inputs.map((t, i) => (
-        <PortHandle key={t} type={t} position={Position.Left} index={i} count={comp.inputs.length} />
-      ))}
-      {comp.outputs.map((t, i) => (
-        <PortHandle
-          key={t}
-          type={t}
-          position={Position.Right}
-          index={i}
-          count={comp.outputs.length}
-        />
-      ))}
+      {/* Layer accent left border rail */}
+      <span
+        aria-hidden
+        className="absolute inset-y-2.5 left-0 w-[3px] rounded-r-full transition-opacity"
+        style={{ background: layer.hue, opacity: selected ? 1 : 0.7 }}
+      />
 
-      <div className="flex items-start justify-between gap-2">
-        <p className="line-clamp-2 text-[13px] leading-tight font-medium text-balance">
-          {comp.name}
-        </p>
-        <span className="mt-px flex shrink-0 items-center gap-1">
-          {data.locked ? <Lock className="size-3 text-warning" /> : null}
-          {data.needsConfig && !data.locked ? (
-            <Settings2 className="size-3 text-warning" />
-          ) : null}
-          {data.hasError ? <AlertTriangle className="size-3 text-destructive" /> : null}
+      <div className="flex items-start gap-2.5 px-3 py-2.5 pl-3.5">
+        <span
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-[8px] font-mono text-[11px] font-bold shadow-xs"
+          style={{
+            background: `linear-gradient(135deg, color-mix(in oklab, ${layer.hue} 24%, transparent), color-mix(in oklab, ${layer.hue} 12%, transparent))`,
+            color: layer.hue,
+            border: `1px solid color-mix(in oklab, ${layer.hue} 30%, transparent)`,
+          }}
+        >
+          {layer.roman}
+        </span>
+
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="truncate text-[12.5px] leading-tight font-medium text-foreground">
+              {comp.name}
+            </span>
+          </span>
+          <span className="mt-0.5 block truncate text-[10.5px] text-tertiary">
+            {comp.tagline || layer.name}
+          </span>
+        </span>
+
+        {/* Status icon / dot */}
+        <span className="mt-0.5 flex shrink-0 items-center gap-1">
+          {d.locked ? (
+            <Lock className="size-3 text-amber-500" />
+          ) : d.needsConfig ? (
+            <AlertTriangle className="size-3 text-warning" />
+          ) : !d.enabled ? (
+            <EyeOff className="size-3 text-tertiary" />
+          ) : (
+            <span
+              className="size-1.5 rounded-full bg-success shadow-[0_0_6px_var(--success)]"
+              title="Enabled & valid"
+            />
+          )}
         </span>
       </div>
 
-      <p className="flex items-center gap-1.5 text-[11px] text-tertiary">
-        <span className="tabular font-medium" style={{ color: layer.hue }}>
-          {layer.roman}
-        </span>
-        <span className="truncate">
-          {data.locked
-            ? 'Locked'
-            : !data.enabled
-              ? 'Disabled'
-              : data.needsConfig
-                ? 'Needs config'
-                : comp.tagline}
-        </span>
-      </p>
+      <Ports types={comp.inputs} side="in" />
+      <Ports types={comp.outputs} side="out" />
+
+      {/* Handles with subtle default state and clear hover affordance */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!size-3.5 !border-2 !border-background !bg-muted-foreground/70 !opacity-40 transition-all group-hover/node:!opacity-100 group-hover/node:!scale-110 data-[connectingfrom]:!opacity-100"
+        style={{ left: -7 }}
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!size-3.5 !border-2 !border-background !bg-brand !opacity-40 transition-all group-hover/node:!opacity-100 group-hover/node:!scale-110"
+        style={{ right: -7 }}
+      />
     </div>
   )
-}
+})

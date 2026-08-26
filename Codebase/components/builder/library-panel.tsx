@@ -1,8 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ChevronRight, Lock, Package, Search, X } from 'lucide-react'
-import { COMPONENTS, LAYERS, type ComponentDef, type LayerId } from '@/mock/layers'
+import { ChevronRight, GripVertical, Lock, Package, Search, X } from 'lucide-react'
+import { COMPONENTS, LAYERS, LAYER_MAP, type ComponentDef, type LayerId } from '@/mock/layers'
 import { hasComponent } from '@/lib/entitlements'
 import { useSession } from '@/lib/store'
 import { useWorkspace } from '@/lib/workspace-store'
@@ -24,6 +24,7 @@ function LibraryRow({
   onUnlockRequest: (comp: ComponentDef) => void
 }) {
   const addNode = useBuilder((s) => s.addNode)
+  const layer = LAYER_MAP[comp.layer]
 
   return (
     <li>
@@ -38,12 +39,17 @@ function LibraryRow({
           else addNode(comp.id, 120, 0)
         }}
         className={cn(
-          'flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-[13px] transition-colors',
+          'group/row flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1.5 text-[13px] transition-colors',
           locked
             ? 'cursor-pointer text-muted-foreground hover:bg-secondary'
             : 'cursor-grab hover:bg-secondary active:cursor-grabbing',
         )}
       >
+        <GripVertical className="size-3 shrink-0 opacity-0 group-hover/row:opacity-40 transition-opacity" />
+        <span
+          className="size-1.5 rounded-full shrink-0"
+          style={{ background: layer.hue }}
+        />
         <Tooltip content={comp.tagline}>
           <span className="min-w-0 flex-1 truncate">{comp.name}</span>
         </Tooltip>

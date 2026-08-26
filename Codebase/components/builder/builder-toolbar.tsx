@@ -1,22 +1,27 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft,
   BadgeCheck,
   Check,
   ChevronDown,
+  Frame,
+  Hand,
   History,
   Layers,
   LineChart,
+  MessageSquare,
+  MousePointer,
   Redo2,
   Save,
+  StickyNote,
   Undo2,
 } from 'lucide-react'
 import type { Bot } from '@/mock/data'
 import { COMPONENT_MAP, LAYERS } from '@/mock/layers'
-import { useBuilder } from '@/lib/builder-store'
+import { useBuilder, type ToolId } from '@/lib/builder-store'
 import { nodeLimitFor } from '@/lib/entitlements'
 import { useSession } from '@/lib/store'
 import { Button } from '@/components/ui/button'
@@ -45,6 +50,8 @@ export function BuilderToolbar({
     future,
     undo,
     redo,
+    tool,
+    setTool,
     collapsedLayers,
     toggleLayer,
   } = useBuilder()
@@ -62,8 +69,27 @@ export function BuilderToolbar({
     else setName(bot.name)
   }
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)))
+        return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+
+      const key = e.key.toLowerCase()
+      if (key === 'v') setTool('select')
+      else if (key === 'h') setTool('hand')
+      else if (key === 'n') setTool('note')
+      else if (key === 'c') setTool('comment')
+      else if (key === 'f') setTool('frame')
+    }
+
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [setTool])
+
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3">
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/80 bg-background/80 px-3 backdrop-blur-xl">
       <Tooltip content="Back to bots">
         <Button render={<Link href="/app/bots" />} variant="ghost" size="icon-sm">
           <ArrowLeft />
@@ -119,6 +145,35 @@ export function BuilderToolbar({
             Saved {relativeTime(bot.updatedAt)}
           </span>
         )}
+      </div>
+
+      {/* Figma-style tool selector rail */}
+      <div className="mx-auto flex items-center gap-0.5 rounded-[var(--radius-pill)] border border-border/80 bg-secondary/80 p-0.5 shadow-xs backdrop-blur-md">
+        {(
+          [
+            { id: 'select', label: 'Select tool (V)', icon: MousePointer },
+            { id: 'hand', label: 'Hand / Pan tool (H)', icon: Hand },
+            { id: 'note', label: 'Sticky Note tool (N)', icon: StickyNote },
+            { id: 'comment', label: 'Comment tool (C)', icon: MessageSquare },
+            { id: 'frame', label: 'Section Frame tool (F)', icon: Frame },
+          ] as const
+        ).map((t) => (
+          <Tooltip key={t.id} content={t.label}>
+            <button
+              type="button"
+              aria-label={t.label}
+              onClick={() => setTool(t.id as ToolId)}
+              className={cn(
+                'flex size-7 items-center justify-center rounded-[var(--radius-pill)] transition-all [&_svg]:size-3.5',
+                tool === t.id
+                  ? 'bg-background text-foreground shadow-sm font-medium scale-105'
+                  : 'text-tertiary hover:bg-background/50 hover:text-foreground',
+              )}
+            >
+              <t.icon />
+            </button>
+          </Tooltip>
+        ))}
       </div>
 
       <div className="ml-auto flex items-center gap-1">

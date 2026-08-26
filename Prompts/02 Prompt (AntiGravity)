@@ -1,0 +1,351 @@
+# AETHER — Phase 2 Build Prompt: Bot Detail Pages + The Backtest Flow
+
+You are a senior frontend engineer continuing work on an existing Next.js 16 (App Router) codebase called AETHER — a visual drag-and-drop builder for algorithmic trading agents. The marketing site, app shell, and Builder canvas are already built and working. **Do not rebuild or restyle anything that already works.** Your job in this phase is narrow and specific: build the Bot Detail experience (Overview / Backtest / Live / Settings) and, most importantly, the **Backtest Results flow** — which is currently the single biggest hole in the product. Read this entire document before writing any code. It is long because it is meant to be the only spec you need for this phase.
+
+---
+
+## 0. Orientation — read this first
+
+This is still a **frontend-only, fully-mocked** build. There is no backend, no real auth, no real market data, no real compute. Everything you build must look and behave exactly like a real product, using fake-but-deterministic data generated on the client. This constraint does not change in this phase.
+
+The good news: most of the hard plumbing already exists. Before you write a single line, open and actually read these five files — do not assume, read them:
+
+- `mock/data.ts` — all types and seed data: `Bot`, `BotNode`, `BotEdge`, `BacktestRun`, `EquityPoint`, `Trade`, `BacktestMetrics`, `LayerContribution`, the `generateBacktest()` function, `BOTS`, `BACKTEST_RUNS`.
+- `mock/layers.ts` — `LayerId`, `PlanTier`, `ComponentDef`, `LAYERS`, `COMPONENT_MAP`, `CONNECTION_RULES`, `layerIndex()`.
+- `lib/workspace-store.ts` — the Zustand store (`useWorkspace`) that already has `bots`, `runs`, `addRun()`, `deleteRun()`, `updateBot()`, `setBotStatus()`, `snapshotVersion()`, and the selectors `useBot(id)` and `useRun(id)`.
+- `lib/entitlements.ts` — `creditCost(type, nodeCount)`, `hasComponent()`, `nodeLimitFor()`.
+- `lib/validate.ts` — `validateGraph()`, already used by the Builder's Console panel.
+
+**`generateBacktest()` in `mock/data.ts` already produces a complete, realistic `BacktestRun` — equity curve, trade log, metrics, per-layer contributions, and self-learning insights — from a seed and a config object.** You are NOT writing a fake backtesting engine from scratch. You are calling this existing function and building the UI around its output. If you find yourself inventing new fake-data-generation logic that duplicates what `generateBacktest()` already does, stop — you're doing it wrong.
+
+---
+
+## 1. Ground rules (same spirit as the original build, still true here)
+
+1. Every button, form, and flow must be fully wired on the frontend. Clicking "Run Backtest" triggers a real (fake-timed) progress state and then renders a fully populated results dashboard from `generateBacktest()`. Nothing is a dead end, a `console.log`, or a "coming soon" placeholder — unless this document explicitly tells you to defer it (see §2.2).
+2. Reuse existing UI primitives from `components/ui/*` for everything. Do **not** create new button, card, table, tab, or badge components. The available primitives are: `Button`, `PillButton`/`PillLink`, `Badge`/`StatusBadge`/`TierBadge`, `Card`, `Checkbox`/`CheckboxRow`, `Dialog`, `EmptyState`/`ErrorState`/`UpgradeNudge`, `Input`/`Field`/`Textarea`, `Menu`/`MenuContent`/`MenuItem`, `Select`, `Skeleton`, `Slider`, `Stat`/`AnimatedNumber`/`DataRow`, `Switch`, `Table`/`THead`/`TBody`/`TR`/`TH`/`TD`/`SortHeader`, `Tabs`/`TabsList`/`Tab`/`TabPanel`/`Segmented`, `Toast` (via `toast.success/error/info/unlock` from `lib/store.ts`), `Tooltip`. If a page needs something these don't cover, compose it from these primitives — don't reach for a new dependency.
+3. `recharts` is already an installed dependency (`^3.10.1`) but **is not used anywhere in the codebase yet.** You are the first to wire it up, for the equity curve chart. Theme it to match: thin lines, no default recharts styling, glass tooltip (reuse the visual language of the existing `Tooltip` component — blurred card background, hairline border), gradient area fill under the line using the CSS variables already defined in `app/globals.css` (`--profit`/`--loss`/`--brand` tokens — inspect `globals.css` for exact variable names before using them).
+4. Follow the existing "Aether Glass" design language exactly as already implemented elsewhere in the app (glass panels, `--radius-*` tokens, `text-tertiary`/`text-muted-foreground` hierarchy, `tabular` class on all numbers). Copy patterns from `app/app/live/page.tsx` and `app/app/bots/page.tsx` — they are the best existing reference for how a data-dense app page should look in this codebase.
+5. All new data must round-trip through `useWorkspace` (Zustand + `persist` to localStorage), exactly like everything else. Nothing new gets its own ad-hoc state or its own localStorage key.
+6. Money is in ₹ (INR). Use `formatINR()`, `formatPct()`, `formatNumber()`, `formatCompact()`, `formatDate()`, `relativeTime()` from `lib/utils.ts` for every single number and date you render — do not hand-roll formatting.
+7. Every screen that shows backtest results must carry the line **"Past performance does not guarantee future results"** somewhere visible but unobtrusive (small print near the equity chart or metrics). This is a product requirement from `03 : Page by page features` and `04 : Builder Canvas`, not a suggestion.
+8. Do not invent new pages beyond what's listed in §4. Do not skip anything listed in §4 either. If something is ambiguous, make the most Apple-like, most polished choice, consistent with existing pages, and move on — don't ask, just build.
+
+---
+
+## 2. Scope for this phase
+
+### 2.1 Build now (this phase, in this order)
+
+1. Fix the two broken links described in §9 (small, do this first — it's a five-minute fix and unblocks manual testing of everything else).
+2. `/app/bots/[botId]` — real Bot Overview page with tabs (Overview / Backtests / Live / Settings), replacing the current dumb redirect-to-builder stub.
+3. `/app/bots/[botId]/backtest` — Backtest configuration page + the run flow (fake progress, then results).
+4. `/app/bots/[botId]/backtest/[runId]` — a specific historical run's full report page (this is also what the config page navigates to after a run completes, and what "recent runs" lists link into).
+5. The Settings tab content (rename, description, visibility, danger zone) — lives inside the Overview page's tab system, not a separate route, per the routing decision in §4.
+
+### 2.2 Explicitly out of scope — do not touch these this phase
+
+Do not build, wire, or stub any of the following. They are real gaps in the product per `02 : Sitemap & Routes`, but they are **not this phase**: `/onboarding/*`, `/forgot-password`, `/reset-password`, `/verify-email`, `/legal/*`, `/app/presets`, `/app/compare`, `/app/library`, `/app/marketplace/publish/*`, `/app/creator/dashboard`, `/app/billing/plans`, `/app/billing/topup`, `/app/billing/history`, `/app/billing/payment-methods`, `/app/account/security`, `/app/account/api-keys`, `/app/account/danger-zone` (as a separate route — bot-level danger zone is in scope, account-level is not), `/app/help`, `/app/search`. If you notice a nav link or button pointing at one of these, leave it pointing there (it'll 404 or hit the Next.js catch-all) — do not build a placeholder page for it and do not silently remove the link. Flag it in your final summary instead.
+
+### 2.3 Why this scope
+
+Per the product vision doc, "assembling and paper-backtesting a basic bot" is explicitly called out as the required "aha moment" that must never be broken or paywalled. Right now a user can build a graph in the Builder but has **no way to actually see backtest results** — the single most important loop in the product is incomplete. Everything else on the deferred list is real but secondary to proving this loop works end-to-end.
+
+---
+
+## 3. Data model reference (do not modify these files — read and consume only)
+
+You will primarily be consuming, not changing, `mock/data.ts` and `lib/workspace-store.ts`. Know these shapes cold before you start:
+
+```ts
+// A Bot already has everything needed for the Overview page:
+interface Bot {
+  id: string
+  name: string
+  description: string
+  status: 'draft' | 'backtested' | 'live' | 'paused' | 'error'
+  updatedAt: string
+  createdAt: string
+  tags: string[]
+  nodes: BotNode[]
+  edges: BotEdge[]
+  headlineMetric: { label: string; value: string; positive: boolean }
+  visibility: 'private' | 'unlisted' | 'public'
+  versions: BotVersion[]
+  runIds: string[]   // <-- this is how a bot's backtest history is tracked
+}
+
+// A BacktestRun (what generateBacktest() returns, and what BACKTEST_RUNS holds) has:
+interface BacktestRun {
+  id: string
+  botId: string
+  botName: string
+  createdAt: string
+  config: {
+    from: string; to: string; symbols: string; capital: number
+    fees: number; slippage: number; seed: number
+    type: 'historical' | 'walk-forward' | 'monte-carlo' | 'paper' | 'ab'
+  }
+  metrics: BacktestMetrics   // totalReturn, winRate, maxDrawdown, sharpe, trades, avgR, profitFactor, exposure
+  equity: EquityPoint[]      // { date, equity, benchmark, drawdown }
+  trades: Trade[]            // { id, symbol, side, entryTime, exitTime, size, pnl, pnlPct, triggerNode, confidence }
+  contributions: LayerContribution[]  // { layer, label, detail, impact, positive }
+  insights: { title: string; body: string; kind: 'rule' | 'postmortem' }[]
+}
+```
+
+The workspace store already exposes everything you need to read and write this data:
+
+```ts
+useWorkspace(s => s.bots)                 // all bots
+useBot(botId)                             // single bot, or undefined while loading/not found
+useWorkspace(s => s.runs)                 // all runs across all bots
+useRun(runId)                             // single run, or undefined
+useWorkspace(s => s.addRun)               // (run: BacktestRun) => void — call after a "run" completes
+useWorkspace(s => s.deleteRun)            // (id: string) => void
+useWorkspace(s => s.updateBot)            // (id, patch: Partial<Bot>) => void — for rename/description/visibility
+useWorkspace(s => s.deleteBot)            // (id: string) => void — danger zone
+useWorkspace(s => s.setBotStatus)         // (id, status) => void
+useWorkspace(s => s.snapshotVersion)      // (id, note: string) => void
+useHydrated()                             // boolean — gate all reads on this, same pattern as builder pages
+```
+
+`addRun()` already updates the bot's `status` (draft → backtested), `updatedAt`, `runIds`, and `headlineMetric` for you. You do not need to call `updateBot()` separately after a run — just call `addRun()` and the bot record updates itself.
+
+To filter a bot's own runs anywhere: `useWorkspace(s => s.runs).filter(r => r.botId === botId)`.
+
+---
+
+## 4. Routes & files to create or modify
+
+Use this table as your literal build checklist. "Modify" means the file already exists and needs real content in place of a stub; "Create" means it does not exist yet.
+
+| Action | Path | Purpose |
+|---|---|---|
+| Modify | `app/app/bots/[botId]/page.tsx` | Replace the redirect stub with the real Bot Overview page (tabs: Overview / Backtests / Live / Settings). |
+| Create | `app/app/bots/[botId]/backtest/page.tsx` | Backtest config + run flow. |
+| Create | `app/app/bots/[botId]/backtest/[runId]/page.tsx` | Full results report for one run. |
+| Create | `components/bot/bot-header.tsx` | Shared header used by Overview and Backtest pages: name, status badge, back-to-bots link, tab nav. |
+| Create | `components/bot/overview-tab.tsx` | Overview tab content. |
+| Create | `components/bot/backtests-tab.tsx` | Backtests tab content (list of past runs for this bot). |
+| Create | `components/bot/live-tab.tsx` | Live tab content (thin — see §5.1.4). |
+| Create | `components/bot/settings-tab.tsx` | Settings tab content (rename/description/visibility/danger zone). |
+| Create | `components/backtest/config-panel.tsx` | The form on the config page. |
+| Create | `components/backtest/run-progress.tsx` | Fake progress bar + streaming log while a run is "in flight." |
+| Create | `components/backtest/equity-chart.tsx` | Recharts equity curve + benchmark + drawdown, themed. |
+| Create | `components/backtest/metric-cards.tsx` | The `Stat` grid (total return, win rate, max drawdown, Sharpe, trades, avg R, profit factor, exposure). |
+| Create | `components/backtest/trade-log-table.tsx` | Sortable, filterable trade table. |
+| Create | `components/backtest/contribution-panel.tsx` | Per-layer contribution breakdown. |
+| Create | `components/backtest/insights-panel.tsx` | Self-learning insights / post-mortems. |
+| Create | `components/backtest/results-actions.tsx` | Export / Save as preset / Compare / Promote-to-live button row. |
+| Modify | `components/builder/builder-toolbar.tsx` | Fix the Backtest button route (see §9.1). |
+| Modify | `app/app/bots/[botId]/page.tsx` (routing decision) | See §5 — this single file is where Overview/Backtest-tab-link/Live/Settings all live via tabs; only the actual `/backtest` deep-dive and `/backtest/[runId]` report get their own routes. |
+
+**Routing decision, stated explicitly so you don't improvise a different structure:** `/app/bots/:botId` is a tabbed page (Overview, Backtests, Live, Settings — matching `03 : Page by page features` item 10). The "Backtests" tab is a *list* of past runs with a "Run new backtest" button that navigates to `/app/bots/:botId/backtest` (the config page — a separate full route, not a tab, because it has its own complex state machine: idle → configuring → running → done). A completed run's full report lives at `/app/bots/:botId/backtest/:runId`, also a separate route so it's deep-linkable (needed for notification links like `/app/bots/bot-nifty-momentum/backtest/run-1041`, which already exist in `mock/data.ts`'s `NOTIFICATIONS` and `ACTIVITY` arrays — go check them, your route param names must match exactly: `[botId]` and `[runId]`).
+
+---
+
+## 5. Page-by-page detailed spec
+
+### 5.1 Bot Overview — `app/app/bots/[botId]/page.tsx`
+
+Replace the current file entirely (it currently just does `router.replace('/app/builder/' + botId)`).
+
+**Data loading pattern** — copy this exact shape, it matches how other pages in this codebase already handle hydration + not-found:
+
+```tsx
+'use client'
+const { botId } = useParams<{ botId: string }>()
+const hydrated = useHydrated()
+const bot = useBot(botId)
+
+if (!hydrated) return <SkeletonLoadingState />   // build a simple one: a few Skeleton blocks matching the page layout
+if (!bot) return <NotFoundState />                // EmptyState with title "Bot not found", action back to /app/bots
+```
+
+**Layout, top to bottom:**
+
+1. **`BotHeader`** (shared component, also reused on the backtest pages): back arrow to `/app/bots`, bot name (large, bold — not editable here, renaming happens in the Settings tab, unlike the Builder toolbar which allows inline rename), `StatusBadge status={bot.status}`, an "Open in builder" `PillButton` linking to `/app/builder/${bot.id}`, and a `relativeTime(bot.updatedAt)` "Updated Xh ago" caption.
+2. **Tab bar** using `Tabs`/`TabsList`/`Tab`/`TabPanel` from `components/ui/tabs.tsx`: Overview | Backtests | Live | Settings. Use the `defaultValue` prop or controlled state synced to a `?tab=` query param so the tab survives a refresh (check how the Builder's existing tab-like UI, if any, handles this — otherwise just use local `useState` seeded from `useSearchParams()`, and `router.replace` on change without adding to history).
+3. **Tab panels** — each panel renders one of the four components you're creating in `components/bot/*`.
+
+#### 5.1.1 Overview tab (`components/bot/overview-tab.tsx`)
+
+- **Graph thumbnail card**: a simplified, non-interactive, small static render of the bot's node graph. You do **not** need to build a mini React Flow instance — render a lightweight abstract representation instead: group `bot.nodes` by their component's `layer` (via `COMPONENT_MAP[node.componentId].layer`), and render one small colored dot/chip per node arranged in horizontal bands by layer order (use `layerIndex()` from `mock/layers.ts` to sort bands top-to-bottom), inside a bordered card, roughly 300×160px. Clicking the whole card navigates to `/app/builder/${bot.id}`. This same thumbnail component should be reusable — you'll also want it later on `/app/bots` cards, but do not modify that page in this phase unless it's trivial; focus on this page.
+- **Summary stats row**: 4 `Stat` components — Nodes (`bot.nodes.length`), Versions (`bot.versions.length`), Total backtests (`bot.runIds.length`), Headline metric (`bot.headlineMetric.label` / `.value`, `tone` set from `.positive`).
+- **Description**: render `bot.description` as plain text, or an italic "No description yet" if empty.
+- **Tags**: render `bot.tags` as `Badge variant="neutral"` chips, same visual pattern as `app/app/bots/page.tsx` already uses.
+- **Recent backtest runs list**: the 3 most recent runs for this bot (`runs.filter(r => r.botId === bot.id).slice(0, 3)`, already sorted newest-first because `addRun` prepends). Each row: run date (`formatDate`), test type badge, `metrics.totalReturn` formatted with `formatPct` and colored profit/loss, a "View report" link to `/app/bots/${bot.id}/backtest/${run.id}`. If zero runs, show inline `EmptyState` (icon: `LineChart` from lucide-react) with title "No backtests yet", description explaining what a backtest does, action `{ label: 'Run your first backtest', href: '/app/bots/' + bot.id + '/backtest' }`.
+- **"Publish to marketplace" button**: render it, but since publish flow is out of scope this phase, wire its `onClick` to `toast.info('Coming soon', 'Marketplace publishing is not available yet.')` rather than navigating anywhere or leaving it dead. This is the one explicitly-allowed exception to "no dead ends" — an honest "not built yet" toast is acceptable where this doc has explicitly deferred the destination; a silent no-op or console.log is not.
+
+#### 5.1.2 Backtests tab (`components/bot/backtests-tab.tsx`)
+
+- Full list (not just 3) of `runs.filter(r => r.botId === bot.id)`, newest first, as a `Table`: columns Date, Type, Symbols, Total Return, Sharpe, Trades, Max Drawdown, then a row action to open the report.
+- Use `SortHeader` for at least Date and Total Return columns (client-side sort, local `useState` for sort key/direction — see `trade-log-table.tsx` spec in §5.3 for the exact sorting pattern to replicate here too).
+- Top-right: `PillButton` "Run new backtest" → `/app/bots/${bot.id}/backtest`.
+- Empty state: same `EmptyState` as above.
+- Each row also gets a small delete icon button (trash icon) calling `useWorkspace(s => s.deleteRun)` with a `confirm()` guard, same UX pattern as `handleDelete` in `app/app/bots/page.tsx`.
+
+#### 5.1.3 Live tab (`components/bot/live-tab.tsx`)
+
+Keep this thin — the real live-monitoring UI already exists at `app/app/live/page.tsx` (global, cross-bot). This tab is just a bot-scoped entry point:
+
+- If `bot.status === 'live'`: show a condensed live status card (pull the bot's mock position/log data the same way `app/app/live/page.tsx` does it, filtered to this bot's name) plus a `PillLink` "Open full live monitor" → `/app/live`.
+- If not live: `EmptyState` icon `Radio`, title "This bot isn't live", description "Promote a backtested version to paper trading to start the live monitor.", action `{ label: 'View backtests', href: '/app/bots/' + bot.id + '#backtests' }` (or just switch the tab programmatically if you wired tabs to query params — either is fine, pick one and be consistent).
+- Do not build new live-trading logic here. This tab is a summary + link, nothing more.
+
+#### 5.1.4 Settings tab (`components/bot/settings-tab.tsx`)
+
+- **Rename**: `Field label="Bot name"` + `Input`, controlled local state seeded from `bot.name`, saved via `updateBot(bot.id, { name })` on blur or on a "Save" button — follow the exact save-button pattern already used in `app/app/settings/page.tsx` (single "Save Edits" `PillButton` at top with a `Save` icon, `toast.success` on click).
+- **Description**: `Field label="Description"` + `Textarea`, same save pattern, `updateBot(bot.id, { description })`.
+- **Visibility**: three-way control (Private / Unlisted / Public) — use `Segmented` from `components/ui/tabs.tsx` (it's built for exactly this: a small labeled 3-way pill switch). `onValueChange` calls `updateBot(bot.id, { visibility: v })` immediately (no separate save needed for this one — treat it like the existing `Switch` toggles elsewhere that save instantly).
+- **Danger zone**: a visually distinct section (red-tinted border, like `border-destructive/30 bg-destructive/5`, matching the `text-destructive` / `hover:bg-destructive/10` pattern already used for delete buttons in `app/app/bots/page.tsx`). Two actions:
+  - **Archive bot** — since there's no explicit "archived" status in `BotStatus` (`draft | backtested | live | paused | error`), do not invent one. Instead make this button call `setBotStatus(bot.id, 'paused')` with a toast explaining that's what archiving currently does (`toast.info('Bot paused', 'Archiving isn't modeled separately yet — this pauses the bot.')`) — an honest mapping onto the real data model beats inventing a new enum value that nothing else in the app understands.
+  - **Delete bot** — `confirm()` guard, then `deleteBot(bot.id)`, then `router.push('/app/bots')` with a `toast.info`.
+
+### 5.2 Backtest Config page — `app/app/bots/[botId]/backtest/page.tsx`
+
+This page is a state machine with three states: `configuring`, `running`, `done`. Model it with a single local `useState<'configuring' | 'running' | 'done'>('configuring')` plus a `useState<BacktestRun | null>(null)` for the just-completed run.
+
+Use `BotHeader` at the top again (reuse the same component from §5.1), so the page doesn't feel orphaned from the bot it belongs to.
+
+**Config state (`configuring`)** — a form, built with `components/backtest/config-panel.tsx`:
+
+- **Date range**: two `Input type="date"` fields, `from`/`to`. Default `from` = 90 days before today, `to` = today (compute with plain `Date` math, no new dependency).
+- **Symbols**: `Input` free text, default pre-filled from something sensible derived from the bot's tags or just `'NIFTY'` if nothing better is available. (Do not overthink this — `mock/data.ts`'s existing runs use free-text symbol strings like `'RELIANCE, HDFCBANK, INFY'`; match that pattern.)
+- **Starting capital**: `Input type="number"`, default `500000`.
+- **Fees / Slippage**: two small numeric inputs (fees in ₹ per trade or bps — match the existing `BacktestMetrics`/`config.fees`/`config.slippage` semantics already used in `mock/data.ts`'s seed runs, which use plain small numbers like `3`, `8`), defaults `3` and `8`.
+- **Random seed**: `Input type="number"`, default a random 4-digit number generated on mount (`Math.floor(1000 + Math.random() * 9000)`), so repeat visits don't always reuse the same seed but a given page load is stable if the user re-runs without refreshing.
+- **Test type tabs**: `Segmented` with options Historical / Walk-forward / Monte Carlo / Paper trading / A/B compare, mapped to the `config.type` union already defined in `mock/data.ts` (`'historical' | 'walk-forward' | 'monte-carlo' | 'paper' | 'ab'`).
+- **Credit cost preview**: live-computed via the existing `creditCost(type, nodeCount)` from `lib/entitlements.ts`, where `nodeCount = bot.nodes.length`. Render it as a small `DataRow` ("Estimated cost" → "`N` credits") right above the Run button, and pull the user's current balance from `useSession(s => s.credits)` so you can show "You have `X` credits" beside it. If `credits < cost`, disable the Run button and show an inline warning + a link to `/app/billing/credits` (that route already exists).
+- **Run button**: `PillButton`, label "Run Backtest", `onClick` transitions state to `running`, calls `useSession(s => s.spendCredits)(cost)` (already returns `false` and doesn't deduct if insufficient — but you've already disabled the button in that case, so this is just correct bookkeeping) and kicks off the fake run (see next section).
+
+**Running state (`running`)** — `components/backtest/run-progress.tsx`:
+
+- A progress bar that fills over roughly 2.5–4 seconds (longer for `monte-carlo`/`walk-forward` types, shorter for `historical` — vary `fakeLatency`-style timing, but do this with a driven `setInterval`/`requestAnimationFrame` progress percentage, not just a spinner, because the spec explicitly calls for a progress bar).
+- Below the bar, a streaming fake log — reuse the flavor of `LIVE_LOG_TEMPLATES` from `mock/data.ts` (it's written for the live monitor, but the tone — "Technical Analyst: momentum score 0.68", "Risk Gate: position cap check passed" — is exactly right for a backtest log too). Reveal 4–8 of these lines one at a time as the progress bar advances, each timestamped with the current wall-clock time at reveal (not fake historical times — this is a live-feeling console, like the Builder's own Console panel).
+- When progress hits 100%: call `generateBacktest({...})` with the config values collected above and `id: slugId('run')`, `botId: bot.id`, `botName: bot.name`. Call `addRun(run)`. Set local `done` state with the run. Transition the page state to `done`.
+
+**Done state (`done`)**:
+
+- Immediately `router.replace(`/app/bots/${bot.id}/backtest/${run.id}`)` — the config page's job is finished; the actual results dashboard lives at the dedicated `[runId]` route (§5.3) so it's linkable from notifications, activity feed, and the Backtests tab consistently. Do not duplicate the full results dashboard on this page — redirect into it.
+- Show a brief "Backtest complete — opening report..." transitional message for the one render tick before the redirect fires, so it doesn't feel like a flash of blank content.
+
+**First-visit / empty context**: above the form on first load (before any run this session), include a short explanatory blurb per `03 : Page by page features` item 11 ("friendly explanation of what a backtest does before the first run") — two or three sentences, not a modal, just inline copy above the config panel.
+
+### 5.3 Backtest Results report — `app/app/bots/[botId]/backtest/[runId]/page.tsx`
+
+```tsx
+const { botId, runId } = useParams<{ botId: string; runId: string }>()
+const hydrated = useHydrated()
+const bot = useBot(botId)
+const run = useRun(runId)
+
+if (!hydrated) return <SkeletonLoadingState />
+if (!bot || !run || run.botId !== botId) return <NotFoundState />
+```
+
+Layout, top to bottom, using `BotHeader` then a run-specific sub-header (test type badge, date range, `formatDate(run.createdAt, { withTime: true })`, seed number in small `text-tertiary` type for reproducibility transparency):
+
+1. **`MetricCards`** (`components/backtest/metric-cards.tsx`) — an 8-up (responsive to 4-up/2-up) grid of `Stat` components from `run.metrics`: Total Return (`formatPct`, tone from sign), Win Rate (`formatPct` no sign), Max Drawdown (`formatPct`, always `tone="loss"` since it's inherently negative), Sharpe (plain number, 2dp), Trades (plain integer), Avg R-Multiple, Profit Factor, Exposure (`formatPct`). Give each a `hint` tooltip with a one-line plain-English definition — reuse the definitions already written in `mock/data.ts`'s `DOC_SECTIONS[glossary]` block, don't write new ones from scratch.
+2. **The disclaimer line**: directly under the metric cards, small `text-tertiary` text: "Backtest results describe the past. They do not forecast or guarantee future performance." (This exact sentence already exists in `mock/data.ts`'s `quickstart` doc section — reuse it verbatim for consistency.)
+3. **`EquityChart`** (`components/backtest/equity-chart.tsx`) — the centerpiece visual. Recharts `AreaChart` (or `ComposedChart` if you want the drawdown as a secondary shaded band) fed by `run.equity`. Two series: `equity` (bot performance, brand-colored line + soft gradient fill under it) and `benchmark` (thin dashed neutral-gray line, no fill, for comparison) — both already present in every `EquityPoint`. X axis: `date` (format short, e.g. "12 Aug", not the full ISO string — write a tiny formatter or reuse `formatDate` with a truncated display). Y axis: currency, formatted with `formatINR(v, { compact: true })`. Custom tooltip on hover: a small glass card (blurred bg, hairline border matching the rest of the app) showing date, equity value, benchmark value, and drawdown % for that point. Give the chart a fixed height (~320px) and make it responsive width via recharts' `ResponsiveContainer`.
+4. **Trade log table** (`components/backtest/trade-log-table.tsx`) — full `Table` of `run.trades`. Columns: Symbol, Side (long/short, colored chip), Entry time, Exit time, Size, P&L (₹, colored profit/loss), P&L %, Triggered by (`triggerNode`), Confidence (as a small inline progress-bar-style or just percentage text). Make at minimum P&L, P&L%, and Entry time sortable via `SortHeader` — implement with local component state:
+   ```tsx
+   const [sortKey, setSortKey] = useState<'entryTime' | 'pnl' | 'pnlPct'>('entryTime')
+   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+   const sorted = useMemo(() => [...trades].sort((a, b) => {
+     const mul = sortDir === 'asc' ? 1 : -1
+     if (sortKey === 'entryTime') return mul * (new Date(a.entryTime).getTime() - new Date(b.entryTime).getTime())
+     return mul * (a[sortKey] - b[sortKey])
+   }), [trades, sortKey, sortDir])
+   ```
+   Add a simple filter row above the table: a symbol search `Input` and a Long/Short/All `Segmented` filter, both client-side `.filter()` on the already-sorted array. If `run.trades.length === 0` (shouldn't normally happen given `generateBacktest` always produces trades, but guard anyway), show `EmptyState`.
+5. **`ContributionPanel`** (`components/backtest/contribution-panel.tsx`) — render `run.contributions` as a short vertical list, one row per `LayerContribution`: layer label, the `detail` sentence (already fully-formed prose from `generateBacktest`, e.g. "Blocked 12 trades. Estimated avoided loss ₹4,500."), and the `impact` value formatted with `formatINR(impact, { signed: true, compact: true })`, colored by `.positive`. This is literally the "Risk Gate blocked 12 trades, estimated avoided loss ₹X" feature called out explicitly in `03 : Page by page features` — do not skip it, it's one of the most differentiated parts of the product per the vision doc.
+6. **`InsightsPanel`** (`components/backtest/insights-panel.tsx`) — render `run.insights`, each as a small card: a `Badge` distinguishing `kind === 'rule'` (label "Candidate rule", brand-colored) vs `kind === 'postmortem'` (label "Post-mortem", neutral/warn-colored), then `title` (bold) and `body` (regular, `text-muted-foreground`).
+7. **`ResultsActions`** (`components/backtest/results-actions.tsx`) — a button row:
+   - **Export report (PDF/CSV)** → since real export isn't in scope, wire to `toast.info('Coming soon', 'Report export isn't available yet.')` — same honest-deferral pattern as §5.1.1.
+   - **Save as new preset** → this one you *can* actually wire, because `useWorkspace(s => s.savePreset)` already exists and takes `{ name, description, nodes, edges }`. Open a small `Dialog` asking for a preset name (default `"${bot.name} — from this run"`), call `savePreset({ name, description: bot.description, nodes: bot.nodes, edges: bot.edges })` on confirm, `toast.success`.
+   - **Compare to previous run** → deferred (`/app/compare` is out of scope) — `toast.info('Coming soon', 'Run comparison isn't available yet.')`.
+   - **Promote to live** → call `setBotStatus(bot.id, 'live')`, `toast.success('Bot promoted', bot.name + ' is now marked live. Open the Live tab to monitor it.')`, and if the bot wasn't already `live`, this is a legitimate, fully-real state change — don't defer this one, it costs nothing to wire correctly with what already exists.
+
+---
+
+## 6. Shared component: `BotHeader`
+
+Build this once, use it on all three new/modified pages so the bot-detail experience feels like one coherent surface, not three disconnected pages:
+
+```tsx
+// components/bot/bot-header.tsx
+export function BotHeader({ bot, active }: { bot: Bot; active?: 'overview' | 'backtests' | 'live' | 'settings' }) {
+  // back arrow -> /app/bots
+  // bot.name (large, bold, non-editable here)
+  // StatusBadge status={bot.status}
+  // relativeTime(bot.updatedAt) caption
+  // PillButton "Open in builder" -> /app/builder/${bot.id}
+  // if `active` is provided, also render the Tabs nav (used on the Overview page only —
+  //   the backtest config/report pages pass no `active` and just get the identity strip without tabs)
+}
+```
+
+---
+
+## 7. Fix these existing issues before/while you work (both are small)
+
+### 7.1 `components/builder/builder-toolbar.tsx` — broken Backtest button route
+
+The toolbar's "Backtest" button currently links to:
+
+```tsx
+<Button render={<Link href={`/app/backtest/new?bot=${bot.id}`} />} size="sm">
+```
+
+That route (`/app/backtest/new`) does not exist and was never part of the sitemap. Change it to point at the real route you're building in this phase:
+
+```tsx
+<Button render={<Link href={`/app/bots/${bot.id}/backtest`} />} size="sm">
+```
+
+### 7.2 `components/builder/builder-toolbar.tsx` — version history route
+
+The version history menu already links to `/app/builder/${bot.id}/version/${v.id}`, which also does not exist yet and is **not** part of this phase's scope (§2.2 doesn't mention it, and it's genuinely a separate, smaller piece of work: a read-only canvas snapshot view). Leave this link as-is — do not build the route and do not remove the link. Just don't let it distract you into scope creep while you're in this file for the fix in §7.1.
+
+---
+
+## 8. Design & interaction details
+
+- Match spacing/typography exactly to `app/app/live/page.tsx` and `app/app/bots/page.tsx` (both are strong existing references for a data-dense authenticated page in this codebase) — `p-6 lg:p-8`, `max-w-[1400px] mx-auto w-full` outer wrapper, `gap-6` vertical rhythm between major sections.
+- Every number is wrapped in a `tabular` class or rendered through a helper that already applies it (`Stat`, `TD numeric`) so columns of numbers align.
+- Profit/loss coloring is always `text-profit` / `text-loss` (already-defined CSS variables) — never invent a new green/red.
+- Loading states: every page gates on `useHydrated()` before reading from the store (matches the existing pattern in `app/app/builder/page.tsx` and `app/app/builder/[botId]/page.tsx` — copy it exactly, including the `hydrated` early-return). Additionally, the fake "running" state in §5.2 is itself the loading state for a fresh run — you don't need a second skeleton layer inside it.
+- All new interactive elements get real `aria-label`s where they're icon-only (see existing pattern: `<span className="sr-only">Label</span>` inside icon buttons throughout the codebase).
+
+---
+
+## 9. Explicit non-goals — do not do these things even if they seem like natural extensions
+
+- Do not add a real charting library other than `recharts` (already installed).
+- Do not add a PDF/CSV export library — the export button is a deferred toast per §5.3.
+- Do not modify `mock/data.ts`'s types or `generateBacktest()`'s signature. If you think you need a field it doesn't provide, you're almost certainly missing something already there — re-read §3 before adding anything.
+- Do not touch `app/app/live/page.tsx` beyond reading it for reference.
+- Do not build authentication, a database, or any API route. Still frontend-only, still fully mocked.
+- Do not "improve" the Builder canvas, the marketing site, or any page not listed in §4 while you're in the neighborhood, even if you spot something you'd do differently. Stay in scope.
+
+---
+
+## 10. Acceptance checklist — walk through this manually when done
+
+- [ ] From `/app/bots`, every bot card's flows still work unmodified.
+- [ ] Navigating to `/app/bots/bot-nifty-momentum` (a real seeded id from `mock/data.ts`) shows the real Overview tab, not a redirect.
+- [ ] The Backtests tab lists `run-1041`, `run-1032`, `run-1019` (the seeded runs for that bot) correctly sorted newest-first, and sort headers work.
+- [ ] Clicking "Run new backtest" reaches the config page; submitting it shows a progress bar with streaming log lines, then redirects to a new `/app/bots/bot-nifty-momentum/backtest/run-xxxx` report page with real generated data.
+- [ ] That report page renders all 8 metric cards, the equity chart with two series and a working hover tooltip, a sortable/filterable trade table, the per-layer contribution list, and the insights panel — nothing is blank or `undefined`.
+- [ ] "Save as new preset" actually adds an entry to `useWorkspace(s => s.myPresets)` (check via a dev console or the eventual My Presets page later — for now, confirming the store updates is enough).
+- [ ] "Promote to live" actually flips `bot.status` to `'live'` and the `StatusBadge` updates immediately without a refresh.
+- [ ] Visiting a nonexistent bot id or run id shows a graceful not-found state, not a crash.
+- [ ] The Settings tab's rename/description saves persist across a page refresh (i.e., they're actually going through `updateBot` into the persisted store, not just local state).
+- [ ] Deleting a bot from its own Danger Zone redirects to `/app/bots` and the bot is actually gone (including its runs).
+- [ ] The Builder's "Backtest" toolbar button now correctly opens `/app/bots/:botId/backtest` instead of 404ing.
+- [ ] Nothing from §2.2's deferred list was accidentally built, half-built, or newly linked-to from a page that didn't already link to it.
+
+When you're done, summarize in your final message: (1) every file you created or modified, (2) any place you had to make a judgment call this document didn't cover, and (3) explicit confirmation that the deferred-scope list in §2.2 was left untouched.

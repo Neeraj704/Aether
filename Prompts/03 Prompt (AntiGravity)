@@ -1,0 +1,52 @@
+# AETHER — Phase 2 Patch: 3 small fixes only
+
+Phase 2 (the bot detail pages + backtest flow) was reviewed and is largely correct and complete. This is a small, narrow patch — do **not** touch any file outside this list, and do not "improve" anything else you notice while you're in these files.
+
+## Fix 1 — Suspense boundary around `useSearchParams`
+
+**File:** `app/app/bots/[botId]/page.tsx`
+
+It currently calls `useSearchParams()` directly inside the page's client component. In Next.js App Router this can break static optimization or throw a build error, because `useSearchParams()` requires a `<Suspense>` boundary somewhere above it in the tree.
+
+Fix: split the file into two parts.
+1. Rename the current default export's body into an inner component, e.g. `function BotDetailPageInner() { ...exact same code as now... }` (no logic changes).
+2. Make the new default export a thin wrapper:
+   ```tsx
+   import { Suspense } from 'react'
+
+   export default function BotDetailPage() {
+     return (
+       <Suspense fallback={<BotDetailSkeleton />}>
+         <BotDetailPageInner />
+       </Suspense>
+     )
+   }
+   ```
+3. Extract the existing `!hydrated` skeleton block (the one with the three `Skeleton` divs) into a small `BotDetailSkeleton()` component in the same file, and reuse it as the `Suspense` fallback too, so there's no visual flash difference between the two loading paths.
+
+Do not change the tab logic, the query-param sync logic, or anything else in this file — this is purely a wrapping change.
+
+## Fix 2 — Make the Live tab actually bot-scoped
+
+**File:** `components/bot/live-tab.tsx`
+
+Right now, when `bot.status === 'live'`, this renders a generic static "Active Session" card with no real data. Replace the `CardContent` of the live-state branch with real bot-scoped mock data, matching how `app/app/live/page.tsx` already sources its data:
+
+- Import `OPEN_POSITIONS` and `LIVE_LOG_TEMPLATES` from `@/mock/data`.
+- Filter or slice `OPEN_POSITIONS` down to a small deterministic subset for this bot (there's no `botId` field on `Position` in the mock data, so don't try to filter by it — instead, deterministically pick a stable subset using the bot's id, e.g. `OPEN_POSITIONS.slice(0, 1 + (hashString(bot.id) % OPEN_POSITIONS.length))`, using the existing `hashString` helper from `lib/utils.ts` so the same bot always shows the same positions instead of a random selection on every render).
+- Render those positions as a compact table or row list: symbol, side, qty, entry, LTP, P&L (colored profit/loss, using `formatINR(pos.pnl, { signed: true })` and `formatPct(pos.pnlPct)`) — reuse the `Table`/`TR`/`TD` primitives, not a bespoke layout.
+- Below that, show 3–4 lines from `LIVE_LOG_TEMPLATES` (pick a stable slice the same deterministic way) as a small log list, each with a fake "just now"-style relative timestamp, similar in spirit to the streaming log in `run-progress.tsx` but static (this tab isn't a live-updating simulation, just a realistic snapshot).
+- Keep the existing "Open full live monitor" `PillLink` to `/app/live` and the pulsing status dot — those are already correct, don't rebuild them.
+
+Do not build actual polling/interval-based live updates here — a realistic static snapshot is sufficient, matching everything else in this app being deterministically mocked rather than "live" in the literal sense.
+
+## Fix 3 — nothing else
+
+Do not touch `metric-cards.tsx`'s hint text or `run-progress.tsx`'s log lines — those were flagged as a minor stylistic deviation from spec during review but are good as they are and not worth the risk of regressing working code. Leave them exactly as they are.
+
+## Acceptance check
+
+- [ ] `app/app/bots/[botId]/page.tsx` still behaves identically from the user's perspective (tabs, query param sync, skeleton, not-found state) — only the internal Suspense wrapping changed.
+- [ ] `next build` (or your equivalent build/typecheck step) completes without a `useSearchParams` Suspense warning or error.
+- [ ] Visiting a live-status bot's Live tab now shows real symbol/side/P&L rows and a few log lines, not a generic static card — and revisiting the same bot shows the *same* positions/log lines each time (deterministic, not random).
+- [ ] No file outside `app/app/bots/[botId]/page.tsx` and `components/bot/live-tab.tsx` was modified.

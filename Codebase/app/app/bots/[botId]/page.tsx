@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import { Bot as BotIcon } from 'lucide-react'
 import { useBot, useHydrated } from '@/lib/workspace-store'
@@ -12,7 +12,20 @@ import { SettingsTab } from '@/components/bot/settings-tab'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/empty-state'
 
-export default function BotDetailPage() {
+function BotDetailSkeleton() {
+  return (
+    <div className="flex flex-col gap-6 p-6 lg:p-8 max-w-[1400px] mx-auto w-full">
+      <Skeleton className="h-20 w-full rounded-xl" />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Skeleton className="h-44 w-full rounded-xl" />
+        <Skeleton className="h-44 lg:col-span-2 w-full rounded-xl" />
+      </div>
+      <Skeleton className="h-64 w-full rounded-xl" />
+    </div>
+  )
+}
+
+function BotDetailPageInner() {
   const { botId } = useParams<{ botId: string }>()
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -41,16 +54,7 @@ export default function BotDetailPage() {
   }
 
   if (!hydrated) {
-    return (
-      <div className="flex flex-col gap-6 p-6 lg:p-8 max-w-[1400px] mx-auto w-full">
-        <Skeleton className="h-20 w-full rounded-xl" />
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <Skeleton className="h-44 w-full rounded-xl" />
-          <Skeleton className="h-44 lg:col-span-2 w-full rounded-xl" />
-        </div>
-        <Skeleton className="h-64 w-full rounded-xl" />
-      </div>
-    )
+    return <BotDetailSkeleton />
   }
 
   if (!bot) {
@@ -77,5 +81,13 @@ export default function BotDetailPage() {
         {activeTab === 'settings' && <SettingsTab bot={bot} />}
       </main>
     </div>
+  )
+}
+
+export default function BotDetailPage() {
+  return (
+    <Suspense fallback={<BotDetailSkeleton />}>
+      <BotDetailPageInner />
+    </Suspense>
   )
 }

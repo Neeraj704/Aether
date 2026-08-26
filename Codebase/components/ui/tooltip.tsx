@@ -21,7 +21,7 @@ export function Tooltip({
   if (!content) return <>{children}</>
 
   return (
-    <TooltipPrimitive.Root delay={delay}>
+    <TooltipPrimitive.Root>
       <TooltipPrimitive.Trigger render={children as React.ReactElement} />
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Positioner side={side} sideOffset={8} className="z-[60]">

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { COMPONENT_MAP, type ComponentDef } from '@/mock/layers'
+import { COMPONENT_MAP, type ComponentDef, type FieldDef } from '@/mock/layers'
 import {
   BACKTEST_RUNS,
   BOTS,
@@ -28,9 +28,14 @@ import { slugId } from '@/lib/utils'
 export function defaultConfig(comp: ComponentDef): Record<string, unknown> {
   const config: Record<string, unknown> = {}
   for (const f of comp.fields) {
-    if ('value' in f && f.value !== undefined) config[f.key] = f.value
-    else if (f.type === 'text' || f.type === 'password') config[f.key] = ''
-    else if (f.type === 'checklist') config[f.key] = []
+    const raw = f as Record<string, unknown>
+    if (raw.value !== undefined) {
+      config[raw.key as string] = raw.value
+    } else if (raw.type === 'checklist') {
+      config[raw.key as string] = []
+    } else {
+      config[raw.key as string] = ''
+    }
   }
   return config
 }

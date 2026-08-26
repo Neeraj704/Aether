@@ -70,16 +70,16 @@ export default function BillingPage() {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => handleBuyCredits(100, '$10')}
+              onClick={() => handleBuyCredits(100, '₹499')}
               className="h-9 px-3.5 rounded-lg border border-gold/40 bg-gold/15 text-xs font-semibold text-gold hover:bg-gold/25 transition-colors"
             >
-              +100 Credits ($10)
+              +100 Credits (₹499)
             </button>
             <button
-              onClick={() => handleBuyCredits(500, '$40')}
+              onClick={() => handleBuyCredits(500, '₹1,999')}
               className="h-9 px-3.5 rounded-lg bg-gold text-black text-xs font-bold hover:opacity-90 transition-opacity"
             >
-              +500 Credits ($40)
+              +500 Credits (₹1,999)
             </button>
           </div>
         </div>
@@ -99,7 +99,7 @@ export default function BillingPage() {
                 <h3 className="text-lg font-bold">Free Tier</h3>
                 {plan === 'free' && <span className="text-xs font-bold text-brand bg-brand/10 px-2.5 py-1 rounded-full">Current Plan</span>}
               </div>
-              <div className="text-3xl font-extrabold">$0 <span className="text-xs font-normal text-muted-foreground">/ month</span></div>
+              <div className="text-3xl font-extrabold">₹0 <span className="text-xs font-normal text-muted-foreground">/ month</span></div>
               <p className="text-xs text-muted-foreground">For learning visual bot building and standard backtesting.</p>
 
               <ul className="flex flex-col gap-2 pt-4 text-xs">
@@ -131,7 +131,7 @@ export default function BillingPage() {
                 <h3 className="text-lg font-bold">Starter Tier</h3>
                 {plan === 'starter' && <span className="text-xs font-bold text-brand bg-brand/10 px-2.5 py-1 rounded-full">Current Plan</span>}
               </div>
-              <div className="text-3xl font-extrabold">$49 <span className="text-xs font-normal text-muted-foreground">/ month</span></div>
+              <div className="text-3xl font-extrabold">₹2,999 <span className="text-xs font-normal text-muted-foreground">/ month</span></div>
               <p className="text-xs text-muted-foreground">For active retail traders deploying multi-agent setups.</p>
 
               <ul className="flex flex-col gap-2 pt-4 text-xs">
@@ -163,7 +163,7 @@ export default function BillingPage() {
                 <h3 className="text-lg font-bold text-gold">Pro Tier</h3>
                 {plan === 'pro' && <span className="text-xs font-bold text-gold bg-gold/15 px-2.5 py-1 rounded-full">Current Plan</span>}
               </div>
-              <div className="text-3xl font-extrabold">$149 <span className="text-xs font-normal text-muted-foreground">/ month</span></div>
+              <div className="text-3xl font-extrabold">₹9,999 <span className="text-xs font-normal text-muted-foreground">/ month</span></div>
               <p className="text-xs text-muted-foreground">Full suite for institutional quants & high-frequency bots.</p>
 
               <ul className="flex flex-col gap-2 pt-4 text-xs">

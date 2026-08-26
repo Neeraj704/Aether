@@ -258,7 +258,7 @@ export function BuilderToolbar({
           Save
         </Button>
 
-        <Button render={<Link href={`/app/backtest/new?bot=${bot.id}`} />} size="sm">
+        <Button render={<Link href={`/app/bots/${bot.id}/backtest`} />} size="sm">
           <LineChart data-icon="inline-start" />
           Backtest
         </Button>

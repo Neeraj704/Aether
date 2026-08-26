@@ -26,7 +26,7 @@ export default function PricingPage() {
           <div className="rounded-2xl border border-border bg-card p-8 flex flex-col justify-between gap-8">
             <div className="flex flex-col gap-4">
               <h3 className="text-xl font-bold">Free Tier</h3>
-              <div className="text-4xl font-extrabold">$0 <span className="text-sm font-normal text-muted-foreground">/ mo</span></div>
+              <div className="text-4xl font-extrabold">₹0 <span className="text-sm font-normal text-muted-foreground">/ mo</span></div>
               <p className="text-xs text-muted-foreground">Perfect for exploring the 12-layer visual builder concept.</p>
 
               <div className="border-t border-border pt-4 flex flex-col gap-3 text-xs">
@@ -49,7 +49,7 @@ export default function PricingPage() {
                 <h3 className="text-xl font-bold">Starter Tier</h3>
                 <span className="text-xs font-bold text-brand bg-brand/20 px-3 py-1 rounded-full">Popular</span>
               </div>
-              <div className="text-4xl font-extrabold">$49 <span className="text-sm font-normal text-muted-foreground">/ mo</span></div>
+              <div className="text-4xl font-extrabold">₹2,999 <span className="text-sm font-normal text-muted-foreground">/ mo</span></div>
               <p className="text-xs text-muted-foreground">For active traders running multi-agent debate strategies.</p>
 
               <div className="border-t border-border pt-4 flex flex-col gap-3 text-xs">
@@ -70,7 +70,7 @@ export default function PricingPage() {
           <div className="rounded-2xl border border-gold/40 bg-gold/5 p-8 flex flex-col justify-between gap-8">
             <div className="flex flex-col gap-4">
               <h3 className="text-xl font-bold text-gold">Pro Tier</h3>
-              <div className="text-4xl font-extrabold">$149 <span className="text-sm font-normal text-muted-foreground">/ mo</span></div>
+              <div className="text-4xl font-extrabold">₹9,999 <span className="text-sm font-normal text-muted-foreground">/ mo</span></div>
               <p className="text-xs text-muted-foreground">Complete quant infrastructure with full 12-layer access.</p>
 
               <div className="border-t border-border pt-4 flex flex-col gap-3 text-xs">

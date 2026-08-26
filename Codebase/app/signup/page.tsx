@@ -29,7 +29,7 @@ export default function SignupPage() {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <Field label="Full Name">
-            <Input placeholder="Arjun Mehta" required />
+            <Input placeholder="Neeraj Sharma" required />
           </Field>
           <Field label="Email Address">
             <Input type="email" placeholder="arjun@aether.dev" required />

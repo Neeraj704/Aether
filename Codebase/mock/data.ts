@@ -95,7 +95,7 @@ export interface MockUser {
 
 export const CURRENT_USER: MockUser = {
   id: 'u-1',
-  name: 'Arjun Mehta',
+  name: 'Neeraj Sharma',
   email: 'arjun@aether.dev',
   initials: 'AM',
   bio: 'Systematic trader. Building slow, boring bots that survive.',
@@ -1839,7 +1839,7 @@ export const BLOG_POSTS: BlogPost[] = [
     title: 'Paper trading is the default, and it should stay that way',
     excerpt: 'Every new bot starts with no money at risk. Getting to real capital requires separate verification, on purpose.',
     date: '2026-07-08T11:15:00.000Z',
-    author: 'Arjun Mehta',
+    author: 'Neeraj Sharma',
     readingTime: '5 min',
     category: 'Product',
   },

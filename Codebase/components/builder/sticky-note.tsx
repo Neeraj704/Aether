@@ -39,7 +39,7 @@ export const StickyNote = memo(function StickyNote({ data }: NodeProps) {
   return (
     <div
       className={cn(
-        'nodrag group/note relative flex w-56 flex-col rounded-[12px] border p-2.5 shadow-[0_10px_30px_-14px_rgb(0_0_0/0.7)] transition-opacity',
+        'group/note relative flex w-56 flex-col rounded-[12px] border p-2.5 shadow-[0_10px_30px_-14px_rgb(0_0_0/0.7)] transition-opacity cursor-grab active:cursor-grabbing active:scale-[1.01]',
         d.resolved && 'opacity-45',
       )}
       style={{
@@ -92,7 +92,7 @@ export const StickyNote = memo(function StickyNote({ data }: NodeProps) {
             if (e.key === 'Escape') commit()
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commit()
           }}
-          className="w-full resize-none bg-transparent text-[12px] leading-relaxed text-foreground outline-none placeholder:text-tertiary"
+          className="nodrag w-full resize-none bg-transparent text-[12px] leading-relaxed text-foreground outline-none placeholder:text-tertiary"
         />
       ) : (
         <p
@@ -105,7 +105,7 @@ export const StickyNote = memo(function StickyNote({ data }: NodeProps) {
         </p>
       )}
 
-      <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover/note:opacity-100">
+      <div className="nodrag mt-2 flex gap-1 opacity-0 transition-opacity group-hover/note:opacity-100">
         {NOTE_COLORS.map((c) => (
           <button
             key={c}

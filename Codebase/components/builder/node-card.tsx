@@ -52,7 +52,7 @@ export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        'group/node relative flex flex-col rounded-[14px] border backdrop-blur-xl text-left transition-all duration-200 shadow-md hover:-translate-y-0.5',
+        'group/node relative flex flex-col rounded-[14px] border backdrop-blur-xl text-left transition-[border-color,box-shadow,opacity,background-color] duration-200 shadow-md hover:-translate-y-0.5 cursor-grab active:cursor-grabbing active:scale-[1.015] active:shadow-2xl',
         selected
           ? 'border-brand bg-background/90 shadow-[0_0_0_2px_var(--brand),0_12px_32px_-8px_rgba(0,0,0,0.5)]'
           : 'border-border/80 bg-background/75 hover:border-border hover:shadow-lg',

@@ -122,6 +122,7 @@ interface BuilderState extends Snapshot {
   addNode: (componentId: string, x: number, y: number) => string | null
   addBlock: (nodes: BotNode[], edges: BotEdge[], at?: { x: number; y: number }) => void
   moveNodes: (moves: { id: string; x: number; y: number }[]) => void
+  updatePositionsLive: (moves: { id: string; x: number; y: number }[]) => void
   nudgeSelection: (dx: number, dy: number) => void
   removeNodes: (ids: string[]) => void
   duplicateSelection: () => void
@@ -287,6 +288,31 @@ export const useBuilder = create<BuilderState>((set, get) => {
         nodes: get().nodes.map((n) => {
           const m = lookup.get(n.id)
           return m ? { ...n, x: snap(m.x), y: snap(m.y) } : n
+        }),
+      })
+    },
+
+    updatePositionsLive: (moves) => {
+      if (moves.length === 0) return
+      const lookup = new Map(moves.map((m) => [m.id, m]))
+      const snapFn = (v: number) => snapTo(v, get().view.snap)
+      const noteIds = new Set(get().notes.map((n) => n.id))
+      const frameIds = new Set(get().frames.map((f) => f.id))
+
+      set({
+        nodes: get().nodes.map((n) => {
+          const m = lookup.get(n.id)
+          return m && !noteIds.has(n.id) && !frameIds.has(n.id)
+            ? { ...n, x: snapFn(m.x), y: snapFn(m.y) }
+            : n
+        }),
+        notes: get().notes.map((n) => {
+          const m = lookup.get(n.id)
+          return m ? { ...n, x: snapFn(m.x), y: snapFn(m.y) } : n
+        }),
+        frames: get().frames.map((f) => {
+          const m = lookup.get(f.id)
+          return m ? { ...f, x: snapFn(m.x), y: snapFn(m.y) } : f
         }),
       })
     },

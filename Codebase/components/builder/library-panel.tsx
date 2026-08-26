@@ -33,6 +33,14 @@ function LibraryRow({
         onDragStart={(e) => {
           e.dataTransfer.setData(DRAG_MIME, comp.id)
           e.dataTransfer.effectAllowed = 'copy'
+          const dragEl = document.createElement('div')
+          dragEl.className =
+            'fixed -top-[9999px] left-0 pointer-events-none z-50 flex items-center gap-2 rounded-[12px] border border-brand/60 bg-background/95 px-3 py-2 text-foreground shadow-2xl backdrop-blur-xl'
+          dragEl.style.width = '200px'
+          dragEl.innerHTML = `<span class="size-2 rounded-full" style="background: ${layer.hue}"></span><span class="text-xs font-medium truncate">${comp.name}</span>`
+          document.body.appendChild(dragEl)
+          e.dataTransfer.setDragImage(dragEl, 100, 20)
+          setTimeout(() => document.body.removeChild(dragEl), 0)
         }}
         onDoubleClick={() => {
           if (locked) onUnlockRequest(comp)

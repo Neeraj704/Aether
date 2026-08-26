@@ -114,6 +114,7 @@ function FlowCanvas({
     focusToken,
     addNode,
     moveNodes,
+    updatePositionsLive,
     moveNote,
     setSelection,
     setSelectedEdges,
@@ -255,19 +256,32 @@ function FlowCanvas({
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      const moves = changes
+      // 1. Live position updates during drag
+      const liveMoves = changes
         .filter(
           (c): c is NodeChange & { type: 'position'; id: string; position: { x: number; y: number } } =>
-            c.type === 'position' && 'position' in c && !!c.position && c.dragging === false,
+            c.type === 'position' && 'position' in c && !!c.position && c.dragging === true,
         )
         .map((c) => ({ id: c.id, x: c.position.x, y: c.position.y }))
 
-      if (moves.length > 0) {
+      if (liveMoves.length > 0) {
+        updatePositionsLive(liveMoves)
+      }
+
+      // 2. Final position commit on drag release or non-drag move
+      const finalMoves = changes
+        .filter(
+          (c): c is NodeChange & { type: 'position'; id: string; position: { x: number; y: number } } =>
+            c.type === 'position' && 'position' in c && !!c.position && c.dragging !== true,
+        )
+        .map((c) => ({ id: c.id, x: c.position.x, y: c.position.y }))
+
+      if (finalMoves.length > 0) {
         const noteIds = new Set(notes.map((n) => n.id))
         const frameIds = new Set(frames.map((f) => f.id))
-        const nodeMoves = moves.filter((m) => !noteIds.has(m.id) && !frameIds.has(m.id))
+        const nodeMoves = finalMoves.filter((m) => !noteIds.has(m.id) && !frameIds.has(m.id))
 
-        for (const m of moves) {
+        for (const m of finalMoves) {
           if (noteIds.has(m.id)) moveNote(m.id, m.x, m.y)
         }
         if (nodeMoves.length > 0) moveNodes(nodeMoves)
@@ -283,7 +297,7 @@ function FlowCanvas({
         }
       }
     },
-    [moveNodes, moveNote, notes, frames, setSelection],
+    [updatePositionsLive, moveNodes, moveNote, notes, frames, setSelection],
   )
 
   const onEdgesChange = useCallback(

@@ -13,6 +13,8 @@ import {
   type BotEdge,
   type BotNode,
   type BotStatus,
+  type CanvasFrame,
+  type CanvasNote,
   type BacktestRun,
   type MyPreset,
   type Notification,
@@ -89,7 +91,12 @@ interface WorkspaceState {
   duplicateBot: (id: string) => Bot | null
   deleteBot: (id: string) => void
   updateBot: (id: string, patch: Partial<Omit<Bot, 'id'>>) => void
-  saveGraph: (id: string, nodes: BotNode[], edges: BotEdge[]) => void
+  saveGraph: (
+    id: string,
+    nodes: BotNode[],
+    edges: BotEdge[],
+    annotations?: { notes: CanvasNote[]; frames: CanvasFrame[] },
+  ) => void
   setBotStatus: (id: string, status: BotStatus) => void
   snapshotVersion: (id: string, note: string) => void
 
@@ -197,12 +204,21 @@ export const useWorkspace = create<WorkspaceState>()(
           ),
         }),
 
-      saveGraph: (id, nodes, edges) =>
-        set({
-          bots: get().bots.map((b) =>
-            b.id === id ? { ...b, nodes, edges, updatedAt: nowISO() } : b,
-          ),
-        }),
+    saveGraph: (id, nodes, edges, annotations) =>
+      set({
+        bots: get().bots.map((b) =>
+          b.id === id
+            ? {
+                ...b,
+                nodes,
+                edges,
+                notes: annotations?.notes ?? b.notes,
+                frames: annotations?.frames ?? b.frames,
+                updatedAt: nowISO(),
+              }
+            : b,
+        ),
+      }),
 
       setBotStatus: (id, status) =>
         set({

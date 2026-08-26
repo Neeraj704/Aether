@@ -22,6 +22,29 @@ export interface BotEdge {
   target: string
 }
 
+/** Sticky note or pinned comment placed on the builder canvas. */
+export interface CanvasNote {
+  id: string
+  kind: 'note' | 'comment'
+  x: number
+  y: number
+  text: string
+  color: 'amber' | 'blue' | 'green' | 'pink' | 'slate'
+  createdAt: string
+  resolved?: boolean
+}
+
+/** Labelled section drawn behind the nodes to group part of a strategy. */
+export interface CanvasFrame {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+  label: string
+  hue: string
+}
+
 export type BotStatus = 'draft' | 'backtested' | 'live' | 'paused' | 'error'
 
 export interface BotVersion {
@@ -42,6 +65,9 @@ export interface Bot {
   tags: string[]
   nodes: BotNode[]
   edges: BotEdge[]
+  /** Canvas annotations — optional so older saved graphs keep working. */
+  notes?: CanvasNote[]
+  frames?: CanvasFrame[]
   headlineMetric: { label: string; value: string; positive: boolean }
   visibility: 'private' | 'unlisted' | 'public'
   versions: BotVersion[]

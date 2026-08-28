@@ -1,0 +1,148 @@
+# AETHER — Phase 3 Build Prompt: Legal Pages + Auth Flow Pages
+
+You are continuing work on AETHER, the same Next.js 16 (App Router) frontend-only, fully-mocked codebase from the previous two phases. This phase is smaller and lower-risk than the backtest flow — mostly static content pages and simple mocked form flows. Read this whole document before writing code.
+
+**Scope discipline note, because it mattered last time:** only touch the files listed in §2. If you think an existing page (footer, login, signup, settings) needs a small link added so these new pages are actually reachable, that's in scope and listed explicitly below — but do not restyle, refactor, or "improve" anything else in those files while you're there. If you're tempted to touch a file not listed in §2, stop and don't.
+
+---
+
+## 0. Orientation
+
+Still frontend-only. Still no real backend. This phase has two halves:
+
+1. **Legal pages** — static, mostly-text pages: Terms, Privacy Policy, Risk Disclosure, Refund Policy. These aren't decorative — AETHER is a trading product, and the Risk Disclosure page in particular is something the product's own docs (`03 : Page by page features`, `mock/data.ts`'s `FAQS`) already treat as load-bearing ("Is this financial advice?" is literally the first FAQ). Write real, complete, sensible content for each — not lorem ipsum, not three sentences and a "coming soon."
+2. **Auth flow pages** — `/forgot-password`, `/reset-password`, `/verify-email`. These are mocked exactly like `/login` and `/signup` already are (no real email sending, no real tokens) — the point is that the *flow* feels complete and every state is reachable, not that it's functionally real.
+
+Before writing anything, actually open and read `app/login/page.tsx` and `app/signup/page.tsx` — these are your reference for visual style, form patterns, and how auth pages in this codebase are already structured (the marketing-site layout wrapper, the card treatment, the input/button patterns). Match them exactly. Also check whether either page already has a "Forgot password?" or similar link pointing nowhere — if so, that's the link you're wiring up in §2.
+
+---
+
+## 1. Ground rules (same as previous phases)
+
+1. Reuse existing UI primitives (`Button`, `PillButton`/`PillLink`, `Card`, `Input`/`Field`, `Checkbox`, `Dialog`, `EmptyState`, `Tabs`, `Toast` via `lib/store.ts`) — do not invent new ones.
+2. Every flow is fully mocked but fully wired — no dead ends, no console.logs. A "Send reset link" button must visibly do something (toast + state transition), even though no email is actually sent.
+3. Match the marketing-site visual language (the same one `/login`, `/signup`, `/pricing`, `/how-it-works` already use) for all six new pages — centered card layouts, not the authenticated-app-shell layout used under `/app/*`.
+4. Legal page content should be genuinely thorough — several hundred words per page minimum, organized with real headings, written in plain English, specific to what AETHER actually is and does (a bot-building/backtesting tool, paper trading by default, marketplace with revenue share, credits that don't expire, etc. — pull real specifics from `mock/data.ts`'s `FAQS`, `PLANS`, and `PLAN_COMPARISON` so the legal pages are consistent with what the product actually claims elsewhere, not generic boilerplate that contradicts the rest of the app).
+5. Do not add a rich-text/markdown-rendering library for the legal pages — plain JSX with semantic headings and paragraphs is correct and matches how `app/docs/page.tsx` already renders structured content from `DOC_SECTIONS`.
+
+---
+
+## 2. Files to create or modify
+
+| Action | Path | Purpose |
+|---|---|---|
+| Create | `app/legal/terms/page.tsx` | Terms of Service |
+| Create | `app/legal/privacy/page.tsx` | Privacy Policy |
+| Create | `app/legal/risk-disclosure/page.tsx` | Risk Disclosure |
+| Create | `app/legal/refund-policy/page.tsx` | Refund Policy |
+| Create | `components/legal/legal-page-layout.tsx` | Shared wrapper: title, "Last updated" date, back link, consistent prose styling, and a small in-page nav linking to the other three legal pages (so a visitor lands on one and can browse the rest). |
+| Create | `app/forgot-password/page.tsx` | Request a reset link (mocked). |
+| Create | `app/reset-password/page.tsx` | Set a new password (mocked), reads a fake token from the query string. |
+| Create | `app/verify-email/page.tsx` | Email verification landing page (mocked), reads a fake token from the query string. |
+| Modify | `app/login/page.tsx` | Add a "Forgot password?" link to `/forgot-password` if one doesn't already exist. Nothing else in this file changes. |
+| Modify | (whatever file renders the site footer — locate it yourself, likely `components/layout/footer.tsx` or similar) | Add the four legal page links (Terms, Privacy, Risk Disclosure, Refund Policy) to the footer's link list, matching the existing footer link style exactly. Nothing else in this file changes. |
+
+Do not create `/app/account/danger-zone` or any account-level page — that's still out of scope per the phase-2 deferred list. Do not touch `app/signup/page.tsx` beyond what's needed if it already has a dead legal-page link that needs pointing somewhere real (check first; only touch it if there's an actual dead link to fix).
+
+---
+
+## 3. Legal pages — detailed content spec
+
+### 3.1 Shared layout (`components/legal/legal-page-layout.tsx`)
+
+```tsx
+export function LegalPageLayout({
+  title,
+  lastUpdated,
+  children,
+}: {
+  title: string
+  lastUpdated: string   // e.g. '24 August 2026'
+  children: React.ReactNode
+}) {
+  // Centered max-w-[720px] prose column, generous line-height, consistent with
+  // the reading-focused feel of app/docs/page.tsx's article content.
+  // Header: back-to-home link, title, "Last updated {lastUpdated}" in text-tertiary.
+  // Footer of the layout: a small row of links to the other three legal pages.
+  // children renders the actual body content (headings/paragraphs/lists).
+}
+```
+
+Use plain semantic HTML for the body content inside each page (`<h2>`, `<p>`, `<ul>`) styled via a `prose`-like set of Tailwind utility classes applied at the `LegalPageLayout` level (font sizes, spacing, list markers) — don't reach for `@tailwindcss/typography` as a new dependency, just write the handful of utility classes directly since the content structure is simple and fixed.
+
+### 3.2 Terms of Service (`app/legal/terms/page.tsx`)
+
+Real sections, each a couple of paragraphs: what AETHER is (a tool for building, testing, and paper-trading algorithmic strategies — not a broker, not an advisor, not a fund manager); account eligibility and responsibilities; description of the credits/subscription model (consistent with `PLANS` and `CREDIT_BUNDLES` in `mock/data.ts` — credits don't expire, subscriptions unlock component tiers, etc.); the marketplace (publishing, forking, the 80% revenue share for Pro creators mentioned in `PLAN_COMPARISON`); acceptable use (no reverse engineering, no abuse of the platform to redistribute paid presets outside the marketplace); intellectual property (users retain rights to strategies they build; AETHER retains rights to the platform itself); disclaimers of warranty; limitation of liability; termination; governing law (India, consistent with the ₹ pricing and NSE/Nifty-focused product); how to contact for legal questions.
+
+### 3.3 Privacy Policy (`app/legal/privacy/page.tsx`)
+
+What data is collected (account info, trading strategies/bot graphs, usage analytics, payment info handled by the payment processor rather than stored directly); how it's used (running the product, improving it, nothing about selling data to third parties — be explicit that strategy data is never used to trade against users or sold to other users without explicit publishing consent, since that's a real trust concern for a platform where people build proprietary trading logic); data retention; how the existing "Export all data" feature (already referenced in `mock/data.ts`'s `FAQS`) fits in; cookies/analytics; children's privacy (not directed at anyone under 18, consistent with it being a trading product); user rights (access, correction, deletion); how to contact for privacy questions.
+
+### 3.4 Risk Disclosure (`app/legal/risk-disclosure/page.tsx`)
+
+This is the most important of the four — write it with real care, not filler. Cover: trading involves substantial risk of loss and is not suitable for everyone; past performance (including backtest results) does not guarantee future results — this exact framing already appears verbatim in `mock/data.ts`'s `quickstart` doc section, reuse that framing for consistency; backtests are simulations and have inherent limitations (survivorship bias, lookahead bias, overfitting — these are literally already named and explained in `DOC_SECTIONS`'s `backtesting` section, pull from there so the product is internally consistent rather than saying subtly different things in two places); paper trading does not reflect real market conditions like slippage under stress, liquidity gaps, or emotional decision-making with real capital at stake; AETHER is not a registered investment advisor and nothing in the product constitutes investment advice or a recommendation to buy or sell any security (this exact stance already appears in the `FAQS` — reuse it); users are solely responsible for their own trading decisions; automated/algorithmic strategies can fail in unexpected ways (bugs, bad data, market regime changes); real-money live trading is a separate, explicitly opt-in tier requiring additional verification, and users should only risk capital they can afford to lose.
+
+### 3.5 Refund Policy (`app/legal/refund-policy/page.tsx`)
+
+Cover: subscription refunds (e.g., pro-rated or not within some window — pick a reasonable, clearly-stated policy, such as "refundable within 7 days of a new subscription or upgrade if you haven't run more than a handful of backtests, at our discretion" — be specific and concrete rather than vague); credit purchases (typically non-refundable once any credits have been spent, since they unlock permanent component access — consistent with credits "never expiring" per `PLANS`); marketplace preset purchases (a short satisfaction window, consistent with a digital-goods marketplace); how to actually request a refund (a real-feeling process description, e.g. "contact support with your invoice ID" — reference the existing `Invoice` id format from `mock/data.ts`, like `INV-2026-0814`, so it feels internally consistent); processing time.
+
+---
+
+## 4. Auth flow pages — detailed spec
+
+All three follow the same visual shell as `/login`/`/signup` (centered card, marketing layout, not the app shell). All three are local `useState` state machines — no store wiring needed, since none of this persists anything real.
+
+### 4.1 Forgot Password (`app/forgot-password/page.tsx`)
+
+- State: `'form' | 'sent'`.
+- `form` state: a `Card` with a headline, one `Field label="Email"` + `Input type="email"`, and a `PillButton` "Send reset link". On submit (no real validation needed beyond non-empty), transition to `sent` and `toast.success('Reset link sent', 'Check your inbox for further instructions.')`.
+- `sent` state: confirmation message ("If an account exists for that email, we've sent a reset link.") plus a "Back to login" `PillLink` to `/login`, and a small "Didn't get it? Resend" text-button that just re-shows the toast and stays on this state (no actual resend logic needed).
+- Small link back to `/login` in the `form` state too, for anyone who got here by mistake.
+
+### 4.2 Reset Password (`app/reset-password/page.tsx`)
+
+- Reads a `token` query param via `useSearchParams()` — **remember the Suspense lesson from the phase-2 patch**: wrap any component using `useSearchParams()` in a `<Suspense>` boundary, exactly the pattern used in `app/app/bots/[botId]/page.tsx` after that patch. Don't repeat that mistake here.
+- If no `token` param is present at all, show an `EmptyState` (icon `AlertTriangle` or similar) — "This reset link is invalid or has expired" — with a `PillLink` back to `/forgot-password` to request a new one. This is a real, reachable state — don't skip it.
+- If a token is present (any non-empty string counts as "valid" for this mock — don't build fake token validation logic), show a form: `Field label="New password"` + `Input type="password"`, `Field label="Confirm new password"` + `Input type="password"`, client-side check that they match (inline error text if not, using the same inline-validation visual pattern already used on `/signup`), `PillButton` "Reset password". On submit, transition to a `done` state — a success message plus a `PillLink` "Continue to login" → `/login`.
+
+### 4.3 Verify Email (`app/verify-email/page.tsx`)
+
+- Same `useSearchParams()` + `Suspense` pattern as above.
+- This one has three states, driven purely by whether a token is present (no real async check — pick the state synchronously from whether the query param exists and is non-empty, so there's no artificial loading spinner needed, though a brief one is fine if you want the transition to feel real):
+  - No token → `EmptyState`: "Missing verification link" with description explaining they should check their email, and a "Resend verification email" button that just fires a `toast.info('Verification email sent', "Check your inbox.")` and stays put.
+  - Token present → success state: a checkmark-style confirmation ("Your email is verified"), a `PillLink` "Continue to dashboard" → `/app`.
+  - (Optional, nice-to-have, not required) — if you want a third state for realism, treat a token literally equal to the string `expired` as an expired-link case with a resend button, so the page has an obviously-testable failure path. Skip this if it adds meaningful complexity; the two states above are sufficient.
+
+---
+
+## 5. Wiring into existing pages
+
+- **`app/login/page.tsx`**: add a small "Forgot password?" text link near the password field, pointing to `/forgot-password`, styled consistently with any existing small links on that page (e.g. the sign-up link, if one exists). This is the only change to this file.
+- **Footer**: locate the actual footer component (search for where `/pricing`, `/how-it-works`, or similar marketing links are already rendered site-wide) and add Terms / Privacy / Risk Disclosure / Refund Policy as a link group, matching the existing footer's link styling and grouping pattern exactly. This is the only change to that file.
+- Do not add legal-page links to the authenticated `/app/*` shell/sidebar — those pages are part of the public marketing surface, not the app shell, consistent with how `/pricing` and `/how-it-works` are already handled.
+
+---
+
+## 6. Explicit non-goals for this phase
+
+- Do not build real email sending, real tokens, or real password hashing/storage — everything here is presentation-layer only, same as `/login`/`/signup` already are.
+- Do not touch `/app/account/*` — still out of scope.
+- Do not add a markdown/rich-text rendering dependency.
+- Do not restyle `/login`, `/signup`, `/pricing`, or `/how-it-works` beyond the single small link addition specified above.
+- Do not touch anything under `app/app/*`, `components/bot/*`, or `components/backtest/*` — this phase has nothing to do with the builder or the backtest flow.
+
+---
+
+## 7. Acceptance checklist
+
+- [ ] All four legal pages render real, substantial, product-specific content — not placeholder text — and are internally consistent with claims already made elsewhere in the app (backtest disclaimers, credit/subscription terms, "not investment advice" stance).
+- [ ] Each legal page cross-links to the other three via the shared layout.
+- [ ] The footer (site-wide, on marketing pages at minimum) now links to all four legal pages and they actually navigate correctly.
+- [ ] `/forgot-password` → submitting the form reaches a real "sent" confirmation state, not a dead end.
+- [ ] `/reset-password?token=abc123` shows the reset form; `/reset-password` with no token shows the invalid-link empty state; both are manually reachable and correct.
+- [ ] `/verify-email?token=abc123` shows a success state with a working link into `/app`; `/verify-email` with no token shows the missing-link state with a working resend button.
+- [ ] Both `useSearchParams()` usages are wrapped in `Suspense`, matching the phase-2 patch pattern — verify this explicitly, don't just assume you remembered.
+- [ ] `/login` has exactly one small addition (the forgot-password link) and is otherwise byte-identical to before.
+- [ ] No file outside the list in §2 was modified. Confirm this yourself by mentally diffing what you touched against that table before you finish.
+
+When done, summarize: every file created/modified, and explicit confirmation that nothing outside §2's list was touched.

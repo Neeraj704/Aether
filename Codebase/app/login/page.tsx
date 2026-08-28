@@ -31,9 +31,15 @@ export default function LoginPage() {
           <Field label="Email Address">
             <Input type="email" placeholder="arjun@aether.dev" defaultValue="arjun@aether.dev" required />
           </Field>
-          <Field label="Password">
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[13px] font-medium text-foreground">Password</label>
+              <Link href="/forgot-password" className="text-xs text-brand font-medium hover:underline">
+                Forgot password?
+              </Link>
+            </div>
             <Input type="password" placeholder="••••••••" defaultValue="password123" required />
-          </Field>
+          </div>
           <PillButton type="submit" className="w-full justify-center mt-2">
             Sign In &rarr;
           </PillButton>

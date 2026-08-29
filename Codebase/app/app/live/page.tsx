@@ -294,80 +294,82 @@ export default function LiveMonitoringPage() {
         </div>
 
         {/* Controls */}
-        <div className="flex items-center flex-wrap gap-2">
-          {/* Stream pause/play toggle */}
-          <button
-            onClick={() => setIsStreaming(!isStreaming)}
-            className={`h-9 px-3.5 rounded-full border text-xs font-semibold flex items-center gap-2 transition-all ${
-              isStreaming
-                ? 'border-profit/30 bg-profit/10 text-profit hover:bg-profit/20'
-                : 'border-warn/30 bg-warn/10 text-warn hover:bg-warn/20'
-            }`}
-          >
-            {isStreaming ? (
-              <>
-                <Pause className="size-3.5" /> Pause Feed
-              </>
-            ) : (
-              <>
-                <Play className="size-3.5" /> Resume Feed
-              </>
-            )}
-          </button>
+        <div className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
+          {/* Feed Toolbar Capsule */}
+          <div className="flex items-center bg-secondary/50 border border-border/80 rounded-full p-1 gap-1">
+            {/* Stream pause/play toggle */}
+            <button
+              onClick={() => setIsStreaming(!isStreaming)}
+              className={`h-7 px-3 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                isStreaming
+                  ? 'bg-profit/15 text-profit hover:bg-profit/25 border border-profit/30'
+                  : 'bg-warn/15 text-warn hover:bg-warn/25 border border-warn/30'
+              }`}
+              title={isStreaming ? 'Pause live WebSocket stream' : 'Resume live WebSocket stream'}
+            >
+              {isStreaming ? (
+                <>
+                  <Pause className="size-3" />
+                  <span>Pause Feed</span>
+                </>
+              ) : (
+                <>
+                  <Play className="size-3" />
+                  <span>Resume</span>
+                </>
+              )}
+            </button>
 
-          {/* Tick Speed Toggle */}
-          <button
-            onClick={() => setTickSpeed((prev) => (prev === 1200 ? 500 : prev === 500 ? 2500 : 1200))}
-            className="h-9 px-3 rounded-full border border-border bg-secondary/60 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary flex items-center gap-1.5 transition-colors"
-            title="Cycle tick simulation speed"
-          >
-            <Zap className="size-3.5 text-brand" />
-            <span>{tickSpeed === 500 ? 'Fast (0.5s)' : tickSpeed === 1200 ? 'Normal (1.2s)' : 'Slow (2.5s)'}</span>
-          </button>
+            {/* Tick Speed Toggle */}
+            <button
+              onClick={() => setTickSpeed((prev) => (prev === 1200 ? 500 : prev === 500 ? 2500 : 1200))}
+              className="h-7 px-2.5 rounded-full text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/80 flex items-center gap-1 transition-colors cursor-pointer"
+              title={`Simulation speed: ${tickSpeed === 500 ? 'Fast (0.5s)' : tickSpeed === 1200 ? 'Normal (1.2s)' : 'Slow (2.5s)'} (click to cycle)`}
+            >
+              <Zap className="size-3 text-brand" />
+              <span className="text-[11px] font-mono">{tickSpeed === 500 ? '0.5s' : tickSpeed === 1200 ? '1.2s' : '2.5s'}</span>
+            </button>
 
-          {/* Sound alert toggle */}
-          <button
-            onClick={() => {
-              setSoundOn(!soundOn)
-              toast.info(soundOn ? 'Alert sounds muted' : 'Alert sounds enabled')
-            }}
-            className={`h-9 px-3 rounded-full border text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
-              soundOn
-                ? 'border-border bg-secondary/60 text-foreground hover:bg-secondary'
-                : 'border-border bg-transparent text-muted-foreground hover:bg-secondary/40'
-            }`}
-            title={soundOn ? 'Audible risk/warn alerts enabled' : 'Audible alerts muted'}
-          >
-            {soundOn ? (
-              <Volume2 className="size-3.5 text-brand" />
-            ) : (
-              <VolumeX className="size-3.5 text-muted-foreground" />
-            )}
-            <span>{soundOn ? 'Sound On' : 'Sound Off'}</span>
-          </button>
+            <div className="h-4 w-px bg-border/60 mx-0.5" />
 
-          {/* Reconnect Gateway */}
-          <button
-            onClick={handleReconnect}
-            className="h-9 px-3 rounded-full border border-border bg-secondary/60 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Reconnect to feed gateway"
-          >
-            <RefreshCw className="size-3.5 text-brand" />
-            <span>Reconnect</span>
-          </button>
+            {/* Sound alert toggle */}
+            <button
+              onClick={() => {
+                setSoundOn(!soundOn)
+                toast.info(soundOn ? 'Alert sounds muted' : 'Alert sounds enabled')
+              }}
+              className={`h-7 w-7 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+                soundOn
+                  ? 'text-brand hover:bg-secondary/80'
+                  : 'text-muted-foreground/60 hover:text-foreground hover:bg-secondary/80'
+              }`}
+              title={soundOn ? 'Sound alerts enabled (click to mute)' : 'Sound alerts muted (click to enable)'}
+            >
+              {soundOn ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
+            </button>
+
+            {/* Reconnect Gateway */}
+            <button
+              onClick={handleReconnect}
+              className="h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors cursor-pointer"
+              title="Reconnect to feed gateway"
+            >
+              <RefreshCw className="size-3.5" />
+            </button>
+          </div>
 
           {/* Manual Trade Simulation */}
           <button
             onClick={handleSimulateTrade}
-            className="h-9 px-3.5 rounded-full border border-brand/30 bg-brand/10 text-xs font-semibold text-brand hover:bg-brand/20 transition-colors flex items-center gap-1.5 cursor-pointer"
+            className="h-8 px-3 rounded-full border border-brand/30 bg-brand/10 text-xs font-medium text-brand hover:bg-brand/20 transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
-            <Plus className="size-3.5" /> Execute Test Trade
+            <Plus className="size-3.5" /> Test Trade
           </button>
 
           {/* Emergency Stop */}
           <button
             onClick={() => setKillConfirmed(true)}
-            className="h-9 px-4 rounded-full border border-destructive/40 bg-destructive/15 text-xs font-semibold text-destructive hover:bg-destructive/25 transition-colors flex items-center gap-2 cursor-pointer"
+            className="h-8 px-3.5 rounded-full border border-destructive/40 bg-destructive/15 text-xs font-semibold text-destructive hover:bg-destructive/25 transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
             <ShieldAlert className="size-3.5" /> Emergency Stop
           </button>

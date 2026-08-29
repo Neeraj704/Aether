@@ -3,11 +3,13 @@
 import { ArrowRight } from 'lucide-react'
 import { PillLink } from '@/components/ui/pill-button'
 import { useReveal } from '@/lib/use-reveal'
+import { useSession } from '@/lib/store'
 
 const ASSURANCES = ['No card required', 'Paper trading by default', 'Cancel anytime']
 
 export function ClosingCta() {
   const ref = useReveal<HTMLDivElement>()
+  const authed = useSession((s) => s.authed)
 
   return (
     <section className="relative overflow-hidden border-t border-border py-24 sm:py-32">
@@ -39,11 +41,12 @@ export function ClosingCta() {
         </p>
 
         <div data-reveal className="mt-9 flex flex-wrap items-center justify-center gap-3">
-          <PillLink href="/builder" size="lg">
+          <PillLink href={authed ? '/app/builder' : '/signup'} size="lg">
             Open the builder
             <ArrowRight className="size-4" strokeWidth={2} />
           </PillLink>
-          <PillLink href="/marketplace" size="lg" variant="secondary">
+          {/* TODO(phase5): point at public /marketplace once built */}
+          <PillLink href="/app/marketplace" size="lg" variant="secondary">
             Browse strategies
           </PillLink>
         </div>

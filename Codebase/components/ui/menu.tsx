@@ -61,10 +61,13 @@ export function MenuLinkItem({ className, ...props }: MenuPrimitive.LinkItem.Pro
   return <MenuPrimitive.LinkItem className={cn(itemClass, className)} {...props} />
 }
 
-export function MenuLabel({ className, ...props }: MenuPrimitive.GroupLabel.Props) {
+export function MenuLabel({
+  className,
+  ...props
+}: React.ComponentProps<'div'>) {
   return (
-    <MenuPrimitive.GroupLabel
-      className={cn('px-2.5 pt-2 pb-1 text-[11px] font-medium tracking-[0.04em] text-tertiary uppercase', className)}
+    <div
+      className={cn('px-2.5 pt-2 pb-1 text-[11px] font-medium tracking-[0.04em] text-tertiary uppercase select-none', className)}
       {...props}
     />
   )

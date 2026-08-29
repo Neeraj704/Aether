@@ -1,0 +1,86 @@
+# AETHER — Phases 4–7 Master Implementation Plan
+
+This is the continuation of your existing document set (`01–04` = product spec and initial build prompts). It picks up exactly where `Prompts/04 Prompt (AntiGravity)` left off. It was written after a full read of every PRD, every prompt, and every file in your current codebase — not from assumptions.
+
+## Why four more files instead of one
+
+Your own build history (v0 → AntiGravity Phase 2 → Phase 2 patch → Phase 3) proves that narrow, bounded prompts fed one at a time to a coding agent produce clean results, and one giant prompt covering everything invites regressions and half-finished work. This plan keeps that discipline. Do not paste all four phase files into one agent conversation. Feed them **in order, one at a time**, and only start the next phase once the current one's acceptance checklist passes.
+
+| File | Phase | What it does | Depends on |
+|---|---|---|---|
+| `05_Phase4_Bug_Bash_and_Auth_Guards.md` | 4 | Fixes everything already built: dead links, unwired buttons, missing 404, no real sign-out gate, three different hardcoded pricing numbers. Adds zero new pages. | Nothing — start here. |
+| `06_Phase5_Missing_Pages_and_Onboarding.md` | 5 | Builds every page your own sitemap and mock data already call for but that doesn't exist yet: library, presets, compare, marketplace detail + publish, creator dashboard, billing subpages, account subpages, help, search, onboarding, blog. | Phase 4 (uses the fixed routes/links). |
+| `07_Phase6_Node_System_Overhaul.md` | 6 | The "1000% more configurable" work: a real config-field schema, model/provider selection, editable prompts, a Deep Customization modal, applied first to Intelligence Agents then rolled out everywhere. | Phase 4. Independent of Phase 5 — can run in parallel if you use two agent sessions. |
+| `08_Phase7_Graph_and_Config_Storage_Model.md` | 7 | Reshapes how bots/nodes/configs are stored — still `localStorage`, but normalized so it maps cleanly onto real relational tables later, and versioning/config history actually work. | Phase 6 (needs the new config shape to normalize). |
+
+Total order if run serially: **4 → 5 → 6 → 7**. If you have two agent sessions, 5 and 6 can run concurrently after 4, and 7 waits for 6.
+
+## What this plan is not
+
+It is not a backend build. Every phase here stays inside the current architecture: Next.js 16 App Router, all client components, Zustand + `localStorage` persistence, everything mocked. No API routes, no database, no real Razorpay, no real model calls. That is deliberately the *next* plan, after this one — do not let an agent "helpfully" start wiring a real backend mid-phase. If an agent proposes that, stop it.
+
+## Ground rules that apply to every phase below
+
+Paste this section (or reference this file) at the top of whichever phase prompt you feed the agent, since it is not repeated in full in each phase file.
+
+**Stack, as it exists today — do not change these:**
+- Next.js 16 (App Router, `'use client'` on every interactive component), React 19, TypeScript, Tailwind v4 (CSS-variable tokens in `app/globals.css`, no `tailwind.config`).
+- State: Zustand. `lib/store.ts` (session/auth/theme/toasts/dev-switcher), `lib/workspace-store.ts` (bots/runs/presets/notifications, persisted), `lib/builder-store.ts` (canvas-local undo/redo state, not persisted directly — it's loaded from and saved back to the workspace store).
+- Canvas: `@xyflow/react` (React Flow). Don't introduce a second canvas library or hand-roll positioning logic.
+- UI kit: `@base-ui/react` primitives wrapped in `components/ui/*` (`Dialog`, `Menu`, `Select`, `Slider`, `Switch`, `Tabs`/`Segmented`). **Always reuse these** — never import a raw `@base-ui/react` primitive directly in a page, and never hand-roll a modal/dropdown with raw `useState` + conditional divs when `Dialog`/`Menu` already exist.
+- Icons: `lucide-react`. Motion: `motion/react` for component-level transitions, `gsap` + `ScrollTrigger` (via `lib/use-reveal.ts`) for marketing-page scroll reveals only — don't mix them.
+- Formatting: always `formatINR`, `formatPct`, `formatNumber`, `formatCompact`, `formatDate`, `relativeTime` from `lib/utils.ts`. Never hand-format a rupee value, a date, or a percentage inline. If a new format is needed (e.g. a duration), add one function to `lib/utils.ts`, don't inline it.
+- IDs: `slugId(prefix)` from `lib/utils.ts` for anything new needing a client-generated id.
+
+**Design language — "Aether Glass":**
+- Frosted glass surfaces (`glass`, `glass-chrome` utility classes in `globals.css`), Apple-style easing (`EASE_AETHER` / `EASE_CSS` from `lib/utils.ts`), semantic colors `text-profit` / `text-loss` / `text-warn` / `text-gold` / `text-brand`, never raw green/red hex.
+- Every list/table/detail page needs all three states already established elsewhere in the app: a loading `Skeleton`, an `EmptyState` (icon + title + one real explanation + one primary action — never a bare "No data"), and where relevant an `ErrorState` with retry. Copy the exact pattern from `app/app/bots/[botId]/page.tsx`'s `BotDetailSkeleton` + `EmptyState` combo.
+- Every destructive action needs confirmation. The current codebase uses the browser's native `confirm()` in a couple of places (`bots/page.tsx`, `settings-tab.tsx`) — **replace these** with a proper `Dialog`-based `ConfirmDialog` component (build this once in Phase 4, reuse everywhere after). Native `confirm()` cannot be styled and looks broken next to a polished glass UI.
+- Every non-trivial action produces a `toast` (`success` / `error` / `info` / `unlock` from `lib/store.ts`) — this pattern is already consistent almost everywhere; keep it that way for every new button you wire up.
+
+**What "coming soon" is still allowed to mean after these four phases:** only things that require a real backend or real third-party integration — actual Razorpay checkout, real broker/live-money execution, real email delivery, a real LLM call. Everything else — every page, every button, every piece of data shown — must be real within the mocked/local-storage world: it must actually change state, actually persist across a refresh, and actually navigate somewhere that exists. "Coming soon" is not an acceptable outcome for a button that could instead just work against mock data.
+
+**Never do this in any phase:**
+- Don't invent a new visual language, spacing scale, or component pattern when an existing one in `components/ui/` already covers the need.
+- Don't add `localStorage`/`sessionStorage` calls directly in a component — everything persisted goes through a Zustand `persist` store, same as today.
+- Don't scope-creep. If you notice something unrelated to the current phase that's broken, note it in a comment or a running "found but not fixed" list at the end of the session — don't fix it in the middle of an unrelated phase. (Phase 4 is explicitly the phase where you *do* fix these, so most of what you'll notice is already listed there.)
+- Don't touch `Iteration 101/` content or try to implement the "Quantum Edge" backend blueprint. That was an early idea, not a target for these phases.
+
+## How the codebase is organized (for the agent's orientation)
+
+```
+app/                      → routes (App Router)
+  (marketing pages at root: /, /pricing, /docs, /how-it-works, /legal/*, auth pages)
+  app/                     → authenticated workspace, everything under /app/*
+components/
+  app/                     → topbar, sidebar, command palette
+  backtest/, bot/          → backtest report + bot detail tab components
+  builder/                 → the Loom canvas and everything around it
+  landing/, marketing/     → homepage sections, nav, footer
+  legal/                   → shared legal page layout
+  ui/                      → the design-system primitives (reuse, don't reinvent)
+lib/
+  store.ts                 → session (auth/plan/credits/theme), toasts, dev switcher
+  workspace-store.ts       → bots, runs, presets, notifications (persisted)
+  builder-store.ts         → canvas editing state (undo/redo, selection, tool)
+  entitlements.ts          → plan/credit gating logic
+  validate.ts              → graph structural validation (the Console panel's brain)
+  search-index.ts          → powers both Cmd+K and (once built) /app/search
+  utils.ts                 → all formatters + helpers
+mock/
+  data.ts                  → every mocked entity: users, bots, runs, presets, invoices,
+                             sessions, API keys, notifications, docs, blog, FAQs — this
+                             file already contains data for several pages that don't
+                             exist yet (see Phase 5)
+  layers.ts                → the 12 layers, port types, and all ComponentDef/FieldDef
+                             definitions for every node in the library (this is what
+                             Phase 6 extends)
+```
+
+**Important, and easy to miss:** `mock/data.ts` already defines full mock datasets for several pages that were never built — `MY_PRESETS`, `PLANS` + `PLAN_COMPARISON`, `INVOICES`, `PAYMENT_METHODS`, `CREDIT_BUNDLES`, `PUBLISHED_PRESETS` + `CREATOR_EARNINGS`, `SESSIONS`, `API_KEYS`, `NOTIFICATION_EVENTS`, `DOC_SECTIONS`, `BLOG_POSTS`. Several existing notifications and activity-feed entries already link to routes like `/app/library/regime-tagger` and `/app/creator/dashboard` that don't exist. Phase 5 is mostly about building the UI these already-written datasets are waiting for — it is not starting from zero.
+
+## A note on scale
+
+Your library currently has **68 components across the 12 layers** (not 100+ yet — the library search placeholder says "100+" ahead of schedule). Phase 6 is what makes going from 68 to 100+ components a matter of data entry instead of a UI project every time.
+
+Read all four phase files in full before starting Phase 4 — later phases assume you understand what earlier ones set up.

@@ -1,0 +1,249 @@
+# PHASE 5 — Every Page Your Sitemap Promised But Doesn't Exist Yet
+
+**Read `00 - START HERE` and finish Phase 4 first.** Phase 4 fixed every link below to point at the *correct* path — this phase just has to build the page waiting at the other end.
+
+A useful fact for scoping your own confidence here: **almost none of these pages need new mock data.** `mock/data.ts` already contains fully-formed datasets for nearly every page in this list — `MY_PRESETS`, `PLANS`, `PLAN_COMPARISON`, `INVOICES`, `PAYMENT_METHODS`, `CREDIT_BUNDLES`, `PUBLISHED_PRESETS`, `CREATOR_EARNINGS`, `SESSIONS`, `API_KEYS`, `NOTIFICATION_EVENTS`, `DOC_SECTIONS`, `BLOG_POSTS` — every one of these currently has **zero consumers** anywhere in the app. This phase is UI construction against data that's already sitting there, not data modeling. Where a page needs something the mock data doesn't have, that's called out explicitly below.
+
+Build in this order — later pages assume earlier ones exist for cross-linking:
+
+1. Global shell updates (do first — every other page in this phase gets linked in from here)
+2. Onboarding flow
+3. Dashboard polish (activity feed, upgrade banner)
+4. My Presets
+5. Component Library
+6. Compare
+7. Marketplace detail + public marketplace + publish flow
+8. Creator Dashboard
+9. Billing subpages
+10. Account section
+11. Help
+12. Global Search
+13. Docs detail pages + Blog
+14. Version restore page
+
+---
+
+## 0. Global shell updates
+
+### 0.1 Sidebar navigation
+`components/app/app-sidebar.tsx`'s `NAV` array currently has 5 items (Dashboard, My Bots, Builder, Live, Marketplace) and `FOOTER_NAV` has 3 (Billing, Settings, Docs). Per the original sitemap's global-UI spec, the sidebar should include Presets, Compare, and Library alongside the existing items, and Help alongside Docs. Update to:
+
+```
+NAV = [
+  Dashboard   → /app            (unchanged)
+  My Bots     → /app/bots       (unchanged)
+  Builder     → /app/builder    (unchanged)
+  Presets     → /app/presets    (new — Bookmark or Layers2 icon)
+  Marketplace → /app/marketplace (unchanged)
+  Compare     → /app/compare    (new — GitCompareArrows icon, already imported elsewhere)
+  Library     → /app/library    (new — LibraryBig or BookMarked icon)
+  Live        → /app/live       (unchanged — move to end of primary list or keep position, your call, just don't drop it)
+]
+
+FOOTER_NAV = [
+  Billing  → /app/billing        (unchanged)
+  Settings → /app/account/profile (was /app/settings — see §10)
+  Help     → /app/help           (new — LifeBuoy icon, currently used for Docs; give Docs a different icon, e.g. BookOpen)
+  Docs     → /docs               (unchanged, new icon)
+]
+```
+
+**Important gotcha:** `MobileTabBar` currently derives its 5 tabs from `NAV.slice(0, 5)`. Once `NAV` grows past 5 items, that slice silently drops whatever falls off the end (would cut "Live" if you append new items before it) — don't let this happen by accident. Give `MobileTabBar` its own explicit, hand-picked 5-item array (Dashboard, My Bots, Builder, Live, Marketplace — the five things someone actually needs one thumb-tap away on a phone), independent of the full sidebar `NAV`.
+
+### 0.2 Search index additions
+Once each page below exists, add a matching entry to the `PAGES` array in `lib/search-index.ts` (title, subtitle, href) so it's reachable via Cmd+K and `/app/search`. Do this as you finish each page, not all at the end — it's one array literal, low risk of merge pain either way, but easier to not forget per-page.
+
+---
+
+## 1. Onboarding flow (`/onboarding/welcome` → `/onboarding/start` → `/onboarding/tour` → `/onboarding/first-node` → `/onboarding/done`)
+
+This is authenticated-but-pre-dashboard: a fresh sign-up lands here (per the Phase 4 §1.4 redirect), an existing user with `onboardingComplete: true` never sees it again. Build as five separate route files under `app/onboarding/`, sharing one layout (`app/onboarding/layout.tsx`) that renders just a centered content area with a slim top progress bar (5 segments, current step highlighted) and a "Skip onboarding" text link in the corner that calls `setOnboardingComplete(true)` and routes straight to `/app` from any step.
+
+Track the answers in a small new store slice — add to `lib/store.ts`:
+```
+onboarding: { experience: 'beginner' | 'intermediate' | 'advanced' | null; startChoice: 'template' | 'blank' | null; draftBotId: string | null }
+setOnboardingAnswer: (patch: Partial<SessionState['onboarding']>) => void
+```
+
+**Step 1 — `/onboarding/welcome`**: "How would you describe yourself?" — three large radio cards (Beginner / Intermediate / Advanced), each with a one-line description of what changes (e.g. Beginner: "We'll hide advanced config until you ask for it"). Selecting one calls `setOnboardingAnswer({ experience })` and enables a "Continue" `PillButton` routing to `/onboarding/start`. This experience level should actually do something later, not just be cosmetic — wire it into the Inspector's basic/advanced split from Phase 6 (§3 of that file): `experience === 'beginner'` collapses the "Deep customization" affordance behind one extra click, `advanced` shows it prominently. Store the read for that check in the session store field you just added.
+
+**Step 2 — `/onboarding/start`**: Two large choice cards side by side: "Start from a template" (shows 3 curated presets as mini-cards inside — reuse `MARKETPLACE_PRESETS.filter(p => p.tags.includes('beginner'))` or just the top 3 by `forks`, showing name + headline stat) vs. "Start from a blank canvas." Selecting a template card selects it (highlight state) and reveals a "Continue with {name}" button; selecting blank reveals "Continue with blank canvas." Either path calls `setOnboardingAnswer({ startChoice })`, and if a template was chosen, calls `forkPreset(chosenPreset)` from `useWorkspace` right here and stores the resulting bot id in `draftBotId` — if blank, calls `createBot({ name: 'My First Bot' })` and stores that id instead. Either way, route to `/onboarding/tour`.
+
+**Step 3 — `/onboarding/tour`**: This is the one genuinely new interaction pattern in this phase — a spotlight/tooltip overlay sequence over the *real* app shell (not a static screenshot). Build `components/onboarding/spotlight-tour.tsx`:
+- Renders `<AppShellPreview>` — actually, simpler and more robust: render the real `/app/builder/:draftBotId` page underneath (using the bot id from step 2), with a full-viewport semi-transparent dark overlay `<div>` on top that has a "hole" cut out around the current target element using a CSS `clip-path` or a four-`<div>` mask (top/bottom/left/right bars around the target's bounding rect, computed via `getBoundingClientRect()` on a `ref` you attach to the real DOM node — e.g. `document.querySelector('[data-tour="library-panel"]')`).
+- Add `data-tour="..."` attributes to the five real elements being pointed at: the `LibraryPanel` root (`data-tour="library-panel"`), the canvas wrapper (`data-tour="canvas"`), the Builder toolbar's "Backtest" button (`data-tour="run-backtest"`), the "Save" button (`data-tour="save-graph"` — the spec says "Save as Preset," closest real equivalent is the Save button plus a mention that Save-as-block exists via right-click), and the topbar credits badge (`data-tour="credits-badge"`).
+- A tooltip card near each hole with a short line of copy, "Next" and "Skip tour" buttons. 5 steps, `useState<number>` index driving which hole is cut. "Skip tour" jumps straight to `/onboarding/first-node`.
+- On the last tooltip, "Next" routes to `/onboarding/first-node`.
+
+**Step 4 — `/onboarding/first-node`**: Same real builder page underneath, but now the overlay is a single instruction box: "Drag a Data Source node onto the canvas to continue," pinned near the Library panel's Data Collection section. Watch `useBuilder((s) => s.nodes)` — the moment `nodes.length` for the draft bot increases past whatever it started with (capture the starting count in a ref on mount), auto-advance to `/onboarding/done`. Include a small "Skip this step" escape hatch that advances immediately without requiring the drag.
+
+**Step 5 — `/onboarding/done`**: Success screen — a `Check`/`PartyPopper` icon, "Your bot is ready — let's run a backtest," and a primary button that calls `setOnboardingComplete(true)` then routes to `/app/bots/${draftBotId}/backtest` (landing directly on the config panel with sensible defaults, which `ConfigPanel` already provides). A light confetti burst is a nice touch (a handful of small CSS-animated dots/rects fired on mount, `motion/react`'s `AnimatePresence` with randomized initial positions and a fall+fade transition — five to ten elements is plenty, don't reach for a canvas confetti library for this).
+
+---
+
+## 2. Dashboard polish (`app/app/page.tsx`)
+
+Two whole sections from the original spec are missing and their data already exists, unused, in `mock/data.ts`:
+
+- **Activity feed**: `ACTIVITY` (kinds: `backtest`, `edit`, `unlock`, `publish`, `live`, `payment`, each with `title`, `detail`, `createdAt`, `href`) has zero consumers anywhere in the codebase right now. Add a reverse-chronological feed section below the bots grid, above or beside the recent-backtests table — each row: a kind-specific icon (map kind → lucide icon, e.g. `backtest` → `LineChart`, `edit` → `Pencil`, `unlock` → `Lock`, `publish` → `Globe`, `live` → `Radio`, `payment` → `CreditCard`), `title`, `detail` in muted text, `relativeTime(createdAt)`, whole row links to `href`.
+- **Upgrade banner**: conditional, shown only when `plan === 'free'` and usage is near a limit. You don't have a real "backtests this month" counter today (runs aren't timestamped against a monthly boundary in a way that's filtered anywhere) — compute a reasonable proxy: count `runs.filter(r => new Date(r.createdAt) > startOfCurrentMonth).length` against `NODE_LIMIT`/credit-grant-style constants already in `lib/entitlements.ts` (add one `MONTHLY_BACKTEST_LIMIT: Record<PlanTier, number> = { free: 10, starter: 150, pro: Infinity }` constant there, matching the numbers already promised in `PLANS[0].features` — "10 backtests a month" for free). Render a slim `UpgradeNudge` (component already exists in `components/ui/empty-state.tsx`) only when `plan === 'free' && usedThisMonth >= limit * 0.8`.
+
+---
+
+## 3. My Presets (`/app/presets` + `/app/presets/:presetId`)
+
+Data: `MY_PRESETS` from `mock/data.ts` (already includes `visibility`, `layers`, `nodeCount`, `versions`, an optional `publishedId` linking to a `MARKETPLACE_PRESETS` entry). Workspace store already has `myPresets`/`savePreset` — check whether `useWorkspace`'s `myPresets` field is currently seeded from `MY_PRESETS` or starts empty; if it starts empty, seed it from `MY_PRESETS` the same way `bots` is seeded from a mock array today.
+
+**List page** (`/app/presets`): grid of cards (same visual weight as the My Bots grid) — name, description, a `GraphThumbnail`-style mini layer-band visualization (reuse `components/bot/graph-thumbnail.tsx`'s pattern, but it currently takes `nodes: BotNode[]`; `MyPreset` only stores `layers: LayerId[]` and a count, not actual nodes for the seeded fixtures — for presets that do have `nodes`/`edges` attached via `StoredPreset` from a real save-as-block action, render the real thumbnail; for the seeded fixtures that only have `layers`, render a simpler colored-dot strip, one dot per layer present, in layer order), visibility badge (`private`/`unlisted`/`public` — reuse the same `Badge` variant pattern as bot visibility), created date, version count.
+
+Row actions (as icon buttons, same pattern as the My Bots list): **Load into builder** (creates a fresh bot from this preset's nodes/edges via a new workspace action `createBotFromPreset(presetId)` — mirrors `forkPreset` but for a `MyPreset`/`StoredPreset` instead of a `MARKETPLACE_PRESETS` entry — then routes to the new bot's builder), **Duplicate** (clones the preset entry itself, new id, "Copy of {name}"), **Rename** (inline edit, same commit-on-blur pattern as the builder toolbar's bot name field), **Delete** (through the new `ConfirmDialog` from Phase 4), **Publish to marketplace** (routes to `/app/marketplace/publish/:botId` — but a preset isn't a bot; either (a) require the preset to be loaded into a bot first via "Load into builder" before publishing, and disable this action with a tooltip explaining that until then, or (b) treat `publish/:presetId` and `publish/:botId` as accepting either kind of source id in the publish flow's data-loading logic. Pick (a) — it's simpler and matches the sitemap's `publish/:botId` route literally), **Share** (opens a small popover/dialog with a copyable link — `https://aether.dev/app/marketplace/{publishedId}` if published, otherwise a message explaining the preset must be public/published first — and a visibility `Segmented` control that calls an `updatePresetVisibility` action).
+
+**Detail page** (`/app/presets/:presetId`): full description, the same layer/node breakdown as the list card but larger, an expandable version history list (`versions` array — each with label/date/note, matching the exact same visual pattern already built for bot version history in `builder-toolbar.tsx`'s "Version history" menu), and the same row actions as buttons instead of icons.
+
+**Empty state**: "No saved presets yet" + explanation that presets are created via "Save as block" in the builder (right-click canvas → "Add sticky note" area — actually the real path is the builder toolbar's "Layers" isn't it — check: it's the canvas selection → right-click → nothing currently, or via `Inspector`'s "Save as block" trigger passed in as `onSaveBlock` prop, wired in `builder/[botId]/page.tsx`'s `handleSaveBlock`. Reference that flow by name in the empty-state copy) + a "Go to Builder" CTA.
+
+---
+
+## 4. Component Library (`/app/library` + `/app/library/:componentId`)
+
+This is the single most-linked-to not-yet-built page in the whole app — the Inspector's "Docs" button, the search index, one notification, and one activity item all already point here.
+
+**List page** (`/app/library`): every `ComponentDef` from `COMPONENTS` (`mock/layers.ts`), grouped by layer (same 12-layer grouping and Roman-numeral badge treatment as the `LibraryPanel` sidebar in the builder — you can lift the grouping logic directly from there). Support `?layer=<layerId>` (pre-select/scroll to that layer's section — this is the query param Phase 4 already wired the search index to produce) and a plan-tier filter (`Segmented`: All / Free / Starter / Pro). Each component renders as a card: name, tagline, layer badge, tier badge (reuse `TierBadge`), input/output port-type chips (reuse the color dots from `PORT_COLORS` in `mock/layers.ts`, same as `NodeCard`'s `Ports` sub-component), price if locked. Clicking anywhere on the card routes to `/app/library/${comp.id}`.
+
+**Detail page** (`/app/library/:componentId`): look up via `COMPONENT_MAP[componentId]` (already exported from `mock/layers.ts`), 404 via `notFound()` if missing. Sections: full `description`, `useCase` (already written for every component — this is the "example use case" the spec asks for), inputs/outputs with each port type's color + a one-line definition (pull from `DOC_SECTIONS.find(d => d.slug === 'core-concepts')`'s port-type list block, or just hardcode the same seven definitions since they're stable), the current config fields rendered read-only (reuse the Inspector's field-rendering switch, but non-interactive — pass a `readOnly` prop through, or literally render the same field list with disabled inputs), which plan tier includes it (`comp.tier`, plus a link to `/pricing` if not free), and a **"Try it in a new bot"** button: creates a fresh bot with just this one component as its only node (`createBot()` then `addNode` via the builder store once loaded — simplest: create the bot with a `nodes: [makeNode(comp.id, 0, 0)]` seed directly in the `createBot` call) and routes to its builder. If the component is locked for the current plan, this button instead opens `UnlockDialog` (you'll need to lift `UnlockDialog`'s usage out of the builder page so it can be triggered from here too — it's already a standalone component, just import and use it the same way).
+
+---
+
+## 5. Compare (`/app/compare`)
+
+Data: no new mock data needed — this reads existing `bots`, `runs`, and `MARKETPLACE_PRESETS` from the workspace store, all already fully populated.
+
+Layout: a selector row at the top — up to 4 slots, each an empty "+ Add to compare" tile until filled. Clicking an empty slot opens a `Dialog` with three tabs (`Bots` / `Presets` / `Backtest runs`) each listing the relevant items with a one-click "Add" (reuse the `Segmented` for the tabs, plain list rows for the items — no need for anything fancier). Once 2+ slots are filled:
+- **Overlaid equity curve chart**: for bot/run selections, pull the equity series from that bot's most recent `BacktestRun` (or, if a specific run was selected via the "Compare to Run" button from the backtest report page — see cross-link below — use that exact run). One line per slot, distinct colors (reuse the `LAYER_MAP` hue palette or a simple fixed 4-color array), rendered with the same charting approach as `components/backtest/equity-chart.tsx` (check what charting library that file uses — likely `recharts`, already a dependency per the available libraries list — and extend it to accept multiple series instead of one).
+- **Side-by-side metrics table**: rows = `totalReturn`, `winRate`, `maxDrawdown`, `sharpe`, `trades`, `avgR`, `profitFactor`, `exposure` (the full `BacktestMetrics` shape), columns = your selections, using `Table`/`THead`/`TBody`/`TR`/`TH`/`TD`. Highlight the best value per row (e.g. highest Sharpe, lowest max-drawdown-magnitude) with a subtle `text-profit` treatment — a nice, cheap "at a glance" win.
+- **Diff view**: only meaningful for two *bot* selections (not runs or presets) — a simple list: nodes present in A but not B, present in B but not A, and nodes present in both but with different `config` values (shallow key comparison is enough, no need for a deep diff library). If fewer than two bots are selected, hide this section entirely rather than showing an empty one.
+
+**Cross-link**: wire `components/backtest/results-actions.tsx`'s "Compare to Run" button (currently a `toast.info('Coming soon', ...)` stub) to route to `/app/compare?run=${run.id}` instead, and have the Compare page read that query param on mount to pre-fill the first slot.
+
+**Empty state**: before anything is selected, show a friendly explanation + the four empty tiles rather than a separate blank-slate illustration — the tiles themselves are the empty state here.
+
+---
+
+## 6. Marketplace: public route, authenticated detail page, and publish flow
+
+### 6.1 Public marketplace (`/marketplace` + `/marketplace/:presetId`)
+Root-level (outside `/app`), reachable while logged out — this is the actual destination the landing page, site-nav, and marketplace teaser should point to (go back and update those three links from Phase 4 §2.1–2.3 now that this exists, removing the `TODO(phase5)` comments you left).
+
+Reuse `SiteNav`/`SiteFooter` (same shell as `/pricing`, `/docs`, etc — this is a marketing-shell page, not an app-shell page). Content is the same grid/search/filter as `app/app/marketplace/page.tsx`, but:
+- No "Fork Graph" button — logged-out visitors get a "Sign up to clone" `PillLink` to `/signup` instead (per the sitemap's explicit logged-out behavior).
+- The Like/star toggle is either hidden entirely for logged-out visitors, or clicking it routes to `/signup` — hiding it is simpler and more honest (a logged-out user liking something that isn't tied to any account is confusing), do that.
+- Detail page `/marketplace/:presetId`: full `Preset` detail — description, `authorNotes`, a layer-breakdown visualization (same colored-dot-strip-per-layer approach as the My Presets cards, sized up), the `sampleRunId`'s backtest report rendered inline or linked (look up via `BACKTEST_RUNS.find(r => r.id === preset.sampleRunId)`, and render its `MetricCards` + `EquityChart` right on the page — you already have both components, just feed them this run's data), the full `reviews` array (author initials avatar, star rating, date, body), and "Sign up to clone" instead of "Clone."
+
+### 6.2 Authenticated marketplace detail (`/app/marketplace/:presetId`)
+Same content as the public detail page, but the action button is real: **"Clone to my bots"** calls the existing `forkPreset` action (same as the in-app list page's "Fork Graph" button) and routes to the new bot's builder. Add a **"Report"** link (small, muted, bottom of page) that opens a simple `Dialog` with a reason `Select` (Spam / Misleading performance claims / Inappropriate content / Other) and a `Textarea`, submitting just shows a `toast.success('Report submitted', "We'll review this within 48 hours.")` — there's no moderation backend to actually send this to, and that's fine, the point is the flow doesn't dead-end.
+
+Update `app/app/marketplace/page.tsx`'s cards (already made clickable in Phase 4 §10) to point here, and add a proper **sort dropdown** (Select: Most forked / Highest rated / Newest / Price: low to high) plus a **price filter** (`Segmented`: All / Free / Paid) next to the existing category filter — the spec calls for both and neither exists on the current list page.
+
+### 6.3 Publish flow (`/app/marketplace/publish/:botId`)
+A 5-step wizard, same visual pattern as the onboarding flow's step indicator (reuse that top progress bar component). Guard the entry: if `bot.runIds.length === 0`, redirect straight to the bot's backtest page with a toast explaining "Run at least one backtest before publishing" — the spec requires a backtest as proof, so make that a hard gate, not just a copy suggestion.
+
+- **Step 1 — Visibility**: three radio cards, `Public free` / `Public paid` / `Unlisted`.
+- **Step 2** (skipped if step 1 was `Public free` or `Unlisted`): price input (₹, matching the range already seen in `MARKETPLACE_PRESETS` — roughly ₹99–₹799), and a checkbox "I agree to the marketplace revenue-share terms" linking to `/legal/terms` — the button to continue is disabled until checked.
+- **Step 3**: description `Textarea` (pre-filled from `bot.description`), a multi-select `checklist`-style tag picker (reuse categories already seen in `MARKETPLACE_PRESETS`: Starter, Debate, Options, Momentum, plus let the user type a custom tag).
+- **Step 4**: pick which backtest run to attach as proof — a list of the bot's runs (`BACKTEST_RUNS.filter(r => r.botId === bot.id)`), radio-select one, shown with its headline metrics inline so the choice is informed.
+- **Step 5 — Review**: a read-only summary of everything chosen, plus a final "Publish" button. On submit: create a new `Preset` entry (add a workspace action `publishPreset(input): Preset` that assembles one from the bot's nodes/edges + the wizard's answers, pushes it into a `myPublishedPresets`-style list — check whether `PUBLISHED_PRESETS`/`useWorkspace` needs a new field for this, most likely yes: add `publishedPresets: PublishedPreset[]` to the workspace store, seeded from `PUBLISHED_PRESETS`, with `publishPreset` appending to it), toast success, and route to `/app/creator/dashboard`.
+
+Cross-link: `components/bot/overview-tab.tsx`'s "Publish to marketplace" button currently just toasts `'Coming soon'` — point it at this flow: `router.push(`/app/marketplace/publish/${bot.id}`)`.
+
+---
+
+## 7. Creator Dashboard (`/app/creator/dashboard`)
+
+Data: `PUBLISHED_PRESETS` + `CREATOR_EARNINGS` from `mock/data.ts`, plus whatever your publish flow above adds to the workspace store's `publishedPresets`. Per the sitemap, this page **only shows in the sidebar/nav if the user has published at least one preset** — add that conditional to wherever you render nav (simplest: keep it always in `NAV`/reachable by direct URL, but on the Dashboard and Presets pages, only surface a link to it once `publishedPresets.length > 0`; don't bother hiding the sidebar item itself, that's more complexity than the gate is worth).
+
+Layout:
+- Earnings summary row: 3–4 `Stat` tiles — Total earnings, This month, Pending payout, Next payout date (all from `CREATOR_EARNINGS`).
+- A `PillButton` "Request payout" — since there's no real Razorpay Route integration, clicking it should only be enabled once `pendingPayout > 0`, and on click: `toast.success('Payout requested', 'Funds will arrive in 3–5 business days.')` and optimistically zero out the displayed pending amount (update `CREATOR_EARNINGS`-shaped state in the workspace store, don't mutate the imported mock constant directly).
+- Table of published presets (`PUBLISHED_PRESETS` merged with anything the user just published via §6.3): columns Name, Clones, Revenue, Rating, Reviews, Published date, Price. Each row links to `/app/marketplace/${id}`.
+
+**Empty state** (genuinely likely on a fresh account): "You haven't published anything yet" + a "Browse My Presets" CTA to `/app/presets` (where the publish action lives).
+
+---
+
+## 8. Billing subpages
+
+`app/app/billing/page.tsx` (already fixed in Phase 4 to read from `PLANS`) needs its "Change plan" / "Top up" / "View all" / "Manage" buttons pointed at real pages now:
+
+### 8.1 `/app/billing/plans`
+Exactly the plan-comparison content you already built for `/pricing` in Phase 4 §3.1 (extract that into a shared `components/billing/plan-comparison.tsx` if you haven't already, so both pages render identically) — but button labels change to `Current plan` (disabled) / `Upgrade` / `Downgrade` based on `TIER_RANK` comparison against the active plan, and clicking Upgrade/Downgrade calls the same `setPlan` + toast pattern already in `app/app/billing/page.tsx`, no re-navigation needed (stay on the page, update in place, same as today's billing page behavior).
+
+### 8.2 `/app/billing/topup`
+`CREDIT_BUNDLES` rendered as 3 cards (reuse the same card treatment as the plan cards for visual consistency) plus a **custom amount** field — a number input for "credits wanted," computing price as `credits * 0.999` rounded (roughly matching the existing bundle rate) with a live preview. "Buy credits" on any card or the custom field calls `addCredits(n)` (existing session action) + `toast.success` — no real Razorpay call, but do simulate the same brief "Contacting payment gateway…" loading state already built into `UnlockDialog`'s `payWithCard` path (`delay(1600)` then resolve) so the pattern is consistent across the app. Below the cards, a short explanatory paragraph of what credits are spent on (temporary unlocks, marketplace clones, extra backtest runs) — this text already effectively exists in the FAQ ("How does pricing work?" in `FAQS`), reuse or lightly adapt it rather than writing new copy from scratch.
+
+### 8.3 `/app/billing/history`
+A `Table` of `INVOICES` — Date, Description, Amount, Status (badge: `paid` → profit-tinted, `pending` → warn-tinted, `failed`/`refunded` → loss-tinted, matching the `StatusBadge`/`Badge` variant conventions used everywhere else), and a "Download" icon-button per row. Since there's no real PDF to download, generate a plain-text or minimal-HTML receipt client-side from the invoice's own fields and trigger a `Blob` download named `${invoice.id}.txt` (or `.html` if you want it to look nicer) — this is a real download, not a stub, it just isn't a typeset PDF.
+
+### 8.4 `/app/billing/payment-methods`
+`PAYMENT_METHODS` list — each row: card/UPI icon (`CreditCard` vs a UPI-style icon — `Smartphone` is a reasonable stand-in), label, detail, a "Default" badge if `isDefault`, and a "Set as default" / "Remove" action. "Add new" opens a `Dialog` with a minimal fake card-entry form (number/expiry/CVV inputs, no real validation needed beyond basic length checks) that on submit adds a new entry to the list with a toast — same "simulated gateway" pattern as top-up. Removing the default method should require picking a new default first (disable "Remove" on the default entry, or auto-promote another entry) — don't allow a state with zero payment methods and a stale "default" pointer.
+
+---
+
+## 9. Account section (`/app/account/profile`, `/security`, `/notifications`, `/api-keys`, `/danger-zone`)
+
+Build as a tabbed section sharing one layout, same pattern as the Bot detail page's tab system (`BotHeader` with `activeTab`/`onTabChange`, tab state driven by the URL segment here instead of a query param — five separate route files under `app/app/account/`, each rendering a shared `<AccountTabs active="..."/>` header component plus its own content).
+
+- **`/profile`**: this absorbs everything currently on the flat `/app/settings` page's "Profile & Identity" card — reuse it directly, now reading from and writing to the profile store slice you built in Phase 4 §6. Add an avatar — there's no image upload backend, so make it a simple initials-avatar with a color picker (pick from the same brand/layer hue palette) rather than pretending to support file upload; store the chosen color alongside `initials` in the profile slice and use it wherever `Avatar` currently hardcodes the brand gradient.
+- **`/security`**: password-change form (two fields, old/new — no real backend, so on submit just toast success and don't actually check the "old password" against anything meaningful), a 2FA `Switch` (toggling it just flips a boolean in the profile/session store, no real TOTP flow), and the `SESSIONS` list — each row: device, location, last active (`relativeTime`), a "current" badge on the matching entry, "Log out" per non-current row (removes it from a `sessions` array you seed into the store from the mock constant) and a "Log out everywhere" button (clears all non-current sessions, toast confirms).
+- **`/notifications`**: `NOTIFICATION_EVENTS` (7 event types) each rendered as a row with three `Switch`es — Email / In-app / Webhook — per the spec. Store this as `notificationChannels: Record<string, { email: boolean; inApp: boolean; webhook: boolean }>` in the store, seeded with sensible defaults (in-app on for everything, email on for the important ones, webhook off unless Pro plan — grey out/disable the webhook column entirely when `plan !== 'pro'`, matching `PLAN_COMPARISON`'s "Webhooks: Pro only" row).
+- **`/api-keys`**: gated behind `plan === 'pro'` (show an `UpgradeNudge` instead of the content otherwise, matching the pattern already used elsewhere for plan-gated content). `API_KEYS` list — name, scope badge, prefix (masked, e.g. `ae_live_7f2a••••••`), created date, last used. "Generate new key" opens a `Dialog`: name field + scope `Select` (read / read+write), on submit generates a fake key string (`ae_live_` + a random hex chunk via `slugId`-style generation), shows it **once** in a copyable code block with a "you won't see this again" warning (standard API-key UX), then adds the masked version to the list. "Revoke" per row goes through `ConfirmDialog`.
+- **`/danger-zone`**: this is account-level, distinct from the bot-level danger zone already in `SettingsTab` (leave that one alone — it's correctly scoped to a single bot). Two actions: **"Export all data"** — serialize the current `useWorkspace.getState()` and `useSession.getState()` (minus obviously-sensitive-looking fields, though nothing here is real) into one JSON object and trigger a `Blob` download named `aether-export-${date}.json` — this is a real, working export, not a stub. **"Delete account"** — a multi-step `ConfirmDialog` (or a small dedicated dialog with a type-to-confirm pattern: user must type the word `delete` into a field before the button enables — a nice, cheap bit of extra ceremony for the scariest action in the app), which on confirm calls `reset()` on both stores, clears `localStorage` keys, and routes to `/`.
+
+Redirect the old routes: `app/app/settings/page.tsx` and `app/app/settings/profile/page.tsx` both become simple redirects to `/app/account/profile` (same one-line pattern already used for `app/app/billing/credits/page.tsx`), preserving any old bookmarks/links instead of breaking them. Update `components/app/app-topbar.tsx`'s `AccountMenu` links (`/app/settings/profile` → `/app/settings`) to point at `/app/account/profile` and `/app/account/security` respectively where it currently only offers one generic "Settings" link — split it into "Profile" and "Settings" (or just "Account") menu items now that there's a real multi-tab destination.
+
+---
+
+## 10. Help (`/app/help`)
+
+Marketing-shell-free, app-shell page (sidebar/topbar present, since it's for logged-in users per the sitemap's `[AUTH]` marker). Three sections on one page (no need for sub-routes):
+- Searchable FAQ: reuse `FAQS` with a simple client-side text filter over `q`/`a` (an `Input` at the top, filter as-you-type — same `fuzzyScore` helper from `lib/utils.ts` used everywhere else works fine here too, no new search logic needed).
+- "Contact support" form: name (pre-filled from profile), email (pre-filled), subject `Select` (Billing / Technical issue / Feature request / Other), message `Textarea`. Submitting has nowhere real to send to — `toast.success('Message sent', "We'll reply within one business day.")` and clear the form. This is an acceptable permanent stub (it needs a real backend/email service to ever be real) — say so with a one-line code comment, don't pretend otherwise.
+- "Status page" link — since there's no real status page, this can be a simple always-green inline indicator ("All systems operational" with a `text-profit` dot) rather than a link to nowhere; that's more honest than linking out to a page that doesn't exist.
+
+---
+
+## 11. Global Search (`/app/search`)
+
+Full-page counterpart to the Cmd+K palette, sharing the exact same engine — `lib/search-index.ts`'s `buildIndex`/`searchIndex`/`groupResults`, already built to be reused this way (the file's own doc comment says so). Layout: a large `Input` at the top (auto-focused), results grouped by kind exactly like the palette's dropdown but full-width cards instead of a compact list, with the same keyboard nav (arrow keys + Enter) for parity. Support a `?q=` query param so a search can be linked/bookmarked and so the palette itself can optionally "View all results for {query}" through to this page when there are more results than the palette's compact view shows (add that link to `command-palette.tsx` if it doesn't already truncate — check `searchIndex`'s default `limit = 40`; if a query realistically returns close to 40 hits, add a "View all in full search" row at the bottom of the palette linking to `/app/search?q=${query}`).
+
+---
+
+## 12. Docs detail pages + Blog
+
+### 12.1 `app/docs/[slug]/page.tsx`
+Look up via `DOC_SECTIONS.find(d => d.slug === slug)`, `notFound()` if missing. Render `blocks` in order: `p` → paragraph, `h2`/`h3` → headings, `list` → `<ul>` of `items`, `code` → a `<pre>` block with monospace styling (match the dark-background treatment already used for the builder's console log and the live page's audit trail, for visual consistency across "terminal-styled" content), `note` → a callout box styled like the existing "What is a Strategy Backtest?" info box on the backtest config page (brand-tinted border + background + icon). Sidebar or top breadcrumb back to `/docs`, plus "reading time" and "category" shown same as the list card. A "Next guide" / "Previous guide" footer nav using array order within the same `category` is a nice, cheap addition.
+
+### 12.2 `app/blog/page.tsx` + `app/blog/[slug]/page.tsx`
+`BLOG_POSTS` — list page is a simple card grid (title, excerpt, author, date, category badge, reading time), detail page renders... there's no `body`/`content` field on `BlogPost`, only `excerpt` — so the detail page shows the excerpt as a lead paragraph plus a clearly-labeled "Full post coming soon" notice, rather than fabricating body copy that doesn't exist in the data model. This is the one page in this entire phase where the honest answer is "the data model doesn't support a full article yet" — don't invent paragraphs of fake blog content to fill the space; a short real page beats a long fabricated one.
+
+---
+
+## 13. Version restore page (`app/app/builder/[botId]/version/[versionId]/page.tsx`)
+
+Found during the Phase 4 audit, not in the original non-goals list, but genuinely dead today: `components/builder/builder-toolbar.tsx`'s "Version history" menu already links each entry to `` /app/builder/${bot.id}/version/${v.id} ``, and this route has never existed.
+
+Build it read-only by default: render the same `Canvas` component the live builder uses, but fed the historical snapshot instead of the live graph, with `LibraryPanel`, `Inspector`, and editing entirely absent — just the canvas, zoomed to fit, non-draggable (pass a prop through to disable dragging, or simplest, load the nodes/edges into a throwaway local `useState` instead of the `useBuilder` store so there's no accidental interaction with live editing state). A header bar: "Viewing version {label} · saved {date} · {note}" plus two buttons: **"Restore this version"** (through `ConfirmDialog`, since it overwrites the current graph — on confirm, calls `saveGraph` with this version's nodes/edges and routes to the live builder) and **"Back to current version"** (routes to `/app/builder/${botId}`).
+
+**Data gap to fix first**: `BotVersion` (`mock/data.ts`) currently stores `label`/`createdAt`/`note`/`nodeCount` but **not** the actual `nodes`/`edges` snapshot — there's nothing to restore yet. Add `nodes: BotNode[]` and `edges: BotEdge[]` to the `BotVersion` interface, and update `snapshotVersion` in `lib/workspace-store.ts` (called today from the builder toolbar's rename handler and presumably elsewhere on save) to actually capture the graph at snapshot time, not just metadata about it.
+
+---
+
+## Acceptance checklist for Phase 5
+
+- [ ] Every link fixed-but-not-yet-built in Phase 4 now lands on a real page, not the 404.
+- [ ] A brand-new signup walks through all 5 onboarding steps and lands on a live backtest config screen with a bot it actually built during the tour.
+- [ ] The dashboard shows real activity and, on a free plan near its backtest limit, an upgrade nudge.
+- [ ] Every one of `MY_PRESETS`, `PLANS`, `PLAN_COMPARISON`, `INVOICES`, `PAYMENT_METHODS`, `CREDIT_BUNDLES`, `PUBLISHED_PRESETS`, `CREATOR_EARNINGS`, `SESSIONS`, `API_KEYS`, `NOTIFICATION_EVENTS`, `DOC_SECTIONS`, `BLOG_POSTS` now has at least one real page rendering it.
+- [ ] Publishing a bot (Overview tab → "Publish to marketplace") walks through all 5 wizard steps and the result actually shows up in the Creator Dashboard and in the marketplace list.
+- [ ] Exporting billing history or account data produces a real file download, not a toast that promises one.
+- [ ] The sidebar's mobile bottom tab bar still shows exactly 5 sensible items after the nav additions.
+- [ ] A version can be opened read-only from the builder toolbar's history menu and restored.

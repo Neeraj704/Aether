@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Logo } from '@/components/brand/logo'
@@ -10,12 +11,20 @@ import { PillButton } from '@/components/ui/pill-button'
 export default function SignupPage() {
   const router = useRouter()
   const setAuthed = useSession((s) => s.setAuthed)
+  const onboardingComplete = useSession((s) => s.onboardingComplete)
+  const updateProfile = useSession((s) => s.updateProfile)
+
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (name.trim()) {
+      updateProfile({ name: name.trim(), email: email.trim() || undefined })
+    }
     setAuthed(true)
     toast.success('Account created!', 'Welcome to Aether quants.')
-    router.push('/app')
+    router.push(onboardingComplete ? '/app' : '/onboarding')
   }
 
   return (
@@ -29,10 +38,21 @@ export default function SignupPage() {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <Field label="Full Name">
-            <Input placeholder="Neeraj Sharma" required />
+            <Input
+              placeholder="Neeraj Sharma"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
           </Field>
           <Field label="Email Address">
-            <Input type="email" placeholder="arjun@aether.dev" required />
+            <Input
+              type="email"
+              placeholder="arjun@aether.dev"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
           </Field>
           <Field label="Password">
             <Input type="password" placeholder="Create a strong password" required />

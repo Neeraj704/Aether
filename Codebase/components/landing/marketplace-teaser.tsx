@@ -26,9 +26,10 @@ export function MarketplaceTeaser() {
               Fork a graph that already works.
             </h2>
           </div>
+          {/* TODO(phase5): point at public /marketplace once built */}
           <Link
             data-reveal
-            href="/marketplace"
+            href="/app/marketplace"
             className="flex items-center gap-1.5 text-[14px] font-medium text-brand hover:underline"
           >
             Browse all presets
@@ -39,6 +40,7 @@ export function MarketplaceTeaser() {
         <ul className="mt-12 grid grid-cols-1 gap-4 lg:grid-cols-3">
           {featured.map((p) => (
             <li key={p.id} data-reveal>
+              {/* TODO(phase5): public detail route at /marketplace/:id */}
               <Link
                 href={`/marketplace/${p.id}`}
                 className="glass flex h-full flex-col rounded-[var(--radius-md)] p-6 transition-transform duration-300 hover:-translate-y-1"

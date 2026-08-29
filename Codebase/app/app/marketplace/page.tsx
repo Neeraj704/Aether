@@ -8,11 +8,6 @@ import {
   Search,
   GitFork,
   Star,
-  Zap,
-  TrendingUp,
-  Check,
-  ShieldCheck,
-  Tag,
 } from 'lucide-react'
 import { MARKETPLACE_PRESETS, type Preset } from '@/mock/data'
 import { useWorkspace } from '@/lib/workspace-store'
@@ -81,7 +76,7 @@ export default function MarketplacePage() {
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}
-              className={`h-8 px-3.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${
+              className={`h-8 px-3.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${
                 selectedCategory === cat
                   ? 'bg-brand text-brand-foreground font-semibold'
                   : 'bg-secondary text-muted-foreground hover:text-foreground'
@@ -110,8 +105,11 @@ export default function MarketplacePage() {
                     <span className="text-[11px] text-tertiary font-medium">
                       By {preset.author.name}
                     </span>
-                    <h3 className="font-bold text-base tracking-tight hover:text-brand transition-colors">
-                      {preset.name}
+                    <h3 className="font-bold text-base tracking-tight hover:text-brand transition-colors truncate">
+                      {/* TODO(phase5): detail page at /app/marketplace/:id */}
+                      <Link href={`/app/marketplace/${preset.id}`} className="hover:underline">
+                        {preset.name}
+                      </Link>
                     </h3>
                   </div>
                   <TierBadge tier={preset.tier} />
@@ -158,7 +156,7 @@ export default function MarketplacePage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => toggleLikePreset(preset.id)}
-                    className={`p-2 rounded-lg border text-xs transition-colors ${
+                    className={`p-2 rounded-lg border text-xs transition-colors cursor-pointer ${
                       isLiked
                         ? 'border-gold/50 bg-gold/10 text-gold'
                         : 'border-border text-muted-foreground hover:text-foreground'

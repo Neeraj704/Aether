@@ -7,10 +7,28 @@ import { CURRENT_USER } from '@/mock/data'
 import { slugId } from '@/lib/utils'
 
 /* ------------------------------------------------------------------ */
-/* Session store  the dev-toggleable fake auth/plan/theme state       */
+/* Session store — the dev-toggleable fake auth/plan/theme state       */
 /* ------------------------------------------------------------------ */
 
 export type ThemeMode = 'light' | 'dark' | 'system'
+
+export interface UserProfile {
+  name: string
+  email: string
+  bio: string
+  publicProfile: boolean
+  initials: string
+}
+
+export interface UserApiKeys {
+  nseKey: string
+  brokerKey: string
+}
+
+export interface UserNotificationPrefs {
+  emailNotifs: boolean
+  drawdownAlerts: boolean
+}
 
 interface SessionState {
   hydrated: boolean
@@ -24,6 +42,10 @@ interface SessionState {
   unlocked: string[]
   lastBotId: string | null
 
+  profile: UserProfile
+  apiKeys: UserApiKeys
+  notificationPrefs: UserNotificationPrefs
+
   setAuthed: (v: boolean) => void
   setPlan: (p: PlanTier) => void
   setCredits: (n: number) => void
@@ -34,7 +56,17 @@ interface SessionState {
   toggleSidebar: () => void
   unlock: (componentId: string) => void
   setLastBotId: (id: string) => void
+  updateProfile: (patch: Partial<UserProfile>) => void
+  updateApiKeys: (patch: Partial<UserApiKeys>) => void
+  updateNotificationPrefs: (patch: Partial<UserNotificationPrefs>) => void
   reset: () => void
+}
+
+function computeInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return 'AM'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
 const INITIAL = {
@@ -46,6 +78,21 @@ const INITIAL = {
   sidebarCollapsed: false,
   unlocked: CURRENT_USER.unlockedComponents,
   lastBotId: null as string | null,
+  profile: {
+    name: CURRENT_USER.name,
+    email: CURRENT_USER.email,
+    bio: CURRENT_USER.bio,
+    publicProfile: CURRENT_USER.publicProfile,
+    initials: CURRENT_USER.initials,
+  },
+  apiKeys: {
+    nseKey: 'nse_live_89f104829a174c',
+    brokerKey: 'zk_prod_9918237402',
+  },
+  notificationPrefs: {
+    emailNotifs: true,
+    drawdownAlerts: true,
+  },
 }
 
 export const useSession = create<SessionState>()(
@@ -69,6 +116,32 @@ export const useSession = create<SessionState>()(
       unlock: (componentId) =>
         set({ unlocked: Array.from(new Set([...get().unlocked, componentId])) }),
       setLastBotId: (lastBotId) => set({ lastBotId }),
+      updateProfile: (patch) => {
+        const current = get().profile
+        const updatedName = patch.name !== undefined ? patch.name : current.name
+        const updatedInitials =
+          patch.initials !== undefined
+            ? patch.initials
+            : patch.name !== undefined
+              ? computeInitials(patch.name)
+              : current.initials
+        set({
+          profile: {
+            ...current,
+            ...patch,
+            name: updatedName,
+            initials: updatedInitials,
+          },
+        })
+      },
+      updateApiKeys: (patch) =>
+        set({
+          apiKeys: { ...get().apiKeys, ...patch },
+        }),
+      updateNotificationPrefs: (patch) =>
+        set({
+          notificationPrefs: { ...get().notificationPrefs, ...patch },
+        }),
       reset: () => set(INITIAL),
     }),
     {
@@ -84,7 +157,7 @@ export const useSession = create<SessionState>()(
 )
 
 /* ------------------------------------------------------------------ */
-/* Toast store  bottom-right glass stack                              */
+/* Toast store — bottom-right glass stack                              */
 /* ------------------------------------------------------------------ */
 
 export type ToastKind = 'success' | 'error' | 'info' | 'unlock'
@@ -127,7 +200,7 @@ export const toast = {
 }
 
 /* ------------------------------------------------------------------ */
-/* Dev panel visibility (Ctrl+Shift+D)  not persisted                 */
+/* Dev panel visibility (Ctrl+Shift+D) — not persisted                 */
 /* ------------------------------------------------------------------ */
 
 interface DevState {

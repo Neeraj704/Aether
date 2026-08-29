@@ -1,0 +1,204 @@
+# PHASE 6 — Node System Overhaul: Deep Customization
+
+**Read `00 - START HERE` and finish Phase 4 first.** This phase does not depend on Phase 5 and can run in a separate agent session in parallel with it if you want to move faster — nothing here touches new routes, only the builder's node/config system.
+
+This is the core of what you actually asked for: every node goes from "a handful of sliders and selects" to "every setting a real implementation would need," with a Deep Customization popup that exposes all of it, while the Inspector's right-side panel stays clean and shows only the essentials. Everything below is still a frontend/mock exercise — no real model API is called anywhere in this phase. What changes is the *shape* of the config data and the UI that edits it, so that when a real backend shows up later, the config it needs to read already exists in a sane form.
+
+---
+
+## 1. Where this lives today, exactly
+
+`mock/layers.ts` defines two things that matter here:
+- `FieldDef` — a discriminated union with 7 variants: `text`, `password`, `select`, `slider`, `switch`, `checklist`, `number`.
+- `ComponentDef` — has one `fields: FieldDef[]` array, rendered by `components/builder/inspector.tsx`, which switches on `field.type` and renders the matching input, reading/writing through `useBuilder`'s `updateNodeConfig`.
+
+`lib/workspace-store.ts` has `defaultConfig(comp)` (builds the initial `config` object from each field's `value`) and `computeNeedsConfig(comp, config)` (currently: true if any `text`/`password` field is empty — this is the whole validation story today).
+
+That's the entire system. Six field types, one flat array, one panel. Everything below extends this without breaking it.
+
+---
+
+## 2. Extend `FieldDef` with the field types deep customization actually needs
+
+Add these variants to the `FieldDef` union in `mock/layers.ts`. Keep all 7 existing variants exactly as they are — this is additive.
+
+```
+| { key: string; label: string; type: 'model-select'; value: ModelSelection; help?: string }
+| { key: string; label: string; type: 'prompt'; value: string; variables?: string[]; help?: string }
+| { key: string; label: string; type: 'code'; language?: 'json' | 'python' | 'javascript'; value: string; help?: string }
+| { key: string; label: string; type: 'json'; value: string; help?: string }
+| { key: string; label: string; type: 'key-value'; value: { key: string; value: string }[]; help?: string }
+| { key: string; label: string; type: 'weighted-list'; options: string[]; value: Record<string, number>; help?: string }
+| { key: string; label: string; type: 'credential'; provider?: string; value: string; help?: string }
+| { key: string; label: string; type: 'dataset-ref'; value: string | null; help?: string }
+```
+
+Where `ModelSelection` (new type, define alongside `FieldDef`) is:
+```
+interface ModelSelection {
+  providerId: string          // 'openai' | 'anthropic' | 'google' | 'alibaba' | 'deepseek' | 'ollama' | ...
+  modelId: string             // e.g. 'gpt-5', or the free-typed model tag for ollama, e.g. 'llama3.1:8b'
+  endpoint?: string           // only meaningful for 'ollama' — defaults to http://localhost:11434
+  temperature: number
+  maxTokens: number
+}
+```
+
+Notes on each new type's purpose, so the agent implementing this understands what it's for and doesn't render something generic:
+- **`model-select`**: the model/provider picker itself — see §3, it's a dedicated composite control, not a plain `Select`.
+- **`prompt`**: a multi-line system/instruction prompt. `variables` lists the `{{variable}}` tokens this node's actual wired inputs make available (computed at render time from the node's real incoming edges, not hardcoded on the `ComponentDef` — see §5) so the editor can offer an "insert variable" affordance.
+- **`code`**: free-form code for things like a custom scoring function or a custom risk rule — render as a monospace `Textarea` with a visible line-number gutter (a simple CSS `counter-reset`/`counter-increment` on wrapped `<div>`s per line is enough; don't pull in a full code-editor dependency like Monaco or CodeMirror for this, it's disproportionate to what these fields need). No execution, ever — this is captured as a string, never run client-side.
+- **`json`**: raw structured config for power users (e.g., a custom webhook payload template) — monospace `Textarea`, validated as parseable JSON on blur, with an inline error message if it doesn't parse (don't block typing, just don't accept an invalid save — mirror how `password`/`text` fields already show a `help` line, reuse that slot for the error state).
+- **`key-value`**: dynamic add/remove list of string pairs (e.g., custom HTTP headers for a data feed). Render as repeated two-`Input` rows with a trailing remove `X` button and a "+ Add row" button below — this exact repeated-row-with-remove pattern doesn't exist elsewhere in the codebase yet, so build it once as its own small subcomponent.
+- **`weighted-list`**: N sliders that share a "should roughly sum to 100" relationship (e.g., debate-layer agent weighting, ensemble blend weights) — render as N `SliderWithValue`s, and show a running total at the bottom with a color cue (`text-profit` at ~100, `text-warn` otherwise) — don't hard-block saving at an imperfect sum, just make the imbalance visible.
+- **`credential`**: like `password`, but with a "Test connection" button next to it that does a fake 900ms delay then shows a green check or a red X (randomly succeed unless the field is empty, in which case always fail) — this is for things like a broker API key or a custom data-provider key where "does this even look valid" matters more than the raw secret.
+- **`dataset-ref`**: a reference to an uploaded dataset. Since there's no real file upload in this app, render this as a `Select` populated from a small new mock list (`MOCK_DATASETS` in `mock/data.ts` — 4–5 fake entries: name, row count, date range, size) plus a "browse for more" state that's clearly a placeholder (a disabled "Upload custom dataset (coming soon)" row at the bottom of the list) — real file upload is out of scope for all four phases.
+
+Update `defaultConfig()` and `computeNeedsConfig()` in `lib/workspace-store.ts` to handle every new type:
+- `defaultConfig`: use each field's `value` as-is for all new types except `model-select`, which needs a real default (pick the first provider's first model, `temperature: 0.7`, `maxTokens: 1024`).
+- `computeNeedsConfig`: extend the "still blank" check to also cover `model-select` (empty `modelId`), `credential` (empty `value`), and `dataset-ref` (`null` value) — these are exactly as "must be filled before this node can run" as the existing `text`/`password` check.
+
+---
+
+## 3. The model/provider registry
+
+Create `mock/models.ts` — this is genuinely new data, nothing today models LLM providers at all.
+
+```
+export interface ModelOption {
+  id: string
+  label: string
+  contextWindow: string   // e.g. "200K tokens"
+  speed: 'fast' | 'balanced' | 'deep'
+  costTier: 'low' | 'medium' | 'high'
+}
+
+export interface Provider {
+  id: string
+  name: string
+  logo?: string            // optional — a lucide icon name or brand initial is fine, no real logo assets needed
+  kind: 'hosted' | 'local'
+  models: ModelOption[]    // empty array for 'local' — see below
+}
+
+export const PROVIDERS: Provider[] = [
+  { id: 'openai', name: 'OpenAI', kind: 'hosted', models: [
+    { id: 'gpt-5', label: 'GPT-5', contextWindow: '400K', speed: 'deep', costTier: 'high' },
+    { id: 'gpt-5-mini', label: 'GPT-5 Mini', contextWindow: '400K', speed: 'fast', costTier: 'low' },
+  ]},
+  { id: 'anthropic', name: 'Anthropic', kind: 'hosted', models: [
+    { id: 'claude-opus', label: 'Claude Opus', contextWindow: '200K', speed: 'deep', costTier: 'high' },
+    { id: 'claude-sonnet', label: 'Claude Sonnet', contextWindow: '200K', speed: 'balanced', costTier: 'medium' },
+    { id: 'claude-haiku', label: 'Claude Haiku', contextWindow: '200K', speed: 'fast', costTier: 'low' },
+  ]},
+  { id: 'google', name: 'Google', kind: 'hosted', models: [
+    { id: 'gemini-pro', label: 'Gemini Pro', contextWindow: '1M', speed: 'deep', costTier: 'high' },
+    { id: 'gemini-flash', label: 'Gemini Flash', contextWindow: '1M', speed: 'fast', costTier: 'low' },
+  ]},
+  { id: 'alibaba', name: 'Qwen', kind: 'hosted', models: [
+    { id: 'qwen-72b', label: 'Qwen 72B', contextWindow: '128K', speed: 'balanced', costTier: 'medium' },
+  ]},
+  { id: 'deepseek', name: 'DeepSeek', kind: 'hosted', models: [
+    { id: 'deepseek-v3', label: 'DeepSeek V3', contextWindow: '128K', speed: 'balanced', costTier: 'low' },
+    { id: 'deepseek-r1', label: 'DeepSeek R1 (reasoning)', contextWindow: '128K', speed: 'deep', costTier: 'medium' },
+  ]},
+  { id: 'ollama', name: 'Local (Ollama)', kind: 'local', models: [] },
+]
+```
+
+Treat every model name/id above as an illustrative placeholder for a mock catalog, not a claim about what's actually current — this whole file is fictional data for the demo, same as `mock/data.ts`'s invoices and sessions are. Swap in whatever names you want; what matters structurally is: several hosted providers each with a few models of varying speed/cost, plus exactly one `kind: 'local'` provider with an empty model list, handled specially.
+
+**Build `components/builder/model-select-field.tsx`** — the composite control the `model-select` `FieldDef` type renders as:
+- Provider picker: a row of small logo/initial chips (not a plain dropdown — this should feel like picking a brand, reuse the visual weight of the existing `Segmented` control but with as many options as `PROVIDERS.length`).
+- Model picker: once a provider is picked, a `Select` of that provider's `models` — **except** when `provider.kind === 'local'`, in which case render a free-text `Input` for the model tag (placeholder `"llama3.1:8b"`) plus a second `Input` for the endpoint URL (placeholder/default `http://localhost:11434`), and a "Test connection" button using the same fake-delay pattern described for `credential` fields above (this is the Ollama / self-hosted path — there's no real network call, but the affordance should look and feel real).
+- Temperature: `SliderWithValue`, 0–2 step 0.05.
+- Max tokens: `SliderWithValue` or plain `number` field, reasonable range 128–8192.
+- Show each hosted model's `contextWindow`/`speed`/`costTier` as small muted metadata under the picker once selected, so the choice is informed at a glance.
+
+---
+
+## 4. Split every `ComponentDef` into basic vs. advanced, and add real documentation content
+
+Extend `ComponentDef` in `mock/layers.ts`:
+```
+export interface ComponentDef {
+  // ...all existing fields stay exactly as they are...
+  advancedFields?: FieldDef[]
+  docs?: {
+    whenToUse: string
+    whenToSkip: string
+    bestPractices: string[]
+    commonMistakes: string[]
+  }
+}
+```
+`fields` (existing) = what the Inspector's right panel shows, always — keep these genuinely minimal, 2–4 fields, the "if you only change one thing" settings. `advancedFields` = everything else, shown only inside the Deep Customization modal (§6). `docs` backs the modal's Documentation tab and the Library detail page from Phase 5 §4 (if you're running Phase 5 and 6 in parallel, both should read from this same field once it exists — don't build two separate documentation data shapes).
+
+**Retrofit order** — don't try to write `advancedFields`/`docs`/a `model-select` for all 68 components in one pass. Do it in this order, stopping to verify each group renders correctly in both the Inspector and the new modal before moving to the next:
+
+1. **Intelligence Agents layer (6 components)** — first and most important, since this is the layer the "GPT/Gemini/Claude/Qwen/DeepSeek/Ollama" ask is really about. For each of `technical-agent`, `sentiment-agent`, `macro-agent`, `flow-agent`, `contrarian-agent`, `event-agent`: keep the existing 1–2 `fields` as basic, and add to `advancedFields`:
+   - a `model-select` field (`key: 'model'`)
+   - a `prompt` field (`key: 'systemPrompt'`) pre-filled with a real, specific default prompt reflecting that agent's persona — e.g. for `technical-agent`: *"You are a technical analyst. Given the feature vector for {{symbol}}, form a directional view based on price structure, momentum, and volume. State your confidence 0–1 and a one-sentence rationale."* Write a similarly specific, non-generic default for each of the other five agents based on their existing `description`/`tagline` — this is exactly what your original ask meant by "the website will already have very nice setup ready... the user will be 100% allowed to edit anything."
+   - a `slider` for output confidence threshold if the agent doesn't already have one.
+   Add `docs` for all 6 using their existing `description`/`useCase` as source material, expanded into the four-part shape above.
+
+2. **Debate layer (whichever components exist there — `bull-bear`, `moderator`, and any others in `mock/layers.ts`)** — same treatment, since debate nodes are also LLM-reasoning-backed. Their `systemPrompt` defaults should reflect their structural role (e.g. `moderator`: *"You are scoring a debate between a bull and bear case. Weigh argument quality, not just confidence. Output a winner and a blended confidence score."*).
+
+3. **Everything else** — once steps 1–2 are verified working end-to-end (Inspector shows basic fields, modal shows everything, config saves and reloads correctly), extend `advancedFields`/`docs` to the remaining layers. Most non-agent nodes (data feeds, indicators, risk rules, execution) don't need a `model-select` at all — they need `advancedFields` with the kind of settings a real implementation would expose (e.g. `ohlcv-feed` advanced: a `key-value` field for custom exchange headers, a `credential` for the data provider's API key currently hiding in the flat `Settings` page instead of on the node where it belongs — see §7). Don't force a model picker onto nodes that have no business having one; use judgment per node, guided by its existing `description`.
+
+---
+
+## 5. Input variable mapping (so `{{variables}}` in a prompt actually mean something)
+
+A node's real inputs come from whatever's wired into it on the canvas, not from a fixed schema — e.g. a `moderator` node might have two, three, or four `Signal` edges feeding it depending on the graph. For the `prompt` field type's variable-insertion affordance to be meaningful, it needs to know what's actually connected right now, not just a generic list.
+
+In `components/builder/inspector.tsx` (or wherever the modal ends up living), compute available variables for the selected node at render time: `edges.filter(e => e.target === node.id)`, and for each, look up the source node's `ComponentDef` name to build a default label (e.g. `bull_case`, `bear_case` if two `Signal`-typed edges come from nodes whose names suggest that framing — simplest correct approach: default the variable name to a slugified version of the source component's `name`, and let the user rename it). Store user-given labels in the node's `config` under a reserved key, e.g. `config.__inputLabels: Record<sourceNodeId, string>`, edited via a small "Input variables" section at the top of the Deep Customization modal's Model & Prompt tab — one row per real incoming edge, an editable label `Input` next to each, feeding the "insert variable" list in the `prompt` field.
+
+This is the piece that makes "all settings compatible with each other" real rather than cosmetic: the prompt editor should only ever offer variables that are actually wired in, and if a saved prompt references a `{{variable}}` that no longer exists (edge was deleted since), flag it — add a new check to `lib/validate.ts`: `warning` level, "Prompt references {{x}} but no input provides it," pointing at that node id, using the same `Issue` shape (`id`, `level`, `title`, `detail`, `nodeIds`) every other check in that file already uses.
+
+---
+
+## 6. The Deep Customization modal
+
+Build `components/builder/deep-customization-dialog.tsx`. Large `Dialog` (override the default max-width — go close to full-viewport, this needs room; check `DialogContent`'s className prop for a size override, same as how `UnlockDialog`/the block-save dialog already pass a custom `max-w-*`). Structure as a `Tabs`/`TabsList` inside the dialog body:
+
+- **Configuration** — every field from both `fields` and `advancedFields` together, grouped under two headers ("Basic" / "Advanced") using the same field-rendering logic as the Inspector (see refactor note below) — this tab alone already delivers "see everything, edit everything."
+- **Model & Prompt** — only present when the component has a `model-select` field. The input-variable-mapping mini-section from §5, then the `model-select` field, then the `prompt` field full-width and taller than it renders in a cramped side panel (this modal is exactly where a prompt editor deserves real space — give it a `min-h-64` textarea, not the compact one-line-visible default).
+- **Documentation** — renders `comp.docs` (when-to-use / when-to-skip / best practices / common mistakes as bulleted lists) plus the existing `useCase` line, and a "View full library entry" link to `/app/library/${comp.id}` (Phase 5) if that page exists yet, otherwise omit the link rather than pointing at a 404.
+- **Advanced/Reset** — a "Reset to defaults" button (`ConfirmDialog`-gated, calls `defaultConfig(comp)` and overwrites this node's `config`), and a small "Export config as JSON" / "Import config from JSON" pair (copy-to-clipboard and paste-to-apply, using the browser Clipboard API — this is a genuinely useful power-user feature for sharing one node's exact setup with someone else, and it's cheap to build since `config` is already a plain serializable object).
+
+**Refactor requirement, do this as part of building the modal, not as an afterthought:** the Inspector currently has its field-rendering `switch` inline in `inspector.tsx`. Extract it into `components/builder/field-renderer.tsx` exporting a single `renderField(field: FieldDef, value: unknown, onChange: (v: unknown) => void)` function (or a `<FieldRenderer />` component, whichever fits the codebase's existing conventions better — check how similar shared-rendering utilities are structured elsewhere, e.g. `LEVEL_META` in `console-panel.tsx` for the "lookup table of render logic" pattern already in use). Both the Inspector's basic panel and this modal's Configuration tab call the same function. Extending `FieldDef` in the future should only ever require touching this one file's switch statement, never both the Inspector and the modal separately.
+
+**Trigger**: add a "Deep customization" button to the bottom of the Inspector's field list, below existing fields, above the "Docs" link — full-width, `variant="secondary"`, a `Sparkles` or `SlidersHorizontal` icon, opens this dialog for the currently-selected node.
+
+**Wire the onboarding "experience level" from Phase 5 §1, if you built it**: `experience === 'beginner'` still shows the "Deep customization" button, just with slightly less visual weight (ghost variant instead of secondary) — never hide it outright, a beginner should still be able to find it, just not have it competing for attention immediately.
+
+---
+
+## 7. Migrate the two API-key fields already sitting in the wrong place
+
+`app/app/settings/page.tsx` currently has "NSE Realtime Datafeed Key" and "Broker Execution API Key" as flat text fields on a general settings page, with help text literally saying *"Used by OHLCV and Orderbook feeds in Layer I"* and *"Used for paper and live order placement in Layer IX"* — these keys belong on the nodes that use them, not on an unrelated global settings page. Once `credential`-type `advancedFields` exist on `ohlcv-feed`/`orderbook-depth` (Layer I) and the paper/live execution nodes (Layer IX), remove these two fields from the Settings page entirely (they're superseded, not duplicated — a key belongs in exactly one place) and add a short note where they used to be: "Market data and broker credentials now live on their respective nodes in the Builder — open any Data or Execution node's Deep Customization panel." If you're running this phase before or without Phase 5's Account section, this note lives on the current flat `/app/settings` page; if Phase 5 already moved things to `/app/account/profile`, put the note there instead.
+
+---
+
+## 8. Backward compatibility — don't let this phase break every already-saved bot
+
+Every bot already saved (the seeded mock bots, and anything a real user built before this phase shipped) has `node.config` objects keyed only to the *old* `fields` list. The moment you add `advancedFields` with new keys to a `ComponentDef`, every existing saved node is missing those keys in its stored `config`.
+
+Fix this once, centrally: wherever a bot's graph is loaded into the builder (`load` in `lib/builder-store.ts`, called from `builder/[botId]/page.tsx`), merge each node's stored `config` on top of `defaultConfig(comp)` instead of using the stored `config` as-is:
+```
+const comp = COMPONENT_MAP[node.componentId]
+const mergedConfig = comp ? { ...defaultConfig(comp), ...node.config } : node.config
+```
+This guarantees every field this component definition now expects has *some* value (the default) even for a bot that was saved before that field existed, while never clobbering a value the user actually set. Do this in Phase 6, even though the deeper storage/versioning rework is Phase 7 — an old bot silently missing half its config the first time someone opens it after this update would be a bad regression to ship.
+
+---
+
+## Acceptance checklist for Phase 6
+
+- [ ] Every Intelligence Agent node has a working model/provider picker (including a functioning "local Ollama" path with a free-text model tag and endpoint field) and an editable, sensibly-pre-filled system prompt.
+- [ ] The Deep Customization modal opens from every node in the library (not just agents), shows basic + advanced fields, and — for agent-type nodes — a working input-variable list feeding the prompt editor.
+- [ ] A prompt referencing a variable that isn't actually wired in produces a warning in the Console panel, and the warning disappears once you wire the missing input or edit the prompt.
+- [ ] Opening a bot that was saved before this phase shipped shows every new field populated with a sensible default, not blank/undefined.
+- [ ] The Inspector and the modal render fields through the same shared function — verify by adding a throwaway 8th field type as a smoke test and confirming it only had to be added in one file.
+- [ ] The two API-key fields that used to live on the flat Settings page now live on the Data/Execution nodes that actually use them.

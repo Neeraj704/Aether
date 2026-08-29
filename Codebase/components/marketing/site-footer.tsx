@@ -7,7 +7,8 @@ const COLUMNS = [
     links: [
       { href: '/how-it-works', label: 'How it works' },
       { href: '/pricing', label: 'Pricing' },
-      { href: '/marketplace', label: 'Marketplace' },
+      // TODO(phase5): point at public /marketplace once built
+      { href: '/app/marketplace', label: 'Marketplace' },
       { href: '/app/library', label: 'Component library' },
       { href: '/app/compare', label: 'Compare bots' },
     ],
@@ -26,9 +27,10 @@ const COLUMNS = [
     title: 'Company',
     links: [
       { href: '/how-it-works', label: 'About' },
-      { href: '/blog', label: 'Changelog' },
+      // Changelog placeholder pointing to docs until real changelog exists
+      { href: '/docs', label: 'Changelog' },
       { href: '/app/help', label: 'Support' },
-      { href: '/marketplace', label: 'Creator program' },
+      { href: '/app/marketplace', label: 'Creator program' },
     ],
   },
   {

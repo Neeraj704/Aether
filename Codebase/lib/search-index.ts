@@ -37,7 +37,7 @@ const PAGES: SearchResult[] = [
   { id: 'p-notifs', kind: 'page', title: 'Notifications', subtitle: 'Everything that happened', href: '/app/notifications' },
   { id: 'p-docs', kind: 'page', title: 'Documentation', subtitle: 'Guides and reference', href: '/docs' },
   { id: 'p-pricing', kind: 'page', title: 'Pricing', subtitle: 'Compare plans', href: '/pricing' },
-  { id: 'p-library', kind: 'page', title: 'Component Library', subtitle: 'All 12 layers', href: '/components' },
+  { id: 'p-library', kind: 'page', title: 'Component Library', subtitle: 'All 12 layers', href: '/app/library' },
 ]
 
 const ACTIONS: SearchResult[] = [
@@ -67,7 +67,7 @@ export function buildIndex(bots: Bot[]): SearchResult[] {
       kind: 'component',
       title: c.name,
       subtitle: `${LAYER_MAP[c.layer].roman}. ${LAYER_MAP[c.layer].name} · ${c.tagline}`,
-      href: `/components/${c.layer}#${c.id}`,
+      href: `/app/library/${c.id}`,
       keywords: `${c.tagline} ${c.inputs.join(' ')} ${c.outputs.join(' ')}`,
     })),
     ...LAYERS.map<SearchResult>((l) => ({
@@ -75,7 +75,7 @@ export function buildIndex(bots: Bot[]): SearchResult[] {
       kind: 'layer',
       title: `${l.roman}. ${l.name}`,
       subtitle: l.short,
-      href: `/components/${l.id}`,
+      href: `/app/library?layer=${l.id}`,
     })),
     ...MARKETPLACE_PRESETS.map<SearchResult>((p) => ({
       id: `preset-${p.id}`,

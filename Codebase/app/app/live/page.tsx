@@ -66,6 +66,7 @@ export default function LiveMonitoringPage() {
   const displayedBots = botFilter === 'live' ? liveBots : bots
   const [killConfirmed, setKillConfirmed] = useState(false)
   const [isStreaming, setIsStreaming] = useState(true)
+  const [soundOn, setSoundOn] = useState(true)
   const [tickSpeed, setTickSpeed] = useState<number>(1200) // ms
   const [latency, setLatency] = useState(14)
   const [logFilter, setLogFilter] = useState<string>('all')
@@ -85,6 +86,24 @@ export default function LiveMonitoringPage() {
     { id: 'l4', time: new Date(Date.now() - 15000).toLocaleTimeString(), type: 'warn', bot: 'Debate Engine', text: 'DRAWDOWN WARNING: Intra-day drawdown reached -1.2%' },
     { id: 'l5', time: new Date(Date.now() - 25000).toLocaleTimeString(), type: 'system', bot: 'System Engine', text: 'HEARTBEAT OK: Latency 14ms across NSE Level 2 feeds' },
   ])
+
+  // Reconnect Gateway Handler
+  const handleReconnect = () => {
+    setLatency(Math.floor(10 + Math.random() * 6))
+    setIsStreaming(true)
+    setLogs((prev) => [
+      {
+        id: `log-${Date.now()}`,
+        time: new Date().toLocaleTimeString(),
+        type: 'system',
+        bot: 'Gateway',
+        text: 'RECONNECTED: Restored low-latency feed to NSE Level 2 feed gateway',
+        isNew: true,
+      },
+      ...prev,
+    ])
+    toast.success('Reconnected', 'Restored low-latency feed to NSE Level 2 gateway.')
+  }
 
   // Aggregate stats
   const totalPnl = positions.reduce((acc, p) => acc + p.pnl, 0)
@@ -147,12 +166,38 @@ export default function LiveMonitoringPage() {
           isNew: true,
         }
 
+        if (soundOn && (event.type === 'risk' || event.type === 'warn')) {
+          if (typeof window !== 'undefined' && (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)) {
+            try {
+              const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+              const ctx = new AudioCtx()
+              const osc = ctx.createOscillator()
+              const gain = ctx.createGain()
+              osc.type = 'sine'
+              osc.frequency.setValueAtTime(event.type === 'risk' ? 880 : 660, ctx.currentTime)
+              gain.gain.setValueAtTime(0.04, ctx.currentTime)
+              gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15)
+              osc.connect(gain)
+              gain.connect(ctx.destination)
+              osc.start()
+              osc.stop(ctx.currentTime + 0.15)
+            } catch {
+              // ignore audio context restrictions
+            }
+          }
+          if (event.type === 'risk') {
+            toast.error('Risk Alert', `${randomBot}: ${event.text}`)
+          } else {
+            toast.info('System Warning', `${randomBot}: ${event.text}`)
+          }
+        }
+
         setLogs((prev) => [newLog, ...prev.slice(0, 49)])
       }
     }, tickSpeed)
 
     return () => clearInterval(interval)
-  }, [isStreaming, tickSpeed, liveBots])
+  }, [isStreaming, tickSpeed, liveBots, soundOn])
 
   // Helper to add a manual test order
   const handleSimulateTrade = () => {
@@ -280,10 +325,41 @@ export default function LiveMonitoringPage() {
             <span>{tickSpeed === 500 ? 'Fast (0.5s)' : tickSpeed === 1200 ? 'Normal (1.2s)' : 'Slow (2.5s)'}</span>
           </button>
 
+          {/* Sound alert toggle */}
+          <button
+            onClick={() => {
+              setSoundOn(!soundOn)
+              toast.info(soundOn ? 'Alert sounds muted' : 'Alert sounds enabled')
+            }}
+            className={`h-9 px-3 rounded-full border text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
+              soundOn
+                ? 'border-border bg-secondary/60 text-foreground hover:bg-secondary'
+                : 'border-border bg-transparent text-muted-foreground hover:bg-secondary/40'
+            }`}
+            title={soundOn ? 'Audible risk/warn alerts enabled' : 'Audible alerts muted'}
+          >
+            {soundOn ? (
+              <Volume2 className="size-3.5 text-brand" />
+            ) : (
+              <VolumeX className="size-3.5 text-muted-foreground" />
+            )}
+            <span>{soundOn ? 'Sound On' : 'Sound Off'}</span>
+          </button>
+
+          {/* Reconnect Gateway */}
+          <button
+            onClick={handleReconnect}
+            className="h-9 px-3 rounded-full border border-border bg-secondary/60 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Reconnect to feed gateway"
+          >
+            <RefreshCw className="size-3.5 text-brand" />
+            <span>Reconnect</span>
+          </button>
+
           {/* Manual Trade Simulation */}
           <button
             onClick={handleSimulateTrade}
-            className="h-9 px-3.5 rounded-full border border-brand/30 bg-brand/10 text-xs font-semibold text-brand hover:bg-brand/20 transition-colors flex items-center gap-1.5"
+            className="h-9 px-3.5 rounded-full border border-brand/30 bg-brand/10 text-xs font-semibold text-brand hover:bg-brand/20 transition-colors flex items-center gap-1.5 cursor-pointer"
           >
             <Plus className="size-3.5" /> Execute Test Trade
           </button>
@@ -291,7 +367,7 @@ export default function LiveMonitoringPage() {
           {/* Emergency Stop */}
           <button
             onClick={() => setKillConfirmed(true)}
-            className="h-9 px-4 rounded-full border border-destructive/40 bg-destructive/15 text-xs font-semibold text-destructive hover:bg-destructive/25 transition-colors flex items-center gap-2"
+            className="h-9 px-4 rounded-full border border-destructive/40 bg-destructive/15 text-xs font-semibold text-destructive hover:bg-destructive/25 transition-colors flex items-center gap-2 cursor-pointer"
           >
             <ShieldAlert className="size-3.5" /> Emergency Stop
           </button>

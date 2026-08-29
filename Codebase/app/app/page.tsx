@@ -3,22 +3,19 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  Bot as BotIcon,
   Plus,
-  Play,
   TrendingUp,
   Activity,
   Zap,
   Sparkles,
   ArrowUpRight,
-  ShieldCheck,
   Radio,
 } from 'lucide-react'
 import { useWorkspace } from '@/lib/workspace-store'
 import { useSession, toast } from '@/lib/store'
-import { CURRENT_USER } from '@/mock/data'
 import { StatusBadge, Badge } from '@/components/ui/badge'
 import { PillButton, PillLink } from '@/components/ui/pill-button'
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
 
 export default function WorkspaceDashboard() {
   const router = useRouter()
@@ -27,10 +24,16 @@ export default function WorkspaceDashboard() {
   const createBot = useWorkspace((s) => s.createBot)
   const setBotStatus = useWorkspace((s) => s.setBotStatus)
   const credits = useSession((s) => s.credits)
+  const profile = useSession((s) => s.profile)
 
   const activeBots = bots.filter((b) => b.status === 'live').length
   const totalBots = bots.length
   const totalRuns = runs.length
+
+  const avgSharpe =
+    runs.length > 0
+      ? (runs.reduce((sum, r) => sum + r.metrics.sharpe, 0) / runs.length).toFixed(2)
+      : '—'
 
   const handleCreateBot = () => {
     const bot = createBot({ name: 'New Strategy Bot' })
@@ -48,7 +51,7 @@ export default function WorkspaceDashboard() {
               <Zap className="size-3.5" /> Aether Algorithmic Engine
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-              Welcome back, {CURRENT_USER.name}
+              Welcome back, {profile.name}
             </h1>
             <p className="text-sm text-muted-foreground max-w-xl">
               Manage your visual trading bots, run multi-layered backtests, and monitor execution across live venues.
@@ -71,21 +74,25 @@ export default function WorkspaceDashboard() {
           <span className="text-xs text-muted-foreground font-medium flex items-center justify-between">
             Active Live Bots <Radio className="size-3.5 text-profit animate-pulse" />
           </span>
-          <div className="text-2xl font-bold tracking-tight">{activeBots} <span className="text-xs text-muted-foreground font-normal">/ {totalBots} total</span></div>
+          <div className="text-2xl font-bold tracking-tight">
+            {activeBots} <span className="text-xs text-muted-foreground font-normal">/ {totalBots} total</span>
+          </div>
         </div>
 
         <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-1">
           <span className="text-xs text-muted-foreground font-medium flex items-center justify-between">
             Simulations Executed <Activity className="size-3.5 text-brand" />
           </span>
-          <div className="text-2xl font-bold tracking-tight">{totalRuns} <span className="text-xs text-muted-foreground font-normal">runs</span></div>
+          <div className="text-2xl font-bold tracking-tight">
+            {totalRuns} <span className="text-xs text-muted-foreground font-normal">runs</span>
+          </div>
         </div>
 
         <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-1">
           <span className="text-xs text-muted-foreground font-medium flex items-center justify-between">
             Avg Sharpe Ratio <TrendingUp className="size-3.5 text-profit" />
           </span>
-          <div className="text-2xl font-bold tracking-tight text-profit">1.64</div>
+          <div className="text-2xl font-bold tracking-tight text-profit">{avgSharpe}</div>
         </div>
 
         <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-1">
@@ -199,54 +206,60 @@ export default function WorkspaceDashboard() {
         </div>
 
         <div className="overflow-hidden rounded-xl border border-border bg-card">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b border-border bg-secondary/50 font-medium text-muted-foreground">
-                <tr>
-                  <th className="p-3 pl-4">Run ID</th>
-                  <th className="p-3">Bot Name</th>
-                  <th className="p-3">Simulation Type</th>
-                  <th className="p-3">Total Return</th>
-                  <th className="p-3">Win Rate</th>
-                  <th className="p-3">Max DD</th>
-                  <th className="p-3">Sharpe</th>
-                  <th className="p-3 pr-4 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {runs.slice(0, 5).map((run) => (
-                  <tr key={run.id} className="hover:bg-secondary/30 transition-colors">
-                    <td className="p-3 pl-4 font-mono text-tertiary">{run.id}</td>
-                    <td className="p-3 font-semibold text-foreground">{run.botName}</td>
-                    <td className="p-3">
-                      <Badge variant="outline" size="sm" className="capitalize">
-                        {run.config.type}
-                      </Badge>
-                    </td>
-                    <td
-                      className={`p-3 font-bold ${
-                        run.metrics.totalReturn >= 0 ? 'text-profit' : 'text-loss'
-                      }`}
-                    >
-                      {run.metrics.totalReturn >= 0 ? '+' : ''}
-                      {run.metrics.totalReturn}%
-                    </td>
-                    <td className="p-3 text-foreground">{run.metrics.winRate}%</td>
-                    <td className="p-3 text-loss">{run.metrics.maxDrawdown}%</td>
-                    <td className="p-3 text-foreground font-semibold">{run.metrics.sharpe}</td>
-                    <td className="p-3 pr-4 text-right">
+          <Table>
+            <THead>
+              <TR>
+                <TH className="pl-4">Run ID</TH>
+                <TH>Bot Name</TH>
+                <TH>Simulation Type</TH>
+                <TH>Total Return</TH>
+                <TH>Win Rate</TH>
+                <TH>Max DD</TH>
+                <TH>Sharpe</TH>
+                <TH className="pr-4 text-right">Actions</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {runs.slice(0, 5).map((run) => (
+                <TR key={run.id}>
+                  <TD className="pl-4 font-mono text-tertiary text-xs">{run.id}</TD>
+                  <TD className="font-semibold text-foreground">{run.botName}</TD>
+                  <TD>
+                    <Badge variant="outline" size="sm" className="capitalize">
+                      {run.config.type}
+                    </Badge>
+                  </TD>
+                  <TD
+                    className={`font-bold ${
+                      run.metrics.totalReturn >= 0 ? 'text-profit' : 'text-loss'
+                    }`}
+                  >
+                    {run.metrics.totalReturn >= 0 ? '+' : ''}
+                    {run.metrics.totalReturn}%
+                  </TD>
+                  <TD className="text-foreground">{run.metrics.winRate}%</TD>
+                  <TD className="text-loss">{run.metrics.maxDrawdown}%</TD>
+                  <TD className="text-foreground font-semibold">{run.metrics.sharpe}</TD>
+                  <TD className="pr-4 text-right">
+                    <div className="flex items-center justify-end gap-3">
+                      <Link
+                        href={`/app/bots/${run.botId}/backtest/${run.id}`}
+                        className="text-xs font-medium text-brand hover:underline"
+                      >
+                        View report &rarr;
+                      </Link>
                       <Link
                         href={`/app/builder/${run.botId}`}
-                        className="text-brand hover:underline font-medium"
+                        className="text-xs text-muted-foreground hover:text-foreground"
                       >
-                        View Graph &rarr;
+                        Graph &rarr;
                       </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </div>
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
         </div>
       </div>
     </div>

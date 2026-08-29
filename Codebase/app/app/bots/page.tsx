@@ -10,15 +10,13 @@ import {
   Copy,
   Trash2,
   ExternalLink,
-  Play,
-  Pause,
-  Filter,
 } from 'lucide-react'
 import { useWorkspace } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
 import { StatusBadge, Badge } from '@/components/ui/badge'
 import { PillButton } from '@/components/ui/pill-button'
 import { Input } from '@/components/ui/input'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import type { BotStatus } from '@/mock/data'
 
 export default function MyBotsPage() {
@@ -31,6 +29,7 @@ export default function MyBotsPage() {
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [botToDelete, setBotToDelete] = useState<{ id: string; name: string } | null>(null)
 
   const filteredBots = bots.filter((bot) => {
     const matchSearch =
@@ -55,10 +54,7 @@ export default function MyBotsPage() {
   }
 
   const handleDelete = (id: string, name: string) => {
-    if (confirm(`Are you sure you want to delete "${name}"?`)) {
-      deleteBot(id)
-      toast.info('Bot deleted', `${name} was removed.`)
-    }
+    setBotToDelete({ id, name })
   }
 
   return (
@@ -201,6 +197,23 @@ export default function MyBotsPage() {
           ))}
         </div>
       )}
+      <ConfirmDialog
+        open={botToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setBotToDelete(null)
+        }}
+        title={`Delete "${botToDelete?.name}"?`}
+        description="This permanently removes the bot, its saved versions, and its backtest history. This can't be undone."
+        confirmLabel="Delete bot"
+        destructive
+        onConfirm={() => {
+          if (botToDelete) {
+            deleteBot(botToDelete.id)
+            toast.info('Bot deleted', `${botToDelete.name} was removed.`)
+            setBotToDelete(null)
+          }
+        }}
+      />
     </div>
   )
 }

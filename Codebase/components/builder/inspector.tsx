@@ -389,7 +389,7 @@ function SingleNodePanel({
 
       <div className="flex items-center gap-2 border-t border-border p-3">
         <Button
-          render={<Link href={`/layers/${comp.layer}`} />}
+          render={<Link href={`/app/library/${comp.id}`} />}
           variant="outline"
           size="sm"
           className="flex-1"

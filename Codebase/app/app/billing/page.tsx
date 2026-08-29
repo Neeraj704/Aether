@@ -1,18 +1,11 @@
 'use client'
 
-import { useState } from 'react'
-import {
-  CreditCard,
-  Check,
-  Zap,
-  Sparkles,
-  ShieldCheck,
-  Building,
-  ArrowUpRight,
-} from 'lucide-react'
+import { Check, Sparkles } from 'lucide-react'
 import { useSession, toast } from '@/lib/store'
 import { TierBadge } from '@/components/ui/badge'
-import { PillButton } from '@/components/ui/pill-button'
+import { PLANS, CREDIT_BUNDLES } from '@/mock/data'
+import type { PlanTier } from '@/mock/layers'
+import { cn, formatINR } from '@/lib/utils'
 
 export default function BillingPage() {
   const plan = useSession((s) => s.plan)
@@ -20,15 +13,17 @@ export default function BillingPage() {
   const credits = useSession((s) => s.credits)
   const addCredits = useSession((s) => s.addCredits)
 
-  const handleBuyCredits = (amount: number, cost: string) => {
+  const handleBuyCredits = (amount: number, price: number) => {
     addCredits(amount)
-    toast.success('Credits Added!', `Added ${amount} simulation credits to your account.`)
+    toast.success('Credits Added!', `Added ${amount} simulation credits to your account for ${formatINR(price)}.`)
   }
 
-  const handlePlanChange = (targetPlan: 'free' | 'starter' | 'pro') => {
+  const handlePlanChange = (targetPlan: PlanTier) => {
     setPlan(targetPlan)
     toast.success('Plan Updated', `Your workspace is now on the ${targetPlan.toUpperCase()} plan.`)
   }
+
+  const subscriptionPlans = PLANS.filter((p) => p.id !== 'payg')
 
   return (
     <div className="flex flex-col gap-8 p-6 lg:p-8 max-w-[1400px] mx-auto w-full">
@@ -37,7 +32,7 @@ export default function BillingPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Billing & Subscriptions</h1>
           <p className="text-xs text-muted-foreground">
-            Manage your subscription tier, simulation credits, and payment methods
+            Manage your subscription tier, simulation credits, and plan entitlements
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -49,38 +44,41 @@ export default function BillingPage() {
         </div>
       </div>
 
-      {/* Credits Card */}
-      <div className="rounded-2xl border border-gold/30 bg-gradient-to-r from-gold/10 via-card to-background p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+      {/* Credits Balance & Top-Up Bundles Card */}
+      <div className="rounded-2xl border border-gold/30 bg-gradient-to-r from-gold/10 via-card to-background p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div className="flex items-start gap-4">
-          <div className="p-3 rounded-xl bg-gold/15 text-gold">
+          <div className="p-3 rounded-xl bg-gold/15 text-gold shrink-0">
             <Sparkles className="size-6" />
           </div>
           <div className="flex flex-col gap-1">
             <h2 className="text-lg font-bold">Simulation Credits Balance</h2>
             <p className="text-xs text-muted-foreground max-w-md">
-              Credits are consumed when running high-frequency backtests, Monte Carlo simulations, and RL policy training loops.
+              Credits are consumed when running high-frequency backtests, Monte Carlo simulations, and unlocking modular layer components.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="flex flex-col text-right sm:text-left">
-            <span className="text-3xl font-extrabold font-mono text-gold">{credits}</span>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
+          <div className="flex flex-col">
+            <span className="text-3xl font-extrabold font-mono text-gold tabular-nums">{credits}</span>
             <span className="text-xs text-muted-foreground">Credits Available</span>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => handleBuyCredits(100, '₹499')}
-              className="h-9 px-3.5 rounded-lg border border-gold/40 bg-gold/15 text-xs font-semibold text-gold hover:bg-gold/25 transition-colors"
-            >
-              +100 Credits (₹499)
-            </button>
-            <button
-              onClick={() => handleBuyCredits(500, '₹1,999')}
-              className="h-9 px-3.5 rounded-lg bg-gold text-black text-xs font-bold hover:opacity-90 transition-opacity"
-            >
-              +500 Credits (₹1,999)
-            </button>
+          <div className="flex flex-wrap gap-2">
+            {CREDIT_BUNDLES.map((bundle) => (
+              <button
+                key={bundle.credits}
+                onClick={() => handleBuyCredits(bundle.credits, bundle.price)}
+                className={cn(
+                  'h-9 px-3.5 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5',
+                  bundle.popular
+                    ? 'bg-gold text-black hover:opacity-90 font-bold shadow-sm'
+                    : 'border border-gold/40 bg-gold/15 text-gold hover:bg-gold/25',
+                )}
+                title={bundle.blurb}
+              >
+                +{bundle.credits} Credits ({formatINR(bundle.price)})
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -90,101 +88,66 @@ export default function BillingPage() {
         <h2 className="text-xl font-bold tracking-tight">Select Subscription Plan</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Free Plan */}
-          <div className={`rounded-xl border p-6 flex flex-col justify-between gap-6 ${
-            plan === 'free' ? 'border-brand bg-brand/5' : 'border-border bg-card'
-          }`}>
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold">Free Tier</h3>
-                {plan === 'free' && <span className="text-xs font-bold text-brand bg-brand/10 px-2.5 py-1 rounded-full">Current Plan</span>}
+          {subscriptionPlans.map((p) => {
+            const isCurrent = plan === p.id
+            const tierId = p.id as PlanTier
+
+            return (
+              <div
+                key={p.id}
+                className={cn(
+                  'rounded-xl border p-6 flex flex-col justify-between gap-6 transition-all',
+                  isCurrent
+                    ? 'border-brand bg-brand/5 ring-1 ring-brand'
+                    : p.highlight
+                      ? 'border-gold/40 bg-gold/[0.03]'
+                      : 'border-border bg-card',
+                )}
+              >
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-bold">{p.name} Tier</h3>
+                    {isCurrent && (
+                      <span className="text-xs font-bold text-brand bg-brand/15 px-2.5 py-0.5 rounded-full">
+                        Current Plan
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-3xl font-extrabold tracking-tight">
+                    {p.monthly === 0 ? 'Free' : formatINR(p.monthly)}{' '}
+                    <span className="text-xs font-normal text-muted-foreground">/ month</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground min-h-[2rem] leading-relaxed">
+                    {p.blurb}
+                  </p>
+
+                  <ul className="flex flex-col gap-2 pt-3 text-xs text-muted-foreground border-t border-border">
+                    {p.features.map((f) => (
+                      <li key={f} className="flex items-start gap-2">
+                        <Check className="size-4 text-profit shrink-0 mt-0.5" />
+                        <span>{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <button
+                  disabled={isCurrent}
+                  onClick={() => handlePlanChange(tierId)}
+                  className={cn(
+                    'h-10 rounded-lg text-xs font-bold transition-all cursor-pointer',
+                    isCurrent
+                      ? 'border border-border text-muted-foreground bg-secondary/50 cursor-default'
+                      : p.highlight
+                        ? 'bg-gold text-black hover:opacity-90'
+                        : 'bg-brand text-brand-foreground hover:opacity-90',
+                  )}
+                >
+                  {isCurrent ? 'Active Plan' : `Switch to ${p.name}`}
+                </button>
               </div>
-              <div className="text-3xl font-extrabold">₹0 <span className="text-xs font-normal text-muted-foreground">/ month</span></div>
-              <p className="text-xs text-muted-foreground">For learning visual bot building and standard backtesting.</p>
-
-              <ul className="flex flex-col gap-2 pt-4 text-xs">
-                <li className="flex items-center gap-2"><Check className="size-4 text-profit" /> Layer I & II Free Components</li>
-                <li className="flex items-center gap-2"><Check className="size-4 text-profit" /> 5 Active Bots</li>
-                <li className="flex items-center gap-2"><Check className="size-4 text-profit" /> 50 Simulation Credits / mo</li>
-              </ul>
-            </div>
-
-            <button
-              disabled={plan === 'free'}
-              onClick={() => handlePlanChange('free')}
-              className={`h-10 rounded-lg text-xs font-bold transition-all ${
-                plan === 'free'
-                  ? 'border border-border text-muted-foreground cursor-default'
-                  : 'bg-secondary text-foreground hover:bg-secondary/80'
-              }`}
-            >
-              {plan === 'free' ? 'Active Plan' : 'Downgrade to Free'}
-            </button>
-          </div>
-
-          {/* Starter Plan */}
-          <div className={`rounded-xl border p-6 flex flex-col justify-between gap-6 ${
-            plan === 'starter' ? 'border-brand bg-brand/5' : 'border-border bg-card'
-          }`}>
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold">Starter Tier</h3>
-                {plan === 'starter' && <span className="text-xs font-bold text-brand bg-brand/10 px-2.5 py-1 rounded-full">Current Plan</span>}
-              </div>
-              <div className="text-3xl font-extrabold">₹2,999 <span className="text-xs font-normal text-muted-foreground">/ month</span></div>
-              <p className="text-xs text-muted-foreground">For active retail traders deploying multi-agent setups.</p>
-
-              <ul className="flex flex-col gap-2 pt-4 text-xs">
-                <li className="flex items-center gap-2"><Check className="size-4 text-profit" /> Starter & Free Layer Components</li>
-                <li className="flex items-center gap-2"><Check className="size-4 text-profit" /> 25 Active Bots</li>
-                <li className="flex items-center gap-2"><Check className="size-4 text-profit" /> 250 Simulation Credits / mo</li>
-                <li className="flex items-center gap-2"><Check className="size-4 text-profit" /> Debate & Sentiment Layer</li>
-              </ul>
-            </div>
-
-            <button
-              onClick={() => handlePlanChange('starter')}
-              className={`h-10 rounded-lg text-xs font-bold transition-all ${
-                plan === 'starter'
-                  ? 'border border-border text-muted-foreground cursor-default'
-                  : 'bg-brand text-brand-foreground hover:opacity-90'
-              }`}
-            >
-              {plan === 'starter' ? 'Active Plan' : 'Upgrade to Starter'}
-            </button>
-          </div>
-
-          {/* Pro Plan */}
-          <div className={`rounded-xl border p-6 flex flex-col justify-between gap-6 relative overflow-hidden ${
-            plan === 'pro' ? 'border-gold bg-gold/5' : 'border-border bg-card'
-          }`}>
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-gold">Pro Tier</h3>
-                {plan === 'pro' && <span className="text-xs font-bold text-gold bg-gold/15 px-2.5 py-1 rounded-full">Current Plan</span>}
-              </div>
-              <div className="text-3xl font-extrabold">₹9,999 <span className="text-xs font-normal text-muted-foreground">/ month</span></div>
-              <p className="text-xs text-muted-foreground">Full suite for institutional quants & high-frequency bots.</p>
-
-              <ul className="flex flex-col gap-2 pt-4 text-xs">
-                <li className="flex items-center gap-2"><Check className="size-4 text-gold" /> ALL 12 Layers Unlocked</li>
-                <li className="flex items-center gap-2"><Check className="size-4 text-gold" /> Unlimited Active Bots</li>
-                <li className="flex items-center gap-2"><Check className="size-4 text-gold" /> 1,000 Simulation Credits / mo</li>
-                <li className="flex items-center gap-2"><Check className="size-4 text-gold" /> RL Policy Training & Microstructure</li>
-              </ul>
-            </div>
-
-            <button
-              onClick={() => handlePlanChange('pro')}
-              className={`h-10 rounded-lg text-xs font-bold transition-all ${
-                plan === 'pro'
-                  ? 'border border-gold/40 text-gold cursor-default'
-                  : 'bg-gold text-black hover:opacity-90'
-              }`}
-            >
-              {plan === 'pro' ? 'Active Plan' : 'Upgrade to Pro'}
-            </button>
-          </div>
+            )
+          })}
         </div>
       </div>
     </div>

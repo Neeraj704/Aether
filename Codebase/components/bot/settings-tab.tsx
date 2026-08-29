@@ -11,6 +11,7 @@ import { Field, Input, Textarea } from '@/components/ui/input'
 import { PillButton } from '@/components/ui/pill-button'
 import { Button } from '@/components/ui/button'
 import { Segmented } from '@/components/ui/tabs'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 export function SettingsTab({ bot }: { bot: Bot }) {
   const router = useRouter()
@@ -20,6 +21,7 @@ export function SettingsTab({ bot }: { bot: Bot }) {
 
   const [name, setName] = useState(bot.name)
   const [description, setDescription] = useState(bot.description)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   const handleSave = () => {
     updateBot(bot.id, { name: name.trim() || bot.name, description: description.trim() })
@@ -37,11 +39,7 @@ export function SettingsTab({ bot }: { bot: Bot }) {
   }
 
   const handleDelete = () => {
-    if (confirm(`Are you sure you want to permanently delete "${bot.name}"? This action cannot be undone.`)) {
-      deleteBot(bot.id)
-      toast.info('Bot deleted', `${bot.name} was removed.`)
-      router.push('/app/bots')
-    }
+    setShowDeleteConfirm(true)
   }
 
   return (
@@ -102,6 +100,20 @@ export function SettingsTab({ bot }: { bot: Bot }) {
           </Button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        title={`Delete "${bot.name}"?`}
+        description="This permanently removes the bot, its saved versions, and its backtest history. This can't be undone."
+        confirmLabel="Delete bot"
+        destructive
+        onConfirm={() => {
+          deleteBot(bot.id)
+          toast.info('Bot deleted', `${bot.name} was removed.`)
+          router.push('/app/bots')
+        }}
+      />
     </div>
   )
 }

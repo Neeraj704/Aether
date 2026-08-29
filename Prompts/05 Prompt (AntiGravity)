@@ -1,0 +1,206 @@
+# PHASE 4 — Bug Bash, Dead Links, and Real Auth Gating
+
+**Read `00 - START HERE` first for ground rules.** This phase touches only pages/components that already exist. It creates exactly one new file (`app/not-found.tsx`) plus one new shared component (`ConfirmDialog`) and one new shared store slice (profile fields) — everything else is edits to existing files. No new routes. Do not build the Library, Presets, Compare, Marketplace detail, Creator dashboard, Billing subpages, Account subpages, Help, Search, Onboarding, or Blog pages in this phase — those are Phase 5, and several fixes below deliberately point at those not-yet-built paths so Phase 5 has nothing left to wire up.
+
+Work through the sections in order. Each fix names the exact file, the exact current behavior, and the exact required behavior.
+
+---
+
+## 1. Global infrastructure (do these first — later fixes depend on them)
+
+### 1.1 Build the missing 404 page
+There is currently no `app/not-found.tsx`. Next.js falls back to its default blank error page for every broken link in the app — including several you're about to fix links *toward* pages that don't exist until Phase 5.
+
+Create `app/not-found.tsx`:
+- Full-bleed centered layout, same visual language as `EmptyState` but full-page (glass card is optional; plain centered content is fine, look at how `login/page.tsx` centers its card for the vertical-centering pattern).
+- Icon: a `Compass` or `SearchX` from `lucide-react`.
+- Heading: "This page doesn't exist." Body: one sentence, honest tone matching the rest of the copy voice (e.g. "The link might be old, or the page hasn't been built yet.").
+- Include the global search trigger inline: a button that calls `usePalette((s) => s.setOpen)(true)` from `components/app/command-palette.tsx` labeled "Search instead", styled like the topbar's search pill.
+- Two `PillLink`s below: if `useSession((s) => s.authed)` is true, link to `/app` labeled "Back to dashboard"; otherwise link to `/` labeled "Back home".
+- This must be a `'use client'` component since it reads from the session store.
+
+### 1.2 Build a real `ConfirmDialog` component
+Two places currently use the browser's native `confirm()` (`app/app/bots/page.tsx`'s delete handler, `components/bot/settings-tab.tsx`'s delete handler). Native `confirm()` is unstyled, blocks the JS thread, and looks like a bug next to a glass UI.
+
+Create `components/ui/confirm-dialog.tsx`:
+```
+interface ConfirmDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  description: string
+  confirmLabel?: string       // default "Confirm"
+  cancelLabel?: string        // default "Cancel"
+  destructive?: boolean       // default true — red confirm button
+  onConfirm: () => void
+}
+```
+Build it on top of the existing `Dialog`/`DialogContent`/`DialogHeader`/`DialogTitle`/`DialogDescription`/`DialogFooter`/`Button` primitives — same composition pattern as `UnlockDialog` and the "Save as block" dialog already in `builder/[botId]/page.tsx`. The confirm button uses `variant="destructive"` when `destructive` is true (the `Button` component already supports this variant — check `components/ui/button.tsx`).
+
+Then replace both native `confirm()` call sites:
+- `app/app/bots/page.tsx` → `handleDelete`: hold `{ id, name } | null` in state, render one `ConfirmDialog` at the bottom of the page, title `Delete "${name}"?`, description `"This permanently removes the bot, its saved versions, and its backtest history. This can't be undone."`
+- `components/bot/settings-tab.tsx` → `handleDelete`: same pattern, plus route back to `/app/bots` only after confirm (this already happens, just move it inside the `onConfirm` callback).
+
+### 1.3 Real auth gating
+Right now `useSession`'s `authed` defaults to `true` and nothing ever checks it to gate a route. The Dev Panel (`components/dev/dev-panel.tsx`) has a working "Signed in: Yes/No" toggle that currently does nothing observable — flipping it to "No" doesn't kick you out of `/app`. "Sign out" in `AccountMenu` (`components/app/app-topbar.tsx`) sets `authed: false` and pushes to `/`, but if the user then types `/app` in the address bar or hits back, they're back in with nothing stopping them.
+
+Fix in `app/app/layout.tsx`: convert it to (or wrap it in) a client component that checks `useSession`:
+```
+const authed = useSession((s) => s.authed)
+const hydrated = useSession((s) => s.hydrated)
+const router = useRouter()
+
+useEffect(() => {
+  if (hydrated && !authed) router.replace('/login')
+}, [hydrated, authed, router])
+
+if (!hydrated) return <FullPageSkeleton />   // avoid a flash of the workspace before hydration resolves
+if (!authed) return null                      // redirect is in flight
+```
+Since `app/app/layout.tsx` is currently a server component exporting `metadata`, split it: keep a thin server `layout.tsx` for the `metadata` export, move the actual JSX + guard into a new client component `components/app/app-shell.tsx` that the layout renders. This mirrors how `bots/[botId]/page.tsx` already separates a `Suspense`-wrapped inner component from its default export — same pattern, applied one level up.
+
+While you're in here, also gate on onboarding: if `authed && !onboardingComplete`, redirect to `/onboarding` instead of rendering the workspace (the `/onboarding` route itself is built in Phase 5 — this redirect will 404 gracefully via your new `not-found.tsx` until then, which is fine and expected).
+
+### 1.4 Wire login/signup into the onboarding gate
+`app/login/page.tsx` and `app/signup/page.tsx` both currently do `setAuthed(true); router.push('/app')`. Change the signup flow specifically (login stays as-is, since a returning user has presumably already onboarded):
+```
+setAuthed(true)
+router.push(onboardingComplete ? '/app' : '/onboarding')
+```
+`onboardingComplete` defaults to `true` in `INITIAL` in `lib/store.ts` today — leave the default as `true` for now (so nothing breaks before Phase 5 builds `/onboarding`), but make sure the Dev Panel's existing "Onboarded: No" toggle, once flipped, actually routes a fresh sign-in through `/onboarding`. This is one line of behavior to get right now so Phase 5 doesn't have to touch auth logic again.
+
+---
+
+## 2. Marketing/landing page dead links
+
+### 2.1 The two biggest dead links on the entire site
+`components/landing/hero.tsx` and `components/landing/closing-cta.tsx` link their primary CTAs to `/builder` and `/marketplace` — **neither route exists**. There is no `app/builder/page.tsx` at the root (only `app/app/builder/page.tsx`), and no `app/marketplace/page.tsx` at the root (only `app/app/marketplace/page.tsx`). Every visitor who clicks "Open the builder" or "Browse strategies" on the homepage currently hits a blank error page. This is the single highest-impact fix in this entire phase — it's the primary conversion path on the marketing site.
+
+Fix, in both files:
+- `"/builder"` → route smartly based on auth: if `authed`, `/app/builder`; if not, `/signup`. Since both are server-rendered-looking marketing sections that are actually `'use client'` already (check — `hero.tsx` uses `motion` so it's already client), read `useSession((s) => s.authed)` and compute the href, or simplest: keep it a plain link to `/app/builder` — the new auth guard from §1.3 will now correctly bounce an unauthed visitor to `/login` instead of silently 404ing, which is an acceptable and common pattern (click "open builder" while logged out → land on login, not stuck). Either approach is fine; the smart-route version is slightly better UX. Pick the smart-route version since you're already touching `lib/store.ts`.
+- `"/marketplace"` → `/app/marketplace` for now (the dedicated public, logged-out-friendly marketplace page from the sitemap is built in Phase 5 at `/marketplace`; once that lands, point these back to the new public route instead — leave a `// TODO(phase5): point at public /marketplace once built` comment so it's not forgotten).
+
+### 2.2 The sitewide nav "Marketplace" link
+`components/marketing/site-nav.tsx`'s `LINKS` array also points "Marketplace" at `/marketplace`, and it renders on **every marketing page** (it's fixed/sticky). Apply the same fix as §2.1.
+
+### 2.3 The marketplace teaser section
+`components/landing/marketplace-teaser.tsx` has two more instances: "Browse all presets" → `/marketplace`, and each preset card → `/marketplace/${p.id}`. Same fix as above for the list link. For the per-card links, since `/marketplace/:id` (public detail) is a Phase 5 page too, leave these as `/marketplace/${p.id}` — they'll 404 gracefully until Phase 5, same TODO comment.
+
+### 2.4 Footer inconsistency
+`components/marketing/site-footer.tsx`'s `COLUMNS` has both a "Blog" link and a "Changelog" link pointing at the exact same `/blog` href — two different labels promising two different things and landing on the same (currently nonexistent) page. Once Phase 5 builds `/blog`, that's the correct target for "Blog". For "Changelog", point it at `/blog?category=Product` instead (there's no dedicated changelog data model, and `BlogPost.category` already includes a `'Product'` category that covers product-update-style posts) — or simplest, since query-param filtering isn't in scope for the blog list page's spec in Phase 5, just point "Changelog" at `/docs` for now with a one-line comment noting it's a placeholder until a real changelog exists. Don't build a changelog system — that's out of scope for all four phases.
+
+### 2.5 Docs page cards aren't links at all
+`app/docs/page.tsx` renders every `DOC_SECTIONS` entry inside a plain `<div>` — there is no `<Link>` anywhere in the card, so nothing happens on click even once `/docs/[slug]` exists. Wrap each card in `<Link href={`/docs/${doc.slug}`}>` now. The destination route itself (`app/docs/[slug]/page.tsx`, rendering `DocSection.blocks`) is built in Phase 5 — this just makes the card an actual clickable link pointed at the right place.
+
+---
+
+## 3. Pricing is shown three different ways with three different numbers
+
+This is a real, visible bug: a visitor scrolling the homepage sees Starter at **₹799**/mo and Pro at **₹1,999**/mo (`components/landing/pricing-teaser.tsx`, which correctly reads from `PLANS` in `mock/data.ts`). The same visitor clicking through to `/pricing` sees Starter at **₹2,999**/mo and Pro at **₹9,999**/mo (`app/pricing/page.tsx`, fully hardcoded, ignores `PLANS` entirely). A logged-in user on `/app/billing` sees the same wrong ₹2,999/₹9,999 numbers (`app/app/billing/page.tsx`, also fully hardcoded, also ignores `PLANS`). Three surfaces, two different prices, zero of them agree with each other.
+
+**`PLANS` in `mock/data.ts` is the single source of truth from now on.** Fix both:
+
+### 3.1 `app/pricing/page.tsx`
+Rewrite to map over `PLANS` (excluding `payg` for the main three-card row, matching what `pricing-teaser.tsx` already does) instead of three hand-written `<div>`s. Each card's feature list comes from `plan.features` (already an array of strings — no hardcoded `<span>` list needed). Add:
+- A monthly/annual `Segmented` toggle (from `components/ui/tabs.tsx`) above the cards — `Plan` already has both `monthly` and `annual` fields, currently only `monthly` is shown anywhere. Toggling switches which number renders, with the annual number divided by 12 for the "/mo" display and a small "billed annually" note, standard SaaS pattern.
+- Below the three cards, render the full `PLAN_COMPARISON` grouped table (`group` + `rows`, each row has `free`/`starter`/`pro`/`payg` — string or boolean; `true` renders as a `Check` icon, `false` renders as a muted `—`, a string renders as-is). This data exists and currently has zero consumers anywhere in the app — it was written for exactly this table.
+- A fourth "Pay-as-you-go" card or a smaller inline callout beneath the three main cards, using `PLANS.find(p => p.id === 'payg')` — currently entirely unused.
+- Reuse `Faq` section content by rendering `FAQS` again here (same component pattern as the landing page's `Faq`, or extract the FAQ accordion markup from `components/landing/faq.tsx` into a shared component `components/marketing/faq-accordion.tsx` that both `/` and `/pricing` use — do this extraction, since you now have two consumers).
+
+### 3.2 `app/app/billing/page.tsx`
+Rewrite the "Subscription Plans Matrix" section to map over `PLANS` the same way, so the logged-in billing page finally agrees with the marketing pricing page. Keep the existing `handlePlanChange` logic (it already calls `setPlan` and toasts correctly) — just drive the card content from data instead of three copy-pasted blocks.
+
+Also fix the credit purchase buttons in the same file: they're hardcoded to "+100 Credits (₹499)" and "+500 Credits (₹1,999)" with the second one mislabeled (`CREDIT_BUNDLES` in `mock/data.ts` says 500 credits costs ₹499 and 1000 credits costs ₹999 — the current UI's price for 500 credits, ₹1,999, matches neither the 500-credit nor the 1000-credit bundle). Map over `CREDIT_BUNDLES` instead of hand-writing two buttons; this also picks up the `popular` flag on the 500-credit bundle for free.
+
+---
+
+## 4. Dashboard fixes (`app/app/page.tsx`)
+
+- **"Avg Sharpe Ratio" is hardcoded to `1.64`** regardless of actual data. Compute it: `runs.length ? runs.reduce((sum, r) => sum + r.metrics.sharpe, 0) / runs.length : 0`, formatted to 2 decimals. If `runs.length === 0`, show `"—"` instead of `0.00`.
+- The "Recent Backtest Runs" table is raw `<table>`/`<thead>`/`<tbody>` markup instead of the `Table`/`THead`/`TBody`/`TR`/`TH`/`TD` components from `components/ui/table.tsx` that every other table in the app uses (`TradeLogTable`, etc). Replace it for visual consistency (sticky header, consistent row hover, consistent padding).
+- "View Graph →" on each run row links to `/app/builder/${run.botId}` (the live editable graph). Add a second, more appropriate link next to it: "View report →" pointing to `/app/bots/${run.botId}/backtest/${run.id}` (the actual report for that specific run) — right now there is no way to reach a specific past run's report from the dashboard at all, only the graph it came from.
+
+---
+
+## 5. Notifications page (`app/app/notifications/page.tsx`)
+
+`Trash2` is imported but never rendered — there is no way to dismiss a single notification, only "mark all read." Add a dismiss action:
+1. In `lib/workspace-store.ts`, add `dismissNotification: (id: string) => void` alongside the existing `markRead`/`markAllRead`, filtering the notification out of state.
+2. In the page, add a small icon-only button (the `Trash2` icon, same visual weight as the existing "Mark all read" `PillButton`) on each notification row, calling `dismissNotification(n.id)` with `e.stopPropagation()` so it doesn't also trigger the row's own `markRead` click handler.
+3. Add a filter `Segmented` control (`All` / `Unread`) above the list — `NotificationKind` already has 8 distinct kinds (`backtest`, `error`, `trade`, `risk`, `fork`, `review`, `payment`, `system`) with zero filtering UI anywhere; add a second-row kind filter too, reusing the same pill-button-row pattern already used for status filters on `app/app/bots/page.tsx`.
+
+---
+
+## 6. Settings pages actually persist (`app/app/settings/page.tsx`)
+
+Right now `handleSave` just fires a toast — `name`, `email`, `bio`, `publicProfile`, `nseKey`, `brokerKey`, `emailNotifs`, `drawdownAlerts` are all local `useState`, initialized once from the static `CURRENT_USER` mock constant, and thrown away on refresh or on navigating away and back.
+
+1. Add a `profile` slice to `lib/store.ts`'s `useSession` (or a new adjacent `useProfile` store — either is fine, but keep it in the same persisted-session family so it round-trips through `localStorage` the same way `plan`/`credits`/`theme` already do):
+   ```
+   profile: { name: string; email: string; bio: string; publicProfile: boolean; initials: string }
+   updateProfile: (patch: Partial<SessionState['profile']>) => void
+   ```
+   Seed the initial value from `CURRENT_USER` (same source as today), so nothing visibly changes on first load.
+2. Also add `apiKeys: { nseKey: string; brokerKey: string }` and `notificationPrefs: { emailNotifs: boolean; drawdownAlerts: boolean }` to the same slice (these map onto the two other sections already on this page) with a matching updater each, or one combined `updateSettings(patch)` — your call, just make sure it's one coherent shape, not three parallel ad hoc pieces of state.
+3. Rewire `SettingsPage` to read initial field values from these new store fields instead of `CURRENT_USER` directly, and make `handleSave` call the updater(s) with the current local draft state before toasting success. Local `useState` for the form fields while editing is still correct (you don't want every keystroke committed to the store) — the fix is that *Save* must actually write through to persisted state, not just show a success toast over nothing.
+4. Update every other place that currently reads `CURRENT_USER.name` / `CURRENT_USER.email` / `CURRENT_USER.initials` directly to read from the new store instead, so a changed name/initials actually shows up everywhere: `components/app/app-topbar.tsx` (`AccountMenu`'s name/email row, the `Avatar` initials), `app/app/page.tsx`'s "Welcome back, {name}" banner. `CURRENT_USER` in `mock/data.ts` can stay as the *seed* value — just stop reading it live from more than one place.
+5. `app/signup/page.tsx` currently collects a "Full Name" field and throws it away. Once the profile store exists, wire signup's submit handler to call `updateProfile({ name })` with the entered value before redirecting, so a new account actually shows the name the person typed instead of always showing "Neeraj Sharma".
+
+---
+
+## 7. Builder: fix the Inspector's dead "Docs" button
+
+`components/builder/inspector.tsx` links each node's "Docs" button to `` `/layers/${comp.layer}` `` — this route has never existed under any name. Meanwhile your own mock data already anticipates the correct path in two places: `NOTIFICATIONS` (`nt-9`) links to `/app/library`, and `ACTIVITY` (`ac-5`) links to `/app/library/regime-tagger`. **Standardize on `/app/library/:componentId` as the canonical per-component docs route** (built in Phase 5) and fix the Inspector now:
+
+`` `/layers/${comp.layer}` `` → `` `/app/library/${comp.id}` ``
+
+---
+
+## 8. Fix `lib/search-index.ts` to point at real (or soon-to-be-real) routes
+
+Three separate wrong URL schemes currently exist for the same not-yet-built page. Fix all of them to agree with the `/app/library/:componentId` standard from §7:
+
+- `PAGES` array, `p-library` entry: `href: '/components'` → `href: '/app/library'`
+- `COMPONENTS.map(...)` entries: `` href: `/components/${c.layer}#${c.id}` `` → `` href: `/app/library/${c.id}` ``
+- `LAYERS.map(...)` entries: `` href: `/components/${l.id}` `` → `` href: `/app/library?layer=${l.id}` `` (Phase 5's library page should support a `?layer=` query param that pre-filters to that layer — note this as a requirement to carry into Phase 5, don't build the page now)
+
+Leave the `BLOG_POSTS` and `MARKETPLACE_PRESETS` entries pointing at `/blog/${p.slug}` and `/app/marketplace/${p.id}` as-is — those are already the correct target paths for Phase 5, just not built yet.
+
+Once Phase 5 adds the Presets, Compare, Creator Dashboard, Billing subpages, Account subpages, Help, and Search pages, come back and add corresponding entries to the `PAGES` array in this file so they're findable via Cmd+K and `/app/search` — call this out explicitly as a Phase 5 follow-up rather than doing it now (the pages don't exist yet).
+
+---
+
+## 9. Live monitoring page: two ghost buttons
+
+`app/app/live/page.tsx` imports `Volume2`, `VolumeX`, and `RefreshCw` from `lucide-react` and never renders any of them — evidence of a sound-alert toggle and a manual reconnect button that were planned and never wired up. Implement both, next to the existing "Pause Feed" / "Resume Feed" control:
+
+- **Sound toggle**: `const [soundOn, setSoundOn] = useState(true)`, a button using `Volume2` when on / `VolumeX` when off, same pill styling as the adjacent tick-speed button. Behavior: when a new `AuditLog` entry of type `'risk'` or `'warn'` is appended inside the tick-simulation `setInterval`, and `soundOn` is true, play a short system beep via the Web Audio API (a two-line `AudioContext` oscillator blip is enough — no audio file asset needed) or, more simply and safely, skip actual audio and instead have the toggle control whether the `toast.error`/`toast.info` call fires for spawned risk/warn log lines (currently no toast fires for auto-generated log lines at all, only for the manual "Execute Test Trade" and "Emergency Stop" actions) — treat `soundOn` as "audible alerts for risk/warn events" and have it gate a toast call when such an event is generated in the tick loop.
+- **Reconnect button**: `RefreshCw`, calls a `handleReconnect` that resets `latency` to a fresh random value, pushes one `system`-type log line ("Reconnected to NSE Level 2 feed gateway"), and if `isStreaming` was somehow false, sets it back to true. Fires a `toast.success('Reconnected', ...)`.
+
+---
+
+## 10. In-app marketplace: make cards clickable (link only — detail page is Phase 5)
+
+`app/app/marketplace/page.tsx` renders each preset card with no `<Link>` wrapping the name or the card body at all — `Star` (like) and `Fork Graph` are the only interactive elements; there is no way to reach a preset's full description, author notes, or reviews despite the `Preset` type in `mock/data.ts` fully modeling all three. Wrap the preset name (`<h3>`) in `<Link href={`/app/marketplace/${preset.id}`}>` now. The destination page is built in Phase 5 — this just stops the click from going nowhere and prepares the correct target.
+
+---
+
+## 11. Consistency pass (do last, after everything above works)
+
+Quick full-site sweep once the above is done — these are small, no individual write-up needed per item, just verify and fix inline:
+- Every page that lists bots (`/app`, `/app/bots`, `/app/live`) currently has three separately hand-rolled bot-card layouts. Don't merge them into one shared component in this phase (that's a larger refactor than "bug bash" scope) — but do make sure all three read `bot.headlineMetric` and `bot.status` consistently and none of them silently omit a status color the other two support (check `StatusBadge` in `components/ui/badge.tsx` covers every `BotStatus` value used across all three).
+- Confirm every `Link`/`PillLink` added in this phase that points at a route which doesn't exist until Phase 5 actually resolves to your new `not-found.tsx` (§1.1) instead of a blank Next.js error screen — this is your regression test for this whole phase. Click every link on every page and confirm you either land on the right existing page, or land on your new, styled 404.
+
+---
+
+## Acceptance checklist for Phase 4
+
+- [ ] Every route in the app either renders a real page or the new styled `not-found.tsx` — no blank default Next.js error page anywhere.
+- [ ] Signing out from the account menu, then navigating to `/app` directly by URL, actually redirects to `/login`.
+- [ ] Homepage "Open the builder" and "Browse strategies", and the sitewide nav "Marketplace" link, all go somewhere real.
+- [ ] `/pricing`, `/app/billing`, and the homepage pricing teaser show identical numbers for every plan.
+- [ ] Deleting a bot (from either `/app/bots` or a bot's Settings tab) shows a styled confirm dialog, not a native browser prompt.
+- [ ] Editing your name/email/bio on `/app/settings` and clicking Save actually changes what's shown in the top-right account menu and the dashboard greeting, and survives a page refresh.
+- [ ] A notification can be dismissed individually, not just all-at-once.
+- [ ] The dashboard's Sharpe stat changes when you run a new backtest.
+- [ ] Every icon imported in a file is either rendered somewhere or removed — no ghost imports left over from this phase's fixes.

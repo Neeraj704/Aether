@@ -19,7 +19,6 @@ import {
 import { cn, relativeTime } from '@/lib/utils'
 import { toast, useSession } from '@/lib/store'
 import { useUnreadCount, useWorkspace } from '@/lib/workspace-store'
-import { CURRENT_USER } from '@/mock/data'
 import { Logo } from '@/components/brand/logo'
 import { Avatar, Kbd } from '@/components/ui/misc'
 import { Badge } from '@/components/ui/badge'
@@ -171,6 +170,7 @@ function AccountMenu() {
   const theme = useSession((s) => s.theme)
   const setTheme = useSession((s) => s.setTheme)
   const setAuthed = useSession((s) => s.setAuthed)
+  const profile = useSession((s) => s.profile)
 
   return (
     <Menu>
@@ -178,15 +178,15 @@ function AccountMenu() {
         aria-label="Account menu"
         className="flex cursor-pointer items-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-brand/30"
       >
-        <Avatar initials={CURRENT_USER.initials} size={28} />
+        <Avatar initials={profile.initials} size={28} />
       </MenuTrigger>
 
       <MenuContent className="w-64">
         <div className="flex items-center gap-3 px-2.5 py-2">
-          <Avatar initials={CURRENT_USER.initials} size={36} />
+          <Avatar initials={profile.initials} size={36} />
           <div className="min-w-0">
-            <p className="truncate text-[13px] font-medium">{CURRENT_USER.name}</p>
-            <p className="truncate text-xs text-muted-foreground">{CURRENT_USER.email}</p>
+            <p className="truncate text-[13px] font-medium">{profile.name}</p>
+            <p className="truncate text-xs text-muted-foreground">{profile.email}</p>
           </div>
         </div>
 
@@ -205,7 +205,7 @@ function AccountMenu() {
 
         <MenuSeparator />
 
-        <MenuLinkItem href="/app/settings/profile">
+        <MenuLinkItem href="/app/settings">
           <User />
           Profile
         </MenuLinkItem>
@@ -228,7 +228,7 @@ function AccountMenu() {
         <MenuItem
           onClick={() => {
             setAuthed(false)
-            router.push('/')
+            router.replace('/login')
             toast.info('Signed out', 'This is a prototype — nothing was actually revoked.')
           }}
           destructive

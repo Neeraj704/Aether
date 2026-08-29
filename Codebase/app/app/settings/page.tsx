@@ -5,35 +5,47 @@ import {
   User,
   Key,
   Bell,
-  Sliders,
-  Shield,
   Save,
-  Moon,
-  Sun,
-  Check,
 } from 'lucide-react'
-import { CURRENT_USER } from '@/mock/data'
 import { useSession, toast } from '@/lib/store'
 import { Input, Textarea, Field } from '@/components/ui/input'
 import { PillButton } from '@/components/ui/pill-button'
 import { Switch } from '@/components/ui/switch'
 
 export default function SettingsPage() {
-  const theme = useSession((s) => s.theme)
-  const setTheme = useSession((s) => s.setTheme)
+  const profile = useSession((s) => s.profile)
+  const apiKeys = useSession((s) => s.apiKeys)
+  const notificationPrefs = useSession((s) => s.notificationPrefs)
+  const updateProfile = useSession((s) => s.updateProfile)
+  const updateApiKeys = useSession((s) => s.updateApiKeys)
+  const updateNotificationPrefs = useSession((s) => s.updateNotificationPrefs)
 
-  const [name, setName] = useState(CURRENT_USER.name)
-  const [email, setEmail] = useState(CURRENT_USER.email)
-  const [bio, setBio] = useState(CURRENT_USER.bio)
-  const [publicProfile, setPublicProfile] = useState(CURRENT_USER.publicProfile)
+  const [name, setName] = useState(profile.name)
+  const [email, setEmail] = useState(profile.email)
+  const [bio, setBio] = useState(profile.bio)
+  const [publicProfile, setPublicProfile] = useState(profile.publicProfile)
 
-  const [nseKey, setNseKey] = useState('nse_live_89f104829a174c')
-  const [brokerKey, setBrokerKey] = useState('zk_prod_9918237402')
+  const [nseKey, setNseKey] = useState(apiKeys.nseKey)
+  const [brokerKey, setBrokerKey] = useState(apiKeys.brokerKey)
 
-  const [emailNotifs, setEmailNotifs] = useState(true)
-  const [drawdownAlerts, setDrawdownAlerts] = useState(true)
+  const [emailNotifs, setEmailNotifs] = useState(notificationPrefs.emailNotifs)
+  const [drawdownAlerts, setDrawdownAlerts] = useState(notificationPrefs.drawdownAlerts)
 
   const handleSave = () => {
+    updateProfile({
+      name: name.trim() || profile.name,
+      email: email.trim() || profile.email,
+      bio: bio.trim(),
+      publicProfile,
+    })
+    updateApiKeys({
+      nseKey: nseKey.trim(),
+      brokerKey: brokerKey.trim(),
+    })
+    updateNotificationPrefs({
+      emailNotifs,
+      drawdownAlerts,
+    })
     toast.success('Settings Saved', 'Your workspace preferences have been updated.')
   }
 
@@ -71,7 +83,9 @@ export default function SettingsPage() {
         <div className="flex items-center justify-between pt-2 border-t border-border">
           <div className="flex flex-col">
             <span className="text-xs font-semibold">Public Profile</span>
-            <span className="text-[11px] text-muted-foreground">Allow other quants to view your published strategy presets</span>
+            <span className="text-[11px] text-muted-foreground">
+              Allow other quants to view your published strategy presets
+            </span>
           </div>
           <Switch checked={publicProfile} onCheckedChange={setPublicProfile} />
         </div>
@@ -101,7 +115,9 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between pt-2">
             <div className="flex flex-col">
               <span className="text-xs font-semibold">Backtest Summaries</span>
-              <span className="text-[11px] text-muted-foreground">Receive email digests after long-running Monte Carlo simulations</span>
+              <span className="text-[11px] text-muted-foreground">
+                Receive email digests after long-running Monte Carlo simulations
+              </span>
             </div>
             <Switch checked={emailNotifs} onCheckedChange={setEmailNotifs} />
           </div>
@@ -109,7 +125,9 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between pt-3">
             <div className="flex flex-col">
               <span className="text-xs font-semibold">Drawdown & Loss Brakes</span>
-              <span className="text-[11px] text-muted-foreground">Instant alert when a live bot hits its drawdown threshold</span>
+              <span className="text-[11px] text-muted-foreground">
+                Instant alert when a live bot hits its drawdown threshold
+              </span>
             </div>
             <Switch checked={drawdownAlerts} onCheckedChange={setDrawdownAlerts} />
           </div>

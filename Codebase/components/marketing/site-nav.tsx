@@ -13,7 +13,8 @@ import { cn, EASE_AETHER } from '@/lib/utils'
 const LINKS = [
   { href: '/how-it-works', label: 'Product' },
   { href: '/pricing', label: 'Pricing' },
-  { href: '/marketplace', label: 'Marketplace' },
+  // TODO(phase5): point at public /marketplace once built
+  { href: '/app/marketplace', label: 'Marketplace' },
   { href: '/docs', label: 'Docs' },
 ]
 

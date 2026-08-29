@@ -113,6 +113,7 @@ interface WorkspaceState {
   /* Notifications */
   markRead: (id: string) => void
   markAllRead: () => void
+  dismissNotification: (id: string) => void
   pushNotification: (n: Omit<Notification, 'id' | 'createdAt' | 'read'>) => void
 
   resetWorkspace: () => void
@@ -331,6 +332,9 @@ export const useWorkspace = create<WorkspaceState>()(
 
       markAllRead: () =>
         set({ notifications: get().notifications.map((n) => ({ ...n, read: true })) }),
+
+      dismissNotification: (id) =>
+        set({ notifications: get().notifications.filter((n) => n.id !== id) }),
 
       pushNotification: (n) =>
         set({

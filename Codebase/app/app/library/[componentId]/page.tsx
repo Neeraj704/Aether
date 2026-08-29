@@ -213,19 +213,52 @@ export default function ComponentDetailPage() {
             </div>
           </div>
 
+          {/* Architectural Guidelines */}
+          {comp.docs && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="rounded-2xl border border-profit/30 bg-profit/5 p-5 flex flex-col gap-2">
+                <h3 className="text-xs font-bold text-profit uppercase tracking-wider">When to Use</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">{comp.docs.whenToUse}</p>
+              </div>
+
+              <div className="rounded-2xl border border-warn/30 bg-warn/5 p-5 flex flex-col gap-2">
+                <h3 className="text-xs font-bold text-warn uppercase tracking-wider">When to Skip</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">{comp.docs.whenToSkip}</p>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-card p-5 flex flex-col gap-2">
+                <h3 className="text-xs font-bold text-foreground">Best Practices</h3>
+                <ul className="list-disc pl-4 text-xs text-muted-foreground flex flex-col gap-1.5">
+                  {comp.docs.bestPractices.map((bp, i) => (
+                    <li key={i}>{bp}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-card p-5 flex flex-col gap-2">
+                <h3 className="text-xs font-bold text-destructive">Common Mistakes</h3>
+                <ul className="list-disc pl-4 text-xs text-muted-foreground flex flex-col gap-1.5">
+                  {comp.docs.commonMistakes.map((cm, i) => (
+                    <li key={i}>{cm}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
           {/* Config Parameters Table */}
           <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
             <h2 className="text-base font-bold flex items-center gap-2">
               <Code2 className="size-4 text-brand" /> Configurable Parameters
             </h2>
 
-            {comp.fields.length === 0 ? (
+            {[...comp.fields, ...(comp.advancedFields || [])].length === 0 ? (
               <p className="text-xs text-muted-foreground italic">
                 This component uses auto-calibrated presets without manual configuration parameters.
               </p>
             ) : (
               <div className="flex flex-col divide-y divide-border">
-                {comp.fields.map((field) => (
+                {[...comp.fields, ...(comp.advancedFields || [])].map((field) => (
                   <div key={field.key} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-bold font-mono text-foreground">
@@ -240,7 +273,7 @@ export default function ComponentDetailPage() {
                     )}
                     {'value' in field && field.value !== undefined && (
                       <span className="text-[11px] text-tertiary font-mono">
-                        Default: {String(field.value)}
+                        Default: {typeof field.value === 'object' ? JSON.stringify(field.value) : String(field.value)}
                       </span>
                     )}
                   </div>

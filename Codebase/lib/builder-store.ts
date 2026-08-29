@@ -3,7 +3,7 @@
 import { create } from 'zustand'
 import { COMPONENT_MAP, LAYERS, type LayerId } from '@/mock/layers'
 import type { BotEdge, BotNode, CanvasFrame, CanvasNote } from '@/mock/data'
-import { computeNeedsConfig, makeNode } from '@/lib/workspace-store'
+import { computeNeedsConfig, defaultConfig, makeNode } from '@/lib/workspace-store'
 import { canConnect, createsCycle, type Issue } from '@/lib/validate'
 import { slugId } from '@/lib/utils'
 
@@ -218,10 +218,22 @@ export const useBuilder = create<BuilderState>((set, get) => {
     rejection: null,
     focusToken: 0,
 
-    load: (botId, nodes, edges, notes = [], frames = []) =>
+    load: (botId, nodes, edges, notes = [], frames = []) => {
+      const migrated = migratePositions(nodes)
+      const hydratedNodes = migrated.map((n) => {
+        const comp = COMPONENT_MAP[n.componentId]
+        if (!comp) return n
+        const mergedConfig = { ...defaultConfig(comp), ...(n.config || {}) }
+        return {
+          ...n,
+          config: mergedConfig,
+          needsConfig: computeNeedsConfig(comp, mergedConfig),
+        }
+      })
+
       set({
         botId,
-        nodes: migratePositions(nodes),
+        nodes: hydratedNodes,
         edges,
         notes,
         frames,
@@ -242,7 +254,8 @@ export const useBuilder = create<BuilderState>((set, get) => {
             message: `Loaded graph — ${nodes.length} nodes, ${edges.length} connections.`,
           },
         ],
-      }),
+      })
+    },
 
     setTool: (tool) => set({ tool }),
 

@@ -1990,4 +1990,21 @@ export const NOTIFICATION_EVENTS = [
 
 export type ActivityItem = Activity
 
+export interface MockDataset {
+  id: string
+  name: string
+  rowCount: number
+  dateRange: string
+  size: string
+  format: string
+}
+
+export const MOCK_DATASETS: MockDataset[] = [
+  { id: 'ds-nifty50-1m', name: 'NSE Nifty 50 (1-Minute Ticks)', rowCount: 1840000, dateRange: '2023-01 to 2026-08', size: '142 MB', format: 'Parquet' },
+  { id: 'ds-banknifty-options', name: 'BankNifty Weekly Options Chain', rowCount: 4200000, dateRange: '2024-01 to 2026-08', size: '380 MB', format: 'HDF5' },
+  { id: 'ds-us-equities-daily', name: 'S&P 500 Daily OHLCV (Adjusted)', rowCount: 950000, dateRange: '2015-01 to 2026-08', size: '64 MB', format: 'CSV' },
+  { id: 'ds-crypto-orderbook', name: 'BTC/ETH L2 Depth Snapshots (100ms)', rowCount: 6500000, dateRange: '2025-06 to 2026-08', size: '512 MB', format: 'Parquet' },
+  { id: 'ds-reuters-sentiment', name: 'Financial News Sentiment Corpus', rowCount: 320000, dateRange: '2022-01 to 2026-08', size: '28 MB', format: 'JSONL' },
+]
+
 

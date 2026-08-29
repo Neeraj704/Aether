@@ -58,62 +58,62 @@ export const LAYERS: LayerDef[] = [
     name: 'Feature Engineering',
     short: 'Turn raw feeds into numbers a model can reason about.',
     description:
-      'Indicators, normalisation, rolling windows and embeddings. Converts messy feeds into a clean feature vector.',
-    hue: '#00a3c4',
+      'Moving averages, order-flow imbalance, regime indicators, text embeddings and rolling normalisations.',
+    hue: '#00b8c4',
   },
   {
     id: 'agents',
     roman: 'III',
     name: 'Intelligence Agents',
-    short: 'Specialist readers that each form an opinion.',
+    short: 'Specialised models that form opinions.',
     description:
-      'Independent analysts  technical, macro, sentiment, flow  each producing a view with its own reasoning trace.',
-    hue: '#00b894',
+      'Technical, sentiment, macro, flow, contrarian and event specialists, each with a narrow persona and its own reasoning prompt.',
+    hue: '#ff9f0a',
   },
   {
     id: 'ml',
     roman: 'IV',
-    name: 'ML Prediction',
-    short: 'Statistical forecasts over your feature set.',
+    name: 'ML Predictive Models',
+    short: 'Classical and neural models for price and volatility.',
     description:
-      'Gradient boosting, sequence models and classifiers that turn features into directional or volatility forecasts.',
+      'Gradient boosted trees, sequence models, volatility forecasters, ensemble stackers and meta-labelers.',
     hue: '#30d158',
   },
   {
     id: 'rl',
     roman: 'V',
     name: 'Reinforcement Learning',
-    short: 'Policies that learn sizing and timing from outcomes.',
+    short: 'Policies that learn how to act through reward.',
     description:
-      'Agents trained against your own backtest environment to learn when to press and when to sit out.',
-    hue: '#a3d900',
+      'Trained policies for position sizing, entry timing, trailing exits and execution schedules.',
+    hue: '#34c759',
   },
   {
     id: 'debate',
     roman: 'VI',
-    name: 'Debate Layer',
-    short: 'Make the opinions argue before you trade them.',
+    name: 'Debate & Consensus',
+    short: 'Make the agents argue before risking capital.',
     description:
-      'Structured disagreement between agents  bull vs bear rounds, critique passes and a moderator that scores the argument.',
+      'Bull vs bear rounds, moderator scoring, adversarial stress tests and structured debate logs.',
     hue: '#ffd60a',
   },
   {
     id: 'confidence',
     roman: 'VII',
-    name: 'Confidence Engine',
-    short: 'How sure is the agent, really?',
+    name: 'Confidence & Calibration',
+    short: 'Know when the agents are sure and when they are guessing.',
     description:
-      'Calibration, ensemble agreement and uncertainty bands that gate weak signals before they reach risk.',
-    hue: '#ff9f0a',
+      'Probability calibrators, agreement metrics, uncertainty bands and out-of-distribution drift monitors.',
+    hue: '#bf5af2',
   },
   {
     id: 'risk',
     roman: 'VIII',
     name: 'Risk Management',
-    short: 'The layer that says no.',
+    short: 'The seatbelts: position caps, drawdown brakes and gates.',
     description:
-      'Position caps, exposure limits, drawdown brakes, correlation checks and hard kill conditions.',
-    hue: '#ff6a3d',
+      'Position ceilings, daily loss limits, drawdown brakes, sector caps, event blackouts and VaR bounds.',
+    hue: '#ff375f',
   },
   {
     id: 'execution',
@@ -163,47 +163,38 @@ export function layerIndex(id: LayerId) {
   return LAYERS.findIndex((l) => l.id === id)
 }
 
+export interface ModelSelection {
+  providerId: string // 'openai' | 'anthropic' | 'google' | 'alibaba' | 'deepseek' | 'ollama'
+  modelId: string // e.g. 'gpt-5-mini', or free-typed 'llama3.1:8b'
+  endpoint?: string // for 'ollama' - default http://localhost:11434
+  apiKey?: string // Optional custom user BYOK key
+  temperature: number
+  maxTokens: number
+}
+
 export type FieldDef =
   | { key: string; label: string; type: 'text'; placeholder?: string; help?: string; value?: string }
   | { key: string; label: string; type: 'password'; placeholder?: string; help?: string }
-  | {
-    key: string
-    label: string
-    type: 'select'
-    options: string[]
-    value?: string
-    help?: string
-  }
-  | {
-    key: string
-    label: string
-    type: 'slider'
-    min: number
-    max: number
-    step: number
-    value: number
-    unit?: string
-    help?: string
-  }
+  | { key: string; label: string; type: 'select'; options: string[]; value?: string; help?: string }
+  | { key: string; label: string; type: 'slider'; min: number; max: number; step: number; value: number; unit?: string; help?: string }
   | { key: string; label: string; type: 'switch'; value: boolean; help?: string }
-  | {
-    key: string
-    label: string
-    type: 'checklist'
-    options: string[]
-    value: string[]
-    help?: string
-  }
-  | {
-    key: string
-    label: string
-    type: 'number'
-    value: number
-    min?: number
-    max?: number
-    unit?: string
-    help?: string
-  }
+  | { key: string; label: string; type: 'checklist'; options: string[]; value: string[]; help?: string }
+  | { key: string; label: string; type: 'number'; value: number; min?: number; max?: number; unit?: string; help?: string }
+  | { key: string; label: string; type: 'model-select'; value: ModelSelection; help?: string }
+  | { key: string; label: string; type: 'prompt'; value: string; variables?: string[]; help?: string }
+  | { key: string; label: string; type: 'code'; language?: 'json' | 'python' | 'javascript'; value: string; help?: string }
+  | { key: string; label: string; type: 'json'; value: string; help?: string }
+  | { key: string; label: string; type: 'key-value'; value: { key: string; value: string }[]; help?: string }
+  | { key: string; label: string; type: 'weighted-list'; options: string[]; value: Record<string, number>; help?: string }
+  | { key: string; label: string; type: 'credential'; provider?: string; value: string; help?: string }
+  | { key: string; label: string; type: 'dataset-ref'; value: string | null; help?: string }
+
+export interface ComponentDocs {
+  whenToUse: string
+  whenToSkip: string
+  bestPractices: string[]
+  commonMistakes: string[]
+}
 
 export interface ComponentDef {
   id: string
@@ -216,6 +207,8 @@ export interface ComponentDef {
   tier: PlanTier
   price: number
   fields: FieldDef[]
+  advancedFields?: FieldDef[]
+  docs?: ComponentDocs
   useCase: string
 }
 
@@ -231,8 +224,10 @@ function c(
   price: number,
   fields: FieldDef[],
   useCase: string,
+  advancedFields?: FieldDef[],
+  docs?: ComponentDocs,
 ): ComponentDef {
-  return { id, name, layer, tagline, description, inputs, outputs, tier, price, fields, useCase }
+  return { id, name, layer, tagline, description, inputs, outputs, tier, price, fields, useCase, advancedFields, docs }
 }
 
 const intervalField: FieldDef = {
@@ -248,7 +243,9 @@ const intervalField: FieldDef = {
 }
 
 export const COMPONENTS: ComponentDef[] = [
-  // ---------- I. Data Collection ----------
+  // ==========================================
+  // ---------- I. Data Collection ------------
+  // ==========================================
   c(
     'ohlcv-feed',
     'data',
@@ -264,7 +261,20 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'resolution', label: 'Resolution', type: 'select', options: ['1m', '5m', '15m', '1h', '1d'], value: '15m' },
       intervalField,
     ],
-    'The default starting point for almost every bot  most feature nodes expect a candle series.',
+    'The default starting point for almost every bot — most feature nodes expect a candle series.',
+    [
+      { key: 'exchangeHeaders', label: 'Custom HTTP Headers', type: 'key-value', value: [{ key: 'X-Exchange-Zone', value: 'IN-MUM-NSE' }] },
+      { key: 'apiKey', label: 'Data Provider API Key', type: 'credential', provider: 'NSE MarketData Gateway', value: '', help: 'Authentication key for live tick websocket and historical backfill.' },
+      { key: 'datasetRef', label: 'Historical Tick Dataset', type: 'dataset-ref', value: 'ds-nifty50-1m', help: 'Offline backtest replay dataset.' },
+      { key: 'fillHoles', label: 'Interpolate missing ticks', type: 'switch', value: true },
+      { key: 'timezone', label: 'Exchange Timezone', type: 'select', options: ['Asia/Kolkata', 'America/New_York', 'UTC', 'Europe/London'], value: 'Asia/Kolkata' },
+    ],
+    {
+      whenToUse: 'Use when building any directional or volatility strategy requiring standard price bars.',
+      whenToSkip: 'Skip if your strategy relies purely on macroeconomic calendars or Level 3 orderbook queuing.',
+      bestPractices: ['Ensure resolution matches your holding period (1m for intraday scalps, 1h/1d for swing setups).', 'Enable missing tick interpolation to avoid NaN propagation through rolling indicators.'],
+      commonMistakes: ['Requesting too many unadjusted symbols on low memory tiers.', 'Using unadjusted prices across dividend or split ex-dates.'],
+    },
   ),
   c(
     'orderbook-depth',
@@ -282,6 +292,18 @@ export const COMPONENTS: ComponentDef[] = [
       intervalField,
     ],
     'Pair with a liquidity-aware execution node to avoid crossing a thin book.',
+    [
+      { key: 'brokerApiKey', label: 'L2 Feed API Key', type: 'credential', provider: 'Direct Market Access', value: '' },
+      { key: 'sampleHz', label: 'Sampling Frequency', type: 'slider', min: 10, max: 1000, step: 10, value: 100, unit: 'ms' },
+      { key: 'datasetRef', label: 'Historical Depth Dataset', type: 'dataset-ref', value: 'ds-crypto-orderbook' },
+      { key: 'aggregateLadders', label: 'Aggregate Top 5 Price Levels', type: 'switch', value: true },
+    ],
+    {
+      whenToUse: 'Use for order flow imbalance (OFI) calculations, queue position modeling, or high-urgency execution.',
+      whenToSkip: 'Skip for swing or multi-day strategies where instantaneous orderbook depth is irrelevant.',
+      bestPractices: ['Keep depth levels below 20 unless running specialized market-making algorithms.'],
+      commonMistakes: ['Sampling L2 snapshots at higher frequency than your graph can process, creating backlog lag.'],
+    },
   ),
   c(
     'news-stream',
@@ -301,10 +323,22 @@ export const COMPONENTS: ComponentDef[] = [
         options: ['Wire services', 'Exchange filings', 'Finance media', 'Regulatory'],
         value: ['Wire services', 'Exchange filings'],
       },
-      { key: 'apiKey', label: 'Provider API key', type: 'password', placeholder: 'sk_live_...' },
+      { key: 'apiKey', label: 'Provider API key', type: 'credential', provider: 'Reuters/Bloomberg Wire', value: '' },
       intervalField,
     ],
     'Feed a sentiment agent so your bot reacts to narrative, not just price.',
+    [
+      { key: 'dedupWindow', label: 'Deduplication window', type: 'slider', min: 5, max: 120, step: 5, value: 30, unit: 'min' },
+      { key: 'languageFilter', label: 'Filter English only', type: 'switch', value: true },
+      { key: 'datasetRef', label: 'Historical News Dataset', type: 'dataset-ref', value: 'ds-reuters-sentiment' },
+      { key: 'sentimentScoring', label: 'Pre-calculate polarity score on ingest', type: 'switch', value: true },
+    ],
+    {
+      whenToUse: 'Use whenever an LLM sentiment or event analyst is in your strategy graph.',
+      whenToSkip: 'Skip for pure mathematical or statistical arbitrage bots that trade on tick patterns alone.',
+      bestPractices: ['Filter by specific ticker tags to avoid processing noise from unrelated asset classes.'],
+      commonMistakes: ['Treating opinion op-eds with equal weight to regulatory exchange disclosures.'],
+    },
   ),
   c(
     'social-sentiment',
@@ -321,6 +355,17 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'minEngagement', label: 'Min engagement', type: 'number', value: 25, min: 0, max: 5000 },
     ],
     'Detect crowded retail positioning before a squeeze.',
+    [
+      { key: 'spamFilterThreshold', label: 'Spam score threshold', type: 'slider', min: 0.1, max: 0.9, step: 0.05, value: 0.65 },
+      { key: 'botAccountFilter', label: 'Filter suspected bot accounts', type: 'switch', value: true },
+      { key: 'customKeywords', label: 'Tracked cashtags/keywords', type: 'text', value: '$NIFTY, #fno, #banknifty' },
+    ],
+    {
+      whenToUse: 'Use for momentum breakout confirmation or detecting extreme retail euphoric tops.',
+      whenToSkip: 'Skip during illiquid overnight hours where bot spam dominates volume.',
+      bestPractices: ['Always apply a high minimum engagement threshold to eliminate promotional noise.'],
+      commonMistakes: ['Trading solely on raw post volume spikes without checking sentiment polarity.'],
+    },
   ),
   c(
     'macro-calendar',
@@ -337,6 +382,17 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'blackout', label: 'Emit blackout windows', type: 'switch', value: true, help: 'Risk nodes can use these to stand down around events.' },
     ],
     'Stop trading 15 minutes either side of a rate decision.',
+    [
+      { key: 'bufferMinutes', label: 'Blackout buffer', type: 'slider', min: 5, max: 60, step: 5, value: 15, unit: 'm' },
+      { key: 'impactThreshold', label: 'Min Event Impact', type: 'select', options: ['High Only', 'Medium & High', 'All Events'], value: 'High Only' },
+      { key: 'autoBlackout', label: 'Auto-broadcast signal veto on high impact', type: 'switch', value: true },
+    ],
+    {
+      whenToUse: 'Essential for volatility breakout strategies and automated risk gates before major announcements.',
+      whenToSkip: 'Skip for long-term multi-month fundamental value portfolios.',
+      bestPractices: ['Feed directly into an Event Blackout risk node.'],
+      commonMistakes: ['Leaving automated limit orders resting during high-volatility rate announcements.'],
+    },
   ),
   c(
     'fundamentals',
@@ -353,6 +409,17 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'pointInTime', label: 'Point-in-time only', type: 'switch', value: true },
     ],
     'Screen a universe down to quality names before technical entry logic runs.',
+    [
+      { key: 'filingType', label: 'Filing Source', type: 'select', options: ['Standalone', 'Consolidated', 'Both'], value: 'Consolidated' },
+      { key: 'restatementLag', label: 'Restatement lag buffer', type: 'slider', min: 0, max: 90, step: 5, value: 15, unit: ' days' },
+      { key: 'secHeaders', label: 'Exchange Gateway Headers', type: 'key-value', value: [{ key: 'X-Filing-Tier', value: 'Quarterly' }] },
+    ],
+    {
+      whenToUse: 'Use for periodic universe rebalancing, stock screening, and factor quality scoring.',
+      whenToSkip: 'Skip for short-horizon intraday trading strategies.',
+      bestPractices: ['Always enable point-in-time mode to prevent backtest lookahead bias.'],
+      commonMistakes: ['Using restated financial metrics before they were publicly disclosed.'],
+    },
   ),
   c(
     'options-chain',
@@ -369,6 +436,17 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'expiries', label: 'Expiries tracked', type: 'slider', min: 1, max: 8, step: 1, value: 2 },
     ],
     'Read IV crush around expiry and size positions accordingly.',
+    [
+      { key: 'calcGreeks', label: 'Calculate live Greeks (Delta, Gamma, Vega, Theta)', type: 'switch', value: true },
+      { key: 'impliedVolModel', label: 'IV Calculation Model', type: 'select', options: ['Black-Scholes-Merton', 'Bachelier', 'Binomial Tree', 'SABR Surface'], value: 'Black-Scholes-Merton' },
+      { key: 'strikeSpread', label: 'Strikes above/below ATM', type: 'slider', min: 5, max: 50, step: 5, value: 20 },
+    ],
+    {
+      whenToUse: 'Use for options volatility trading, Delta-neutral hedging, and max-pain level identification.',
+      whenToSkip: 'Skip if trading pure cash equities without derivatives overlay.',
+      bestPractices: ['Monitor IV skew to detect institutional downside tail hedging.'],
+      commonMistakes: ['Neglecting interest rate and dividend assumptions in Greek calculations.'],
+    },
   ),
   c(
     'onchain-feed',
@@ -384,24 +462,73 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'chains', label: 'Chains', type: 'checklist', options: ['Bitcoin', 'Ethereum', 'Solana'], value: ['Bitcoin', 'Ethereum'] },
     ],
     'Catch large exchange inflows that often precede spot selling.',
+    [
+      { key: 'minTransferUsd', label: 'Whale alert min notional ($)', type: 'slider', min: 50000, max: 5000000, step: 50000, value: 500000, unit: ' USD' },
+      { key: 'watchContractAddresses', label: 'Watchlist contracts', type: 'text', value: '0x..., 0x...' },
+      { key: 'apiKey', label: 'RPC / Node API Key', type: 'credential', provider: 'Infura / Alchemy Gateway', value: '' },
+    ],
+    {
+      whenToUse: 'Use for crypto spot and perpetual futures to track large exchange deposit spikes.',
+      whenToSkip: 'Skip for traditional equity or commodity markets.',
+      bestPractices: ['Filter out internal exchange wallet rebalancing sweeps.'],
+      commonMistakes: ['Acting on small retail token transfers.'],
+    },
   ),
 
-  // ---------- II. Feature Engineering ----------
+  // ==========================================
+  // ---------- II. Feature Engineering -------
+  // ==========================================
   c(
     'ta-indicators',
     'features',
     'Technical Indicators',
-    'The classics, correctly windowed.',
-    'RSI, MACD, ATR, Bollinger, ADX and 40 more, computed with configurable lookbacks and no lookahead.',
+    'The classics, fully customizable.',
+    'RSI, MACD, ATR, Bollinger, ADX, Stochastic, Supertrend, with individual toggles & parameter inputs.',
     ['MarketData'],
     ['FeatureVector'],
     'free',
     0,
     [
-      { key: 'set', label: 'Indicators', type: 'checklist', options: ['RSI', 'MACD', 'ATR', 'Bollinger', 'ADX', 'Stochastic'], value: ['RSI', 'MACD', 'ATR'] },
-      { key: 'lookback', label: 'Lookback', type: 'slider', min: 5, max: 200, step: 1, value: 14, unit: ' bars' },
+      { key: 'set', label: 'Active Indicator Bundle', type: 'checklist', options: ['RSI', 'MACD', 'ATR', 'Bollinger', 'ADX', 'Stochastic', 'Supertrend'], value: ['RSI', 'MACD', 'ATR'] },
+      { key: 'lookback', label: 'Global Baseline Lookback', type: 'slider', min: 5, max: 200, step: 1, value: 14, unit: ' bars' },
     ],
-    'The cheapest way to give a model some market context.',
+    'The foundation for technical alpha generation.',
+    [
+      // RSI Customization
+      { key: 'enableRSI', label: 'Enable RSI (Relative Strength Index)', type: 'switch', value: true },
+      { key: 'rsiPeriod', label: 'RSI Period', type: 'slider', min: 2, max: 50, step: 1, value: 14, unit: ' bars' },
+      { key: 'rsiOverbought', label: 'RSI Overbought Threshold', type: 'slider', min: 60, max: 95, step: 1, value: 70 },
+      { key: 'rsiOversold', label: 'RSI Oversold Threshold', type: 'slider', min: 5, max: 40, step: 1, value: 30 },
+
+      // MACD Customization
+      { key: 'enableMACD', label: 'Enable MACD (Moving Avg Convergence Divergence)', type: 'switch', value: true },
+      { key: 'macdFast', label: 'MACD Fast EMA', type: 'slider', min: 2, max: 50, step: 1, value: 12, unit: ' bars' },
+      { key: 'macdSlow', label: 'MACD Slow EMA', type: 'slider', min: 10, max: 100, step: 1, value: 26, unit: ' bars' },
+      { key: 'macdSignal', label: 'MACD Signal Smoothing', type: 'slider', min: 2, max: 30, step: 1, value: 9, unit: ' bars' },
+
+      // Bollinger Bands Customization
+      { key: 'enableBollinger', label: 'Enable Bollinger Bands', type: 'switch', value: true },
+      { key: 'bollingerPeriod', label: 'Bollinger Period', type: 'slider', min: 5, max: 100, step: 1, value: 20, unit: ' bars' },
+      { key: 'bollingerStdDev', label: 'Bollinger Std Deviations', type: 'slider', min: 1.0, max: 4.0, step: 0.1, value: 2.0, unit: 'σ' },
+
+      // ATR Customization
+      { key: 'enableATR', label: 'Enable ATR (Average True Range)', type: 'switch', value: true },
+      { key: 'atrPeriod', label: 'ATR Period', type: 'slider', min: 2, max: 50, step: 1, value: 14, unit: ' bars' },
+
+      // Supertrend Customization
+      { key: 'enableSupertrend', label: 'Enable Supertrend', type: 'switch', value: false },
+      { key: 'supertrendPeriod', label: 'Supertrend ATR Period', type: 'slider', min: 5, max: 50, step: 1, value: 10, unit: ' bars' },
+      { key: 'supertrendMultiplier', label: 'Supertrend Multiplier', type: 'slider', min: 1.0, max: 6.0, step: 0.1, value: 3.0 },
+
+      // Custom Python Script
+      { key: 'customFormula', label: 'Custom Indicator Formula (Python)', type: 'code', language: 'python', value: '# def custom_alpha(df):\n#   return (df["close"] - df["open"]) / df["atr"]' },
+    ],
+    {
+      whenToUse: 'Use to extract standardized momentum, volatility, and trend metrics from raw OHLCV bars.',
+      whenToSkip: 'Skip if training pure end-to-end deep learning models on raw orderbook microstructure.',
+      bestPractices: ['Combine an oscillator (RSI), a trend metric (MACD), and a volatility measure (ATR).', 'Adjust periods according to the bar resolution.'],
+      commonMistakes: ['Using 5 different oscillators that are 98% correlated with each other.'],
+    },
   ),
   c(
     'normalizer',
@@ -414,10 +541,21 @@ export const COMPONENTS: ComponentDef[] = [
     'free',
     0,
     [
-      { key: 'method', label: 'Method', type: 'select', options: ['Z-score', 'Min-max', 'Rank'], value: 'Z-score' },
+      { key: 'method', label: 'Method', type: 'select', options: ['Z-score', 'Min-max', 'Rank', 'Quantile Transformer'], value: 'Z-score' },
       { key: 'window', label: 'Window', type: 'slider', min: 20, max: 500, step: 10, value: 120, unit: ' bars' },
     ],
     'Required if you are feeding a model that assumes stationary inputs.',
+    [
+      { key: 'clipOutliers', label: 'Clip extreme outliers', type: 'switch', value: true },
+      { key: 'clipSigma', label: 'Outlier clip threshold (σ)', type: 'slider', min: 2.0, max: 5.0, step: 0.5, value: 3.0, unit: 'σ' },
+      { key: 'decayFactor', label: 'Exponential decay factor (half-life)', type: 'slider', min: 0.8, max: 0.999, step: 0.005, value: 0.95 },
+    ],
+    {
+      whenToUse: 'Essential prior to feeding ML models or neural networks sensitive to varying input magnitudes.',
+      whenToSkip: 'Skip for tree-based models (GBDT) that are invariant to monotonic scale transformations.',
+      bestPractices: ['Use rolling Z-scores with at least 60–120 bars of history.'],
+      commonMistakes: ['Normalizing using the full dataset instead of rolling windows, causing lookahead bias.'],
+    },
   ),
   c(
     'regime-tagger',
@@ -430,10 +568,21 @@ export const COMPONENTS: ComponentDef[] = [
     'starter',
     179,
     [
-      { key: 'regimes', label: 'Regime set', type: 'select', options: ['Trend / Chop', 'Vol quartiles', 'HMM 4-state'], value: 'Trend / Chop' },
+      { key: 'regimes', label: 'Regime set', type: 'select', options: ['Trend / Chop', 'Vol quartiles', 'HMM 4-state', 'Gaussian Mixture'], value: 'Trend / Chop' },
       { key: 'smoothing', label: 'Smoothing', type: 'slider', min: 0, max: 20, step: 1, value: 5, unit: ' bars' },
     ],
     'Turn off a mean-reversion bot the moment a trend regime is detected.',
+    [
+      { key: 'hiddenStates', label: 'Hidden Markov States', type: 'slider', min: 2, max: 8, step: 1, value: 4 },
+      { key: 'minDuration', label: 'Min Regime Duration', type: 'slider', min: 1, max: 30, step: 1, value: 5, unit: ' bars' },
+      { key: 'transitionMatrix', label: 'Custom Transition Matrix Prior', type: 'json', value: '{\n  "trend_to_chop": 0.2,\n  "chop_to_trend": 0.35\n}' },
+    ],
+    {
+      whenToUse: 'Use to dynamically switch strategy parameter presets between trending and choppy regimes.',
+      whenToSkip: 'Skip for universal market-neutral statistical arbitrage strategies.',
+      bestPractices: ['Apply smoothing to prevent regime flip-flopping on borderline bars.'],
+      commonMistakes: ['Over-fitting regime state transitions to historical market phases.'],
+    },
   ),
   c(
     'nlp-embedder',
@@ -446,10 +595,21 @@ export const COMPONENTS: ComponentDef[] = [
     'starter',
     199,
     [
-      { key: 'model', label: 'Embedding model', type: 'select', options: ['Compact (fast)', 'Balanced', 'Large (slow)'], value: 'Balanced' },
+      { key: 'model', label: 'Embedding model', type: 'select', options: ['Compact (fast - 384d)', 'Balanced (768d)', 'Large (slow - 1536d)'], value: 'Balanced (768d)' },
       { key: 'halfLife', label: 'Recency half-life', type: 'slider', min: 1, max: 72, step: 1, value: 6, unit: 'h' },
     ],
     'Give a sentiment agent something richer than a keyword count.',
+    [
+      { key: 'vectorDimensions', label: 'Output Projection Dims', type: 'select', options: ['128', '256', '512', '768'], value: '256' },
+      { key: 'poolingStrategy', label: 'Pooling Strategy', type: 'select', options: ['Mean Pooling', 'CLS Token', 'Max Pooling'], value: 'Mean Pooling' },
+      { key: 'truncateLength', label: 'Max Token Truncation', type: 'slider', min: 64, max: 1024, step: 64, value: 256, unit: ' tokens' },
+    ],
+    {
+      whenToUse: 'Use to transform qualitative news and corporate disclosures into quantitative vector features.',
+      whenToSkip: 'Skip if strategy has no news or sentiment feeds wired.',
+      bestPractices: ['Use recency half-life decay so older news loses weight predictably.'],
+      commonMistakes: ['Passing unstructured spam chatter into heavy 1536-dimensional embeddings.'],
+    },
   ),
   c(
     'cross-asset',
@@ -466,6 +626,17 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'window', label: 'Window', type: 'slider', min: 20, max: 250, step: 5, value: 60, unit: ' bars' },
     ],
     'Avoid stacking four positions that are secretly the same bet.',
+    [
+      { key: 'correlationMethod', label: 'Calculation Method', type: 'select', options: ['Pearson', 'Spearman Rank', 'Kendall Tau'], value: 'Pearson' },
+      { key: 'leadLagShift', label: 'Lead/Lag Bar Shift', type: 'slider', min: -5, max: 5, step: 1, value: 0, unit: ' bars' },
+      { key: 'weights', label: 'Benchmark Influence Weights', type: 'weighted-list', options: ['NIFTY Index', 'USDINR Currency', 'Crude Oil Proxy'], value: { 'NIFTY Index': 50, 'USDINR Currency': 30, 'Crude Oil Proxy': 20 } },
+    ],
+    {
+      whenToUse: 'Use to detect macroeconomic divergences and avoid unintentional factor concentration.',
+      whenToSkip: 'Skip if trading isolated micro-cap instruments with zero macro beta.',
+      bestPractices: ['Include both currency and commodity proxies for emerging market equities.'],
+      commonMistakes: ['Assuming rolling correlations remain constant during liquidity crises.'],
+    },
   ),
   c(
     'microstructure',
@@ -481,6 +652,17 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'features', label: 'Features', type: 'checklist', options: ['OFI', 'Spread', 'Trade size', 'Queue depletion'], value: ['OFI', 'Spread'] },
     ],
     'Short-horizon entries where a few basis points of timing matters.',
+    [
+      { key: 'ofiWindow', label: 'OFI Rolling Accumulation', type: 'slider', min: 5, max: 100, step: 5, value: 20, unit: ' ticks' },
+      { key: 'vpinBuckets', label: 'VPIN Volume Buckets', type: 'slider', min: 10, max: 100, step: 10, value: 50 },
+      { key: 'cancelRatioThreshold', label: 'Cancel/Order Ratio Alert', type: 'slider', min: 0.5, max: 0.99, step: 0.01, value: 0.85 },
+    ],
+    {
+      whenToUse: 'Essential for tick-level scalping, high-urgency order execution, and toxic flow detection.',
+      whenToSkip: 'Skip for daily or swing trading holding periods.',
+      bestPractices: ['Pair Order Flow Imbalance with Limit Order Depth feeds.'],
+      commonMistakes: ['Computing heavy microstructure metrics on downsampled 1-hour candles.'],
+    },
   ),
   c(
     'feature-selector',
@@ -494,12 +676,25 @@ export const COMPONENTS: ComponentDef[] = [
     299,
     [
       { key: 'keep', label: 'Keep top N', type: 'slider', min: 3, max: 100, step: 1, value: 20 },
-      { key: 'method', label: 'Method', type: 'select', options: ['Mutual information', 'Permutation importance', 'L1 path'], value: 'Mutual information' },
+      { key: 'method', label: 'Method', type: 'select', options: ['Mutual information', 'Permutation importance', 'L1 path', 'Recursive Feature Elimination'], value: 'Mutual information' },
     ],
     'Fights overfitting when you have wired in more feeds than data.',
+    [
+      { key: 'varianceThreshold', label: 'Min Feature Variance Filter', type: 'slider', min: 0.0, max: 0.1, step: 0.01, value: 0.02 },
+      { key: 'pValCutoff', label: 'Significance p-value Cutoff', type: 'slider', min: 0.01, max: 0.1, step: 0.01, value: 0.05 },
+      { key: 'rankingWeights', label: 'Selection Criterion Weights', type: 'weighted-list', options: ['Predictive Alpha', 'Low Collinearity', 'Computational Speed'], value: { 'Predictive Alpha': 60, 'Low Collinearity': 30, 'Computational Speed': 10 } },
+    ],
+    {
+      whenToUse: 'Use when combining multiple indicators and text embeddings to prune redundant inputs.',
+      whenToSkip: 'Skip when using under 5 features.',
+      bestPractices: ['Retrain feature selection weights on out-of-sample data.'],
+      commonMistakes: ['Selecting features across the entire historical backtest window simultaneously.'],
+    },
   ),
 
-  // ---------- III. Intelligence Agents ----------
+  // ==========================================
+  // ---------- III. Intelligence Agents ------
+  // ==========================================
   c(
     'technical-agent',
     'agents',
@@ -515,6 +710,28 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'horizon', label: 'Horizon', type: 'select', options: ['Intraday', 'Swing', 'Position'], value: 'Swing' },
     ],
     'A solid first opinion node for any price-driven bot.',
+    [
+      {
+        key: 'model',
+        label: 'Intelligence Model',
+        type: 'model-select',
+        value: { providerId: 'openai', modelId: 'gpt-5-mini', temperature: 0.4, maxTokens: 1024 },
+      },
+      {
+        key: 'systemPrompt',
+        label: 'Analyst Persona Prompt',
+        type: 'prompt',
+        value: 'You are a disciplined technical analyst. Given the feature vector for {{input}}, form a directional view based on price structure, momentum indicators, and volume trends. Output your view (BUY, SELL, or HOLD), confidence (0.0 to 1.0), and a concise one-sentence quantitative rationale.',
+      },
+      { key: 'confidenceThreshold', label: 'Min Output Confidence', type: 'slider', min: 0.5, max: 0.95, step: 0.05, value: 0.65 },
+      { key: 'reasoningStyle', label: 'Reasoning Mode', type: 'select', options: ['Strict Quantitative', 'Price Action & Support/Resistance', 'Statistical Anomalies'], value: 'Strict Quantitative' },
+    ],
+    {
+      whenToUse: 'Use when you want structural, trend, and indicator-based trade generation with full natural language auditability.',
+      whenToSkip: 'Skip if building high-frequency tick algorithms where sub-millisecond execution is mandatory.',
+      bestPractices: ['Feed both normalized indicators and raw OHLCV context.', 'Pair with a Moderator debate node.'],
+      commonMistakes: ['Prompting the model without providing clear directional criteria or output constraints.'],
+    },
   ),
   c(
     'sentiment-agent',
@@ -531,6 +748,28 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'ignoreRecycled', label: 'Ignore recycled coverage', type: 'switch', value: true },
     ],
     'Useful as a veto: do not buy a breakout into terrible news.',
+    [
+      {
+        key: 'model',
+        label: 'Intelligence Model',
+        type: 'model-select',
+        value: { providerId: 'anthropic', modelId: 'claude-sonnet', temperature: 0.3, maxTokens: 1024 },
+      },
+      {
+        key: 'systemPrompt',
+        label: 'Sentiment Persona Prompt',
+        type: 'prompt',
+        value: 'You are an institutional financial sentiment analyst. Evaluate headlines and narrative tone from {{input}}. Differentiate between short-term noise and structural business impact. Return a polarity score (-1.0 to +1.0) and a rationale.',
+      },
+      { key: 'confidenceThreshold', label: 'Min Output Confidence', type: 'slider', min: 0.5, max: 0.95, step: 0.05, value: 0.7 },
+      { key: 'recycledDiscount', label: 'Recycled News Decay Penalty', type: 'slider', min: 0.1, max: 0.9, step: 0.05, value: 0.5 },
+    ],
+    {
+      whenToUse: 'Use to filter out trades during negative headline drift or trade earnings sentiment surprises.',
+      whenToSkip: 'Skip in market regimes with zero news catalyst where pure statistical mean reversion dominates.',
+      bestPractices: ['Use a reasoning model like Claude Sonnet or DeepSeek R1 for nuanced earnings tone extraction.'],
+      commonMistakes: ['Allowing one sensationalist headline to completely override 6 months of bullish market structure.'],
+    },
   ),
   c(
     'macro-agent',
@@ -547,6 +786,28 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'weight', label: 'Weight in debate', type: 'slider', min: 0, max: 100, step: 5, value: 40, unit: '%' },
     ],
     'Scale exposure down when global liquidity is tightening.',
+    [
+      {
+        key: 'model',
+        label: 'Intelligence Model',
+        type: 'model-select',
+        value: { providerId: 'google', modelId: 'gemini-pro', temperature: 0.4, maxTokens: 1536 },
+      },
+      {
+        key: 'systemPrompt',
+        label: 'Macro Persona Prompt',
+        type: 'prompt',
+        value: 'You are a global macro strategist. Synthesize central bank policy, yield curve movements, inflation data, and liquidity conditions from {{input}}. State current regime posture (RISK_ON, RISK_OFF, NEUTRAL) and specify risk multipliers.',
+      },
+      { key: 'confidenceThreshold', label: 'Min Output Confidence', type: 'slider', min: 0.5, max: 0.95, step: 0.05, value: 0.6 },
+      { key: 'liquidityWeight', label: 'Global M2 Liquidity Weight', type: 'slider', min: 10, max: 100, step: 10, value: 60, unit: '%' },
+    ],
+    {
+      whenToUse: 'Use on index futures and broad market baskets to establish macro regime bias.',
+      whenToSkip: 'Skip for idiosyncratic single-stock breakout scalping.',
+      bestPractices: ['Combine domestic central bank calendar with global USD liquidity metrics.'],
+      commonMistakes: ['Over-weighting macro views for short 5-minute intraday scalping strategies.'],
+    },
   ),
   c(
     'flow-agent',
@@ -562,13 +823,35 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'sources', label: 'Flow sources', type: 'checklist', options: ['Block trades', 'FII/DII', 'Options OI', 'Dark pool proxy'], value: ['FII/DII', 'Options OI'] },
     ],
     'Confirm a technical setup with real positioning data.',
+    [
+      {
+        key: 'model',
+        label: 'Intelligence Model',
+        type: 'model-select',
+        value: { providerId: 'deepseek', modelId: 'deepseek-v3', temperature: 0.3, maxTokens: 1024 },
+      },
+      {
+        key: 'systemPrompt',
+        label: 'Flow Persona Prompt',
+        type: 'prompt',
+        value: 'You are an institutional order-flow analyst. Analyze FII/DII cash turnover and options open interest changes in {{input}}. Determine whether smart money is accumulating, distributing, or hedging.',
+      },
+      { key: 'confidenceThreshold', label: 'Min Output Confidence', type: 'slider', min: 0.5, max: 0.95, step: 0.05, value: 0.65 },
+      { key: 'derivativesBias', label: 'Options OI Weighting', type: 'slider', min: 10, max: 90, step: 10, value: 50, unit: '%' },
+    ],
+    {
+      whenToUse: 'Use to validate breakouts by verifying whether institutional volume and derivatives OI confirm the move.',
+      whenToSkip: 'Skip if trading instruments with no published exchange participant volume data.',
+      bestPractices: ['Compare options strike open interest build-up against underlying spot resistance.'],
+      commonMistakes: ['Confusing retail call buying spikes with institutional accumulation.'],
+    },
   ),
   c(
     'contrarian-agent',
     'agents',
     'Contrarian',
     'Argues the other side, deliberately.',
-    'Constructs the strongest case against the consensus view  designed to be wrong often but valuable when right.',
+    'Constructs the strongest case against the consensus view — designed to be wrong often but valuable when right.',
     ['FeatureVector', 'Signal'],
     ['Signal'],
     'pro',
@@ -577,6 +860,28 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'aggression', label: 'Aggression', type: 'slider', min: 1, max: 10, step: 1, value: 5 },
     ],
     'Feed the debate layer so your bull case gets stress-tested.',
+    [
+      {
+        key: 'model',
+        label: 'Intelligence Model',
+        type: 'model-select',
+        value: { providerId: 'deepseek', modelId: 'deepseek-r1', temperature: 0.7, maxTokens: 2048 },
+      },
+      {
+        key: 'systemPrompt',
+        label: 'Contrarian Persona Prompt',
+        type: 'prompt',
+        value: 'You are a ruthless contrarian trader. Examine the prevailing consensus signals in {{input}}. Actively construct the single strongest thesis explaining why this trade is a crowded trap. Highlight failure modes and hidden tail risks.',
+      },
+      { key: 'confidenceThreshold', label: 'Min Output Confidence', type: 'slider', min: 0.5, max: 0.95, step: 0.05, value: 0.6 },
+      { key: 'skepticismMode', label: 'Skepticism Persona Mode', type: 'select', options: ['Trap Hunter', 'Liquidity Sweep Hunter', 'Regime Exhaustion'], value: 'Trap Hunter' },
+    ],
+    {
+      whenToUse: 'Use in debate architectures to stress-test winning setups against blind spots and complacency.',
+      whenToSkip: 'Do not use as a standalone execution generator; it is designed to be an adversary in a debate.',
+      bestPractices: ['Wire into a Bull vs Bear debate node paired with a Technical Analyst.'],
+      commonMistakes: ['Treating every contrarian objection as a signal to flip short.'],
+    },
   ),
   c(
     'event-agent',
@@ -593,14 +898,38 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'preWindow', label: 'Pre-event window', type: 'slider', min: 0, max: 10, step: 1, value: 2, unit: ' days' },
     ],
     'Trade the drift into earnings without holding through the print.',
+    [
+      {
+        key: 'model',
+        label: 'Intelligence Model',
+        type: 'model-select',
+        value: { providerId: 'openai', modelId: 'gpt-5', temperature: 0.5, maxTokens: 1024 },
+      },
+      {
+        key: 'systemPrompt',
+        label: 'Event Specialist Persona Prompt',
+        type: 'prompt',
+        value: 'You are an event-driven quantitative specialist. Analyze scheduled catalyst calendar and historical pre-announcement drift from {{input}}. Recommend whether to position for drift, trade post-event volatility crush, or stand down.',
+      },
+      { key: 'confidenceThreshold', label: 'Min Output Confidence', type: 'slider', min: 0.5, max: 0.95, step: 0.05, value: 0.65 },
+      { key: 'ivCrushFactor', label: 'Anticipated IV Crush Factor', type: 'slider', min: 0.1, max: 0.8, step: 0.05, value: 0.45 },
+    ],
+    {
+      whenToUse: 'Use for quarterly earnings cycle playbooks, index rebalancing events, and monthly derivative expiries.',
+      whenToSkip: 'Skip during calm non-event trading sessions.',
+      bestPractices: ['Pre-calculate implied volatility skew 48 hours ahead of the scheduled announcement.'],
+      commonMistakes: ['Gambling across binary earnings releases without strict implied volatility edge.'],
+    },
   ),
 
-  // ---------- IV. ML Prediction ----------
+  // ==========================================
+  // ---------- IV. ML Prediction -------------
+  // ==========================================
   c(
     'gbdt-forecast',
     'ml',
     'Gradient Boosting Forecast',
-    'Strong tabular baseline.',
+    'Strong tabular baseline with full hyperparameters.',
     'Boosted trees predicting forward returns or direction, with feature importance surfaced per prediction.',
     ['FeatureVector'],
     ['Signal'],
@@ -609,9 +938,23 @@ export const COMPONENTS: ComponentDef[] = [
     [
       { key: 'target', label: 'Target', type: 'select', options: ['Direction', 'Forward return', 'Volatility'], value: 'Direction' },
       { key: 'horizon', label: 'Prediction horizon', type: 'slider', min: 1, max: 60, step: 1, value: 5, unit: ' bars' },
-      { key: 'depth', label: 'Max depth', type: 'slider', min: 2, max: 12, step: 1, value: 6 },
+      { key: 'depth', label: 'Max tree depth', type: 'slider', min: 2, max: 16, step: 1, value: 6 },
     ],
     'The model to beat before you try anything fancier.',
+    [
+      { key: 'learningRate', label: 'Learning Rate (η)', type: 'slider', min: 0.01, max: 0.5, step: 0.01, value: 0.05 },
+      { key: 'nEstimators', label: 'Number of Trees (n_estimators)', type: 'slider', min: 50, max: 1000, step: 50, value: 300 },
+      { key: 'subsample', label: 'Row Subsample Ratio', type: 'slider', min: 0.5, max: 1.0, step: 0.05, value: 0.8 },
+      { key: 'lossFunction', label: 'Loss Objective', type: 'select', options: ['Log-Loss (Classification)', 'Squared-Error (MSE)', 'Huber (Robust)', 'Quantile (Pinball)'], value: 'Log-Loss (Classification)' },
+      { key: 'earlyStopping', label: 'Early Stopping Patience', type: 'slider', min: 5, max: 50, step: 5, value: 15, unit: ' rounds' },
+      { key: 'customParams', label: 'Advanced LightGBM JSON Params', type: 'json', value: '{\n  "colsample_bytree": 0.8,\n  "reg_alpha": 0.1,\n  "reg_lambda": 1.0\n}' },
+    ],
+    {
+      whenToUse: 'Best baseline model for tabular market features, technical indicators, and momentum vectors.',
+      whenToSkip: 'Skip when input features contain long raw sequence histories with temporal dependencies.',
+      bestPractices: ['Use early stopping patience to avoid overfitting on noisy market regimes.'],
+      commonMistakes: ['Setting max depth above 10 on financial data, which guarantees overfitting.'],
+    },
   ),
   c(
     'sequence-model',
@@ -625,9 +968,23 @@ export const COMPONENTS: ComponentDef[] = [
     299,
     [
       { key: 'window', label: 'Sequence length', type: 'slider', min: 8, max: 256, step: 8, value: 64, unit: ' bars' },
-      { key: 'arch', label: 'Architecture', type: 'select', options: ['GRU', 'LSTM', 'Small transformer'], value: 'GRU' },
+      { key: 'arch', label: 'Architecture', type: 'select', options: ['GRU', 'LSTM', 'Small transformer', 'Mamba SSM'], value: 'GRU' },
     ],
     'Useful when the order of events matters, not just the current snapshot.',
+    [
+      { key: 'hiddenUnits', label: 'Hidden Dimension Units', type: 'slider', min: 32, max: 512, step: 32, value: 128 },
+      { key: 'numLayers', label: 'Layer Depth', type: 'slider', min: 1, max: 6, step: 1, value: 2 },
+      { key: 'dropout', label: 'Dropout Rate', type: 'slider', min: 0.0, max: 0.5, step: 0.05, value: 0.2 },
+      { key: 'learningRate', label: 'AdamW Learning Rate', type: 'slider', min: 0.0001, max: 0.01, step: 0.0005, value: 0.001 },
+      { key: 'batchSize', label: 'Training Batch Size', type: 'select', options: ['16', '32', '64', '128', '256'], value: '64' },
+      { key: 'attentionHeads', label: 'Attention Heads (Transformer only)', type: 'slider', min: 2, max: 16, step: 2, value: 4 },
+    ],
+    {
+      whenToUse: 'Use for orderbook sequence dynamics, path-dependent volatility, and multi-bar momentum patterns.',
+      whenToSkip: 'Skip if inputs are already aggregated rolling metrics where sequence order is redundant.',
+      bestPractices: ['Keep hidden dimension under 256 to prevent parameter explosion.'],
+      commonMistakes: ['Training deep transformers on short sample sets without dropout regularization.'],
+    },
   ),
   c(
     'vol-forecast',
@@ -640,10 +997,22 @@ export const COMPONENTS: ComponentDef[] = [
     'free',
     0,
     [
-      { key: 'model', label: 'Model', type: 'select', options: ['GARCH(1,1)', 'EWMA', 'ML hybrid'], value: 'EWMA' },
+      { key: 'model', label: 'Model', type: 'select', options: ['GARCH(1,1)', 'EGARCH', 'GJR-GARCH', 'EWMA', 'ML hybrid'], value: 'GARCH(1,1)' },
       { key: 'horizon', label: 'Horizon', type: 'slider', min: 1, max: 30, step: 1, value: 5, unit: ' bars' },
     ],
     'Size positions by expected volatility instead of a fixed lot.',
+    [
+      { key: 'pLag', label: 'GARCH P-Lag (Autoregressive)', type: 'slider', min: 1, max: 5, step: 1, value: 1 },
+      { key: 'qLag', label: 'GARCH Q-Lag (Moving Average)', type: 'slider', min: 1, max: 5, step: 1, value: 1 },
+      { key: 'distType', label: 'Residual Distribution', type: 'select', options: ['Normal', "Student's t", 'Skewed t', 'GED (Generalized Error)'], value: "Student's t" },
+      { key: 'confidenceAlpha', label: 'Significance Alpha (VaR Bounds)', type: 'slider', min: 0.01, max: 0.1, step: 0.01, value: 0.05 },
+    ],
+    {
+      whenToUse: 'Essential for dynamically adjusting stop-loss distances and volatility-weighted position sizing.',
+      whenToSkip: 'Skip if trading fixed-delta option spreads where volatility is pre-hedged.',
+      bestPractices: ["Use Student's t distribution to account for fat tails in financial returns."],
+      commonMistakes: ['Assuming volatility is Gaussian and constant across market regimes.'],
+    },
   ),
   c(
     'ensemble-stacker',
@@ -657,9 +1026,19 @@ export const COMPONENTS: ComponentDef[] = [
     399,
     [
       { key: 'folds', label: 'CV folds', type: 'slider', min: 3, max: 10, step: 1, value: 5 },
-      { key: 'meta', label: 'Meta-learner', type: 'select', options: ['Ridge', 'Logistic', 'Shallow GBDT'], value: 'Ridge' },
+      { key: 'meta', label: 'Meta-learner', type: 'select', options: ['Ridge', 'Logistic', 'Shallow GBDT', 'Linear Constrained'], value: 'Ridge' },
     ],
     'Squeeze a little more out of models you already trust.',
+    [
+      { key: 'useProbabilities', label: 'Stack Raw Probabilities (vs Discrete Signals)', type: 'switch', value: true },
+      { key: 'modelWeights', label: 'Model Confidence Base Weights', type: 'weighted-list', options: ['Technical GBDT', 'Sequence Model', 'Sentiment Agent', 'Macro Classifier'], value: { 'Technical GBDT': 40, 'Sequence Model': 30, 'Sentiment Agent': 20, 'Macro Classifier': 10 } },
+    ],
+    {
+      whenToUse: 'Use when combining multiple uncorrelated model predictions into a single superior consensus signal.',
+      whenToSkip: 'Skip when stacking models that use identical features and architectures.',
+      bestPractices: ['Ensure out-of-fold predictions are strictly purged to prevent information leakage.'],
+      commonMistakes: ['Stacking 5 models that are 95% collinear.'],
+    },
   ),
   c(
     'anomaly-detector',
@@ -676,6 +1055,17 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'action', label: 'On anomaly', type: 'select', options: ['Warn only', 'Reduce size', 'Halt entries'], value: 'Reduce size' },
     ],
     'Protects against trading confidently through a flash crash.',
+    [
+      { key: 'algorithm', label: 'Detector Algorithm', type: 'select', options: ['IsolationForest', 'OneClassSVM', 'AutoEncoder', 'LocalOutlierFactor'], value: 'IsolationForest' },
+      { key: 'contamination', label: 'Expected Outlier Ratio', type: 'slider', min: 0.01, max: 0.2, step: 0.01, value: 0.05 },
+      { key: 'numTrees', label: 'Number of Isolation Trees', type: 'slider', min: 50, max: 500, step: 50, value: 150 },
+    ],
+    {
+      whenToUse: 'Place before execution to halt trades during flash crashes, orderbook glints, or abnormal spread widening.',
+      whenToSkip: 'Skip if your strategy explicitly profits from extreme volatility tail spikes.',
+      bestPractices: ['Set action to "Reduce size" to gracefully de-risk during structural shifts.'],
+      commonMistakes: ['Setting sensitivity too high, which blocks valid high-momentum trend breakouts.'],
+    },
   ),
   c(
     'meta-labeler',
@@ -691,9 +1081,22 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'threshold', label: 'Act threshold', type: 'slider', min: 0.5, max: 0.95, step: 0.01, value: 0.62 },
     ],
     'Cuts trade count sharply while often improving win rate.',
+    [
+      { key: 'tripleBarrierPt', label: 'Profit-Taking Barrier (σ multiplier)', type: 'slider', min: 0.5, max: 5.0, step: 0.25, value: 2.0, unit: 'σ' },
+      { key: 'tripleBarrierSl', label: 'Stop-Loss Barrier (σ multiplier)', type: 'slider', min: 0.5, max: 5.0, step: 0.25, value: 1.5, unit: 'σ' },
+      { key: 'holdingPeriod', label: 'Max Holding Horizon (Time Barrier)', type: 'slider', min: 5, max: 120, step: 5, value: 30, unit: ' bars' },
+    ],
+    {
+      whenToUse: 'Use as a secondary filter on top of technical or LLM agent signals to eliminate false positives.',
+      whenToSkip: 'Skip on strategies with fewer than 100 historical trades.',
+      bestPractices: ['Label training samples using Marcos Lopez de Prado Triple Barrier Method.'],
+      commonMistakes: ['Allowing the primary model to size positions before the meta-labeler validates the entry.'],
+    },
   ),
 
-  // ---------- V. Reinforcement Learning ----------
+  // ==========================================
+  // ---------- V. Reinforcement Learning -----
+  // ==========================================
   c(
     'sizing-policy',
     'rl',
@@ -706,9 +1109,20 @@ export const COMPONENTS: ComponentDef[] = [
     449,
     [
       { key: 'maxSize', label: 'Max size', type: 'slider', min: 1, max: 100, step: 1, value: 25, unit: '% equity' },
-      { key: 'reward', label: 'Reward function', type: 'select', options: ['Sharpe', 'Return / drawdown', 'Raw P&L'], value: 'Return / drawdown' },
+      { key: 'reward', label: 'Reward function', type: 'select', options: ['Sharpe', 'Return / drawdown', 'Raw P&L', 'Sortino Ratio'], value: 'Return / drawdown' },
     ],
     'Replace a fixed 2% rule with something that adapts to conditions.',
+    [
+      { key: 'actionSpace', label: 'Action Space', type: 'select', options: ['Continuous (0-100%)', 'Discrete Steps (25/50/75/100%)', 'Fractional Kelly Multiplier'], value: 'Continuous (0-100%)' },
+      { key: 'gammaDiscount', label: 'Gamma Discount Factor (γ)', type: 'slider', min: 0.8, max: 0.999, step: 0.005, value: 0.98 },
+      { key: 'entropyCoeff', label: 'Entropy Exploration Coefficient', type: 'slider', min: 0.001, max: 0.1, step: 0.005, value: 0.02 },
+    ],
+    {
+      whenToUse: 'Use to adaptively allocate capital based on multi-factor market confidence and current drawdown.',
+      whenToSkip: 'Skip for strict fixed-lot compliance portfolios.',
+      bestPractices: ['Reward policies based on Sortino or Calmar ratio rather than raw P&L.'],
+      commonMistakes: ['Training RL policies on un-penalized leverage, causing extreme volatility.'],
+    },
   ),
   c(
     'entry-timing',
@@ -724,6 +1138,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'patience', label: 'Max wait', type: 'slider', min: 1, max: 40, step: 1, value: 8, unit: ' bars' },
     ],
     'Reduces the cost of chasing a signal that already ran.',
+    [
+      { key: 'rewardSlackPenalty', label: 'Time Waiting Penalty', type: 'slider', min: 0.0, max: 1.0, step: 0.05, value: 0.15 },
+      { key: 'actionThreshold', label: 'Act vs Wait Policy Cutoff', type: 'slider', min: 0.1, max: 0.9, step: 0.05, value: 0.5 },
+    ],
+    {
+      whenToUse: 'Use on momentum breakout strategies to avoid buying at the absolute peak of the impulse candle.',
+      whenToSkip: 'Skip for fast market orders where fill speed is prioritized over price improvement.',
+      bestPractices: ['Set max wait time to under 10 bars on intraday charts.'],
+      commonMistakes: ['Waiting too long and completely missing trending continuation moves.'],
+    },
   ),
   c(
     'exit-policy',
@@ -739,6 +1163,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'style', label: 'Bias', type: 'select', options: ['Protect gains', 'Balanced', 'Let it run'], value: 'Balanced' },
     ],
     'Often the highest-leverage improvement to an already-working entry.',
+    [
+      { key: 'trailingRatio', label: 'Dynamic Trailing Stop Ratio', type: 'slider', min: 0.5, max: 3.0, step: 0.1, value: 1.5 },
+      { key: 'timeDecayPenalty', label: 'Position Holding Time Penalty', type: 'slider', min: 0.0, max: 0.5, step: 0.05, value: 0.1 },
+    ],
+    {
+      whenToUse: 'Use to replace rigid fixed take-profit targets with dynamic market-aware exits.',
+      whenToSkip: 'Skip if trading defined-risk option spreads with binary expiry outcomes.',
+      bestPractices: ['Train exit policies separately from entry policies.'],
+      commonMistakes: ['Over-optimizing exits on historical outliers that never recur.'],
+    },
   ),
   c(
     'rl-trainer',
@@ -751,14 +1185,27 @@ export const COMPONENTS: ComponentDef[] = [
     'pro',
     499,
     [
-      { key: 'algo', label: 'Algorithm', type: 'select', options: ['PPO', 'SAC', 'DQN'], value: 'PPO' },
+      { key: 'algo', label: 'Algorithm', type: 'select', options: ['PPO (Proximal Policy Optimization)', 'SAC (Soft Actor-Critic)', 'DQN (Deep Q-Network)'], value: 'PPO (Proximal Policy Optimization)' },
       { key: 'episodes', label: 'Episodes', type: 'number', value: 2000, min: 100, max: 100000 },
       { key: 'walkForward', label: 'Walk-forward validation', type: 'switch', value: true },
     ],
     'Required if you want your policies to keep improving after launch.',
+    [
+      { key: 'learningRate', label: 'Policy Actor Learning Rate', type: 'slider', min: 0.0001, max: 0.01, step: 0.0005, value: 0.0003 },
+      { key: 'clipRange', label: 'PPO Clip Range (ε)', type: 'slider', min: 0.1, max: 0.4, step: 0.05, value: 0.2 },
+      { key: 'gaeLambda', label: 'GAE Lambda (λ)', type: 'slider', min: 0.8, max: 0.99, step: 0.01, value: 0.95 },
+    ],
+    {
+      whenToUse: 'Place in graph when training position sizing or exit RL agents on historical market data.',
+      whenToSkip: 'Skip if using pure deterministic heuristics or classical ML regressors.',
+      bestPractices: ['Always enable walk-forward validation to detect policy degradation.'],
+      commonMistakes: ['Training for 100,000 episodes on 1 year of data, leading to severe overfitting.'],
+    },
   ),
 
-  // ---------- VI. Debate Layer ----------
+  // ==========================================
+  // ---------- VI. Debate Layer --------------
+  // ==========================================
   c(
     'bull-bear',
     'debate',
@@ -774,6 +1221,27 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'transcript', label: 'Keep transcript', type: 'switch', value: true, help: 'Stored with each trade for post-mortems.' },
     ],
     'Stops a single loud agent from dominating every decision.',
+    [
+      {
+        key: 'model',
+        label: 'Debate Engine LLM',
+        type: 'model-select',
+        value: { providerId: 'anthropic', modelId: 'claude-sonnet', temperature: 0.6, maxTokens: 2048 },
+      },
+      {
+        key: 'systemPrompt',
+        label: 'Debate Round Protocol',
+        type: 'prompt',
+        value: 'Conduct a structured adversarial debate between the Bull case and the Bear case based on input signals: {{input}}. Each round must directly address and refute the opposing claim with empirical evidence from the features.',
+      },
+      { key: 'agentWeights', label: 'Agent Input Weights', type: 'weighted-list', options: ['Bull Argument', 'Bear Argument', 'Macro Context'], value: { 'Bull Argument': 40, 'Bear Argument': 40, 'Macro Context': 20 } },
+    ],
+    {
+      whenToUse: 'Use when pairing multiple agent views (e.g. Technical + Contrarian) to eliminate single-agent hallucinations.',
+      whenToSkip: 'Skip for simple rule-based momentum systems where direct signal thresholding suffices.',
+      bestPractices: ['Keep rounds between 2 and 3 to prevent debate degradation and latency bloat.'],
+      commonMistakes: ['Running 6 debate rounds on a 1-minute scalping strategy.'],
+    },
   ),
   c(
     'moderator',
@@ -789,6 +1257,28 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'criteria', label: 'Criteria', type: 'checklist', options: ['Evidence quality', 'Falsifiability', 'Base rates', 'Risk asymmetry'], value: ['Evidence quality', 'Risk asymmetry'] },
     ],
     'Turns a messy debate into one actionable number.',
+    [
+      {
+        key: 'model',
+        label: 'Moderator Judge LLM',
+        type: 'model-select',
+        value: { providerId: 'openai', modelId: 'gpt-5', temperature: 0.2, maxTokens: 1024 },
+      },
+      {
+        key: 'systemPrompt',
+        label: 'Judicial Scoring Prompt',
+        type: 'prompt',
+        value: 'You are an impartial quant arbitration judge scoring a debate between bull and bear cases in {{input}}. Weigh argument quality, empirical data citations, and risk-reward asymmetry over mere confidence. Output the winning side and a net conviction score (0.0 to 1.0).',
+      },
+      { key: 'minMargin', label: 'Minimum Victory Margin', type: 'slider', min: 0.1, max: 0.5, step: 0.05, value: 0.2 },
+      { key: 'decisionRubric', label: 'Judicial Scoring Rubric JSON', type: 'json', value: '{\n  "evidence_weight": 0.4,\n  "tail_risk_weight": 0.35,\n  "momentum_weight": 0.25\n}' },
+    ],
+    {
+      whenToUse: 'Place immediately after Bull vs Bear rounds or multi-agent consensus layers to derive a unified decision.',
+      whenToSkip: 'Skip if using simple weighted mathematical averaging without LLM arbitration.',
+      bestPractices: ['Set temperature low (0.2) to ensure consistent, repeatable judicial scoring.'],
+      commonMistakes: ['Judging debates on rhetorical flair rather than quantitative feature support.'],
+    },
   ),
   c(
     'devils-advocate',
@@ -804,6 +1294,27 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'vetoPower', label: 'Can veto', type: 'switch', value: false, help: 'If on, a strong objection blocks the trade entirely.' },
     ],
     'Catches consensus mistakes in unusual market conditions.',
+    [
+      {
+        key: 'model',
+        label: 'Adversarial Model',
+        type: 'model-select',
+        value: { providerId: 'deepseek', modelId: 'deepseek-r1', temperature: 0.6, maxTokens: 1024 },
+      },
+      {
+        key: 'systemPrompt',
+        label: 'Adversarial Challenge Prompt',
+        type: 'prompt',
+        value: 'You are the Devil\'s Advocate. The committee has chosen a trade setup from {{input}}. Attack this thesis with maximum skepticism. Identify the worst-case scenario that invalidates this trade.',
+      },
+      { key: 'challengeRigor', label: 'Adversarial Rigor Threshold', type: 'slider', min: 0.5, max: 0.95, step: 0.05, value: 0.75 },
+    ],
+    {
+      whenToUse: 'Use to stress-test high-conviction trade entries against tail-risk events.',
+      whenToSkip: 'Skip for quick mean-reversion scalp setups.',
+      bestPractices: ['Enable veto power only on large swing positions.'],
+      commonMistakes: ['Allowing trivial objections to paralyze the trading pipeline.'],
+    },
   ),
   c(
     'evidence-ledger',
@@ -817,9 +1328,22 @@ export const COMPONENTS: ComponentDef[] = [
     249,
     [{ key: 'retention', label: 'Retention', type: 'select', options: ['30 days', '1 year', 'Forever'], value: '1 year' }],
     'Essential once you have more than a handful of live decisions.',
+    [
+      { key: 'hashIntegrity', label: 'Cryptographic SHA-256 Hash Verification', type: 'switch', value: true },
+      { key: 'fullAuditTrace', label: 'Store Raw Prompt & Response Traces', type: 'switch', value: true },
+      { key: 'retentionDays', label: 'Audit Retention Horizon', type: 'slider', min: 30, max: 1825, step: 30, value: 365, unit: ' days' },
+    ],
+    {
+      whenToUse: 'Mandatory for institutional trade compliance, regulatory audits, and post-trade attribution.',
+      whenToSkip: 'Skip during rapid sandbox prototyping where memory footprint is prioritized.',
+      bestPractices: ['Retain decision logs for at least 1 year.'],
+      commonMistakes: ['Discarding prompt inputs, making post-mortems impossible to reconstruct.'],
+    },
   ),
 
-  // ---------- VII. Confidence Engine ----------
+  // ==========================================
+  // ---------- VII. Confidence Engine --------
+  // ==========================================
   c(
     'calibrator',
     'confidence',
@@ -831,9 +1355,19 @@ export const COMPONENTS: ComponentDef[] = [
     'free',
     0,
     [
-      { key: 'method', label: 'Method', type: 'select', options: ['Isotonic', 'Platt', 'Temperature'], value: 'Isotonic' },
+      { key: 'method', label: 'Method', type: 'select', options: ['Isotonic', 'Platt', 'Temperature Scaling'], value: 'Isotonic' },
     ],
     'Cheap, boring, and one of the highest-value nodes in the catalog.',
+    [
+      { key: 'nBins', label: 'Calibration Bins', type: 'slider', min: 5, max: 50, step: 5, value: 15 },
+      { key: 'regularization', label: 'Regularization L2 Strength', type: 'slider', min: 0.01, max: 1.0, step: 0.05, value: 0.1 },
+    ],
+    {
+      whenToUse: 'Place after any ML or LLM classification node before sizing or risk gates.',
+      whenToSkip: 'Skip if using rank-based sorting rather than absolute probability thresholds.',
+      bestPractices: ['Use Isotonic calibration for non-parametric flexibility with over 1000 samples.'],
+      commonMistakes: ['Assuming raw model softmax outputs represent true empirical win probabilities.'],
+    },
   ),
   c(
     'agreement-score',
@@ -849,6 +1383,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'minAgreement', label: 'Min agreement to act', type: 'slider', min: 0, max: 100, step: 5, value: 60, unit: '%' },
     ],
     'Skip trades where your own components cannot agree.',
+    [
+      { key: 'dispersionMetric', label: 'Dispersion Metric', type: 'select', options: ['Entropy', 'Standard Deviation', 'Gini Coefficient'], value: 'Entropy' },
+      { key: 'consensusThreshold', label: 'Unanimity Threshold', type: 'slider', min: 0.5, max: 0.95, step: 0.05, value: 0.75 },
+    ],
+    {
+      whenToUse: 'Use when multi-agent graphs have 3+ independent analyst opinions.',
+      whenToSkip: 'Skip for single-model or linear rule-based graphs.',
+      bestPractices: ['Require at least 60% agreement before committing full risk.'],
+      commonMistakes: ['Confusing unanimous agreement with a guaranteed winning trade.'],
+    },
   ),
   c(
     'uncertainty-bands',
@@ -864,6 +1408,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'coverage', label: 'Target coverage', type: 'slider', min: 50, max: 99, step: 1, value: 90, unit: '%' },
     ],
     'Feed the width into sizing so uncertain trades get smaller.',
+    [
+      { key: 'alphaLevel', label: 'Conformal Miscoverage Alpha (α)', type: 'slider', min: 0.01, max: 0.2, step: 0.01, value: 0.05 },
+      { key: 'bandwidthKernel', label: 'Bandwidth Smoothing Kernel', type: 'select', options: ['Gaussian', 'Epanechnikov', 'Triangular'], value: 'Gaussian' },
+    ],
+    {
+      whenToUse: 'Use around continuous return forecasts to determine dynamic stop and profit zones.',
+      whenToSkip: 'Skip for binary yes/no execution signals.',
+      bestPractices: ['Automatically scale position size inversely with the uncertainty band width.'],
+      commonMistakes: ['Ignoring wide prediction bands during market regime shifts.'],
+    },
   ),
   c(
     'confidence-gate',
@@ -880,6 +1434,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'hysteresis', label: 'Hysteresis', type: 'slider', min: 0, max: 0.2, step: 0.01, value: 0.05 },
     ],
     'The simplest way to cut your trade count in half.',
+    [
+      { key: 'coolDownBars', label: 'Cool-down Re-arm Bars', type: 'slider', min: 0, max: 20, step: 1, value: 3, unit: ' bars' },
+      { key: 'hardCutoff', label: 'Emergency Reject Threshold', type: 'slider', min: 0.4, max: 0.7, step: 0.05, value: 0.45 },
+    ],
+    {
+      whenToUse: 'Place immediately prior to Risk or Execution layers to eliminate low-conviction churn.',
+      whenToSkip: 'Skip if your strategy relies on continuous small lot market-making.',
+      bestPractices: ['Set hysteresis to at least 0.05 to prevent rapid order oscillation around the cutoff.'],
+      commonMistakes: ['Setting the threshold to 0.9, resulting in 0 executed trades in a year.'],
+    },
   ),
   c(
     'drift-monitor',
@@ -892,13 +1456,25 @@ export const COMPONENTS: ComponentDef[] = [
     'pro',
     329,
     [
-      { key: 'metric', label: 'Drift metric', type: 'select', options: ['PSI', 'KL divergence', 'Wasserstein'], value: 'PSI' },
+      { key: 'metric', label: 'Drift metric', type: 'select', options: ['PSI (Population Stability Index)', 'KL divergence', 'Wasserstein Distance'], value: 'PSI (Population Stability Index)' },
       { key: 'action', label: 'On high drift', type: 'select', options: ['Warn', 'Halve size', 'Halt'], value: 'Halve size' },
     ],
     'Your early warning that a model needs retraining.',
+    [
+      { key: 'refWindowBars', label: 'Reference Historical Baseline Window', type: 'slider', min: 100, max: 5000, step: 100, value: 1000, unit: ' bars' },
+      { key: 'criticalPsiThreshold', label: 'Critical PSI Alarm Cutoff', type: 'slider', min: 0.1, max: 0.5, step: 0.05, value: 0.25 },
+    ],
+    {
+      whenToUse: 'Essential for live ML deployments to catch silent model decay caused by macroeconomic regime shifts.',
+      whenToSkip: 'Skip during rapid backtesting.',
+      bestPractices: ['Wire drift monitor triggers directly to an automated Retrainer node in Layer XI.'],
+      commonMistakes: ['Ignoring PSI alerts above 0.25 until large unexpected losses occur.'],
+    },
   ),
 
-  // ---------- VIII. Risk Management ----------
+  // ==========================================
+  // ---------- VIII. Risk Management ---------
+  // ==========================================
   c(
     'position-cap',
     'risk',
@@ -914,6 +1490,17 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'maxSector', label: 'Max per sector', type: 'slider', min: 5, max: 100, step: 5, value: 30, unit: '% equity' },
     ],
     'The one risk node no bot should ship without.',
+    [
+      { key: 'maxLeverage', label: 'Max gross leverage', type: 'slider', min: 1, max: 10, step: 0.5, value: 2, unit: 'x' },
+      { key: 'enforceCashFloor', label: 'Enforce 10% cash buffer', type: 'switch', value: true },
+      { key: 'sectorExposureTable', label: 'Custom Sector Cap Overrides', type: 'key-value', value: [{ key: 'Financials', value: '25%' }, { key: 'IT', value: '20%' }] },
+    ],
+    {
+      whenToUse: 'Mandatory on every strategy to protect portfolio longevity and prevent single-asset blowups.',
+      whenToSkip: 'Never skip.',
+      bestPractices: ['Set max position size to 5–10% of portfolio equity.'],
+      commonMistakes: ['Setting max position size to 100% on volatile options strategies.'],
+    },
   ),
   c(
     'drawdown-brake',
@@ -930,6 +1517,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'hardStop', label: 'Halt at', type: 'slider', min: 5, max: 50, step: 1, value: 15, unit: '% DD' },
     ],
     'Turns a bad week into a survivable one.',
+    [
+      { key: 'recoveryCoolOffHours', label: 'Post-Halt Cool-Off Time', type: 'slider', min: 1, max: 72, step: 1, value: 24, unit: ' hours' },
+      { key: 'escalationSteps', label: 'Size Reduction De-escalation Steps', type: 'slider', min: 2, max: 5, step: 1, value: 3 },
+    ],
+    {
+      whenToUse: 'Mandatory for preserving capital during prolonged market chop or black-swan drawdowns.',
+      whenToSkip: 'Never skip in live trading.',
+      bestPractices: ['Set hard stop at your personal maximum pain threshold (e.g. 15%).'],
+      commonMistakes: ['Disabling the drawdown brake immediately after it halts a strategy.'],
+    },
   ),
   c(
     'risk-gate',
@@ -948,6 +1545,17 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'maxPosition', label: 'Max position', type: 'slider', min: 1, max: 100, step: 1, value: 20, unit: '% equity' },
     ],
     'Every execution path should pass through a gate like this.',
+    [
+      { key: 'customRiskRule', label: 'Custom Risk Policy Script (Python)', type: 'code', language: 'python', value: '# def evaluate_risk(order, portfolio):\n#   if portfolio.daily_drawdown > 0.05:\n#     return False, "Exceeded daily drawdown"\n#   return True, "Approved"' },
+      { key: 'strictMode', label: 'Strict mode (block on missing data)', type: 'switch', value: true },
+      { key: 'blockOnMissingData', label: 'Block executions if telemetry latency exceeds 500ms', type: 'switch', value: true },
+    ],
+    {
+      whenToUse: 'Place as the sole conduit before any Execution Layer node.',
+      whenToSkip: 'Never skip.',
+      bestPractices: ['Set false-negative cost weight higher than false-positive cost.'],
+      commonMistakes: ['Bypassing the risk gate to wire signals directly into order execution.'],
+    },
   ),
   c(
     'correlation-guard',
@@ -964,6 +1572,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'window', label: 'Window', type: 'slider', min: 20, max: 250, step: 10, value: 60, unit: ' bars' },
     ],
     'Prevents four positions that are all just one index bet.',
+    [
+      { key: 'covarianceDecay', label: 'Covariance Decay Factor', type: 'slider', min: 0.85, max: 0.99, step: 0.01, value: 0.94 },
+      { key: 'eigenCutoff', label: 'Principal Component Eigenvalue Cap', type: 'slider', min: 0.5, max: 0.95, step: 0.05, value: 0.8 },
+    ],
+    {
+      whenToUse: 'Use when trading multi-symbol stock universes to prevent piling into the same momentum basket.',
+      whenToSkip: 'Skip on single-asset trading graphs.',
+      bestPractices: ['Set max correlation to 0.70 to guarantee diversification.'],
+      commonMistakes: ['Holding 5 different banking stocks assuming they are independent positions.'],
+    },
   ),
   c(
     'daily-loss-limit',
@@ -980,6 +1598,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'flatten', label: 'Flatten open positions', type: 'switch', value: false },
     ],
     'A simple circuit breaker that has saved a lot of accounts.',
+    [
+      { key: 'autoCancelPending', label: 'Auto-cancel all open limit orders on trigger', type: 'switch', value: true },
+      { key: 'lockoutUntilNextSession', label: 'Hard lockout until next market session', type: 'switch', value: true },
+    ],
+    {
+      whenToUse: 'Essential intraday circuit breaker to prevent revenge trading or software runaway.',
+      whenToSkip: 'Never skip on live intraday accounts.',
+      bestPractices: ['Set daily loss limit to 1–2% of total capital.'],
+      commonMistakes: ['Manually overriding the daily loss limit mid-session.'],
+    },
   ),
   c(
     'event-blackout',
@@ -996,6 +1624,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'after', label: 'After event', type: 'slider', min: 0, max: 120, step: 5, value: 30, unit: ' min' },
     ],
     'Avoid holding a leveraged position into a rate decision.',
+    [
+      { key: 'emergencyClose', label: 'Close open scalps 2 min before event', type: 'switch', value: true },
+      { key: 'customBlackoutWindows', label: 'Custom Manual Blackout Windows', type: 'key-value', value: [{ key: 'RBI Policy', value: '09:45 - 10:30' }] },
+    ],
+    {
+      whenToUse: 'Use around central bank announcements, CPI releases, and earnings prints.',
+      whenToSkip: 'Skip for long-term multi-month swing strategies.',
+      bestPractices: ['Set buffer to at least 15 min before and 30 min after.'],
+      commonMistakes: ['Holding market orders open through binary macroeconomic releases.'],
+    },
   ),
   c(
     'var-monitor',
@@ -1012,9 +1650,21 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'scenarios', label: 'Stress scenarios', type: 'checklist', options: ['2008', 'Covid crash', 'Rate shock', 'Liquidity freeze'], value: ['Covid crash', 'Rate shock'] },
     ],
     'For when you are running enough capital to care about tails.',
+    [
+      { key: 'monteCarloIterations', label: 'Monte Carlo Simulations', type: 'slider', min: 1000, max: 50000, step: 1000, value: 10000 },
+      { key: 'decayLambda', label: 'Decay Lambda for Historical VaR', type: 'slider', min: 0.9, max: 0.99, step: 0.01, value: 0.94 },
+    ],
+    {
+      whenToUse: 'Use on multi-asset institutional portfolios to monitor tail-risk and capital at risk.',
+      whenToSkip: 'Skip on small single-contract retail accounts.',
+      bestPractices: ['Stress-test against historical liquidity freezes (e.g. March 2020).'],
+      commonMistakes: ['Relying solely on parametric Gaussian VaR without stress scenarios.'],
+    },
   ),
 
-  // ---------- IX. Execution ----------
+  // ==========================================
+  // ---------- IX. Execution -----------------
+  // ==========================================
   c(
     'paper-executor',
     'execution',
@@ -1031,6 +1681,18 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'partialFills', label: 'Model partial fills', type: 'switch', value: true },
     ],
     'Where every bot should live until it has earned real capital.',
+    [
+      { key: 'fillModel', label: 'Fill simulation model', type: 'select', options: ['Next Bar Open', 'Midpoint + Slippage', 'Orderbook Cross Simulation'], value: 'Midpoint + Slippage' },
+      { key: 'latencySimMs', label: 'Simulated Network Latency', type: 'slider', min: 0, max: 500, step: 10, value: 50, unit: ' ms' },
+      { key: 'logOrders', label: 'Emit detailed execution events', type: 'switch', value: true },
+      { key: 'datasetRef', label: 'Execution Replay Dataset', type: 'dataset-ref', value: 'ds-nifty50-1m' },
+    ],
+    {
+      whenToUse: 'Default execution target for all new strategies during research and forward paper validation.',
+      whenToSkip: 'Skip only when deploying real capital to a verified broker API endpoint.',
+      bestPractices: ['Set slippage to at least 8–10 bps to ensure realistic performance results.'],
+      commonMistakes: ['Assuming zero slippage and zero broker commissions in backtests.'],
+    },
   ),
   c(
     'market-order',
@@ -1046,6 +1708,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'maxSlippage', label: 'Abort above', type: 'slider', min: 1, max: 200, step: 1, value: 25, unit: ' bps' },
     ],
     'Fine for liquid names, dangerous for small caps.',
+    [
+      { key: 'timeInForce', label: 'Time in Force', type: 'select', options: ['IOC (Immediate or Cancel)', 'FOK (Fill or Kill)', 'DAY'], value: 'IOC (Immediate or Cancel)' },
+      { key: 'splitChunks', label: 'Split into micro-slices', type: 'slider', min: 1, max: 10, step: 1, value: 1 },
+    ],
+    {
+      whenToUse: 'Use when immediate execution certainty outweighs price improvement (e.g. urgent momentum entry).',
+      whenToSkip: 'Skip in illiquid names with wide bid-ask spreads.',
+      bestPractices: ['Always set an abort threshold above 25–30 bps.'],
+      commonMistakes: ['Blasting market orders into an empty Level 2 book.'],
+    },
   ),
   c(
     'limit-ladder',
@@ -1063,6 +1735,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'timeout', label: 'Timeout to market', type: 'slider', min: 0, max: 60, step: 1, value: 10, unit: ' min' },
     ],
     'Reduce cost on entries where you are not in a hurry.',
+    [
+      { key: 'pegReference', label: 'Peg Reference Anchor', type: 'select', options: ['Midpoint', 'Best Bid/Ask', 'VWAP Reference'], value: 'Midpoint' },
+      { key: 'chaseIntervalSec', label: 'Order Ladder Refresh Frequency', type: 'slider', min: 1, max: 60, step: 1, value: 5, unit: 's' },
+    ],
+    {
+      whenToUse: 'Use when accumulating large positions over time without moving the market.',
+      whenToSkip: 'Skip for momentum breakouts that run away immediately.',
+      bestPractices: ['Set timeout to convert unfilled tail slices to market.'],
+      commonMistakes: ['Leaving wide limit orders resting overnight.'],
+    },
   ),
   c(
     'twap-vwap',
@@ -1075,10 +1757,21 @@ export const COMPONENTS: ComponentDef[] = [
     'starter',
     269,
     [
-      { key: 'algo', label: 'Algorithm', type: 'select', options: ['TWAP', 'VWAP', 'POV'], value: 'VWAP' },
+      { key: 'algo', label: 'Algorithm', type: 'select', options: ['TWAP', 'VWAP', 'POV (Percentage of Volume)'], value: 'VWAP' },
       { key: 'duration', label: 'Duration', type: 'slider', min: 5, max: 240, step: 5, value: 30, unit: ' min' },
     ],
     'Once your size is a meaningful fraction of average volume.',
+    [
+      { key: 'randomizeChunks', label: 'Randomize Chunk Sizes (anti-detection)', type: 'switch', value: true },
+      { key: 'participationRate', label: 'Max Volume Participation Rate', type: 'slider', min: 1, max: 30, step: 1, value: 10, unit: '%' },
+      { key: 'urgency', label: 'Slicing Urgency Bias', type: 'select', options: ['Passive', 'Neutral', 'Aggressive'], value: 'Neutral' },
+    ],
+    {
+      whenToUse: 'Use when order notional exceeds 1% of average 5-minute volume.',
+      whenToSkip: 'Skip for small retail orders where slicing fees outweigh market impact.',
+      bestPractices: ['Enable randomized chunk sizes to avoid detection by adverse HFT algorithms.'],
+      commonMistakes: ['Executing a 3-hour TWAP right before an earnings announcement.'],
+    },
   ),
   c(
     'live-broker',
@@ -1093,10 +1786,21 @@ export const COMPONENTS: ComponentDef[] = [
     [
       { key: 'venue', label: 'Venue', type: 'select', options: ['Zerodha', 'Upstox', 'Interactive Brokers', 'Alpaca'], value: 'Zerodha' },
       { key: 'orderType', label: 'Default order type', type: 'select', options: ['Market', 'Limit', 'SL-M'], value: 'Limit' },
-      { key: 'apiKey', label: 'Broker API key', type: 'password', placeholder: 'Stored encrypted' },
+      { key: 'apiKey', label: 'Broker API Key', type: 'credential', provider: 'Broker Gateway', value: '' },
       { key: 'confirmEach', label: 'Confirm each order manually', type: 'switch', value: true },
     ],
     'Only after a bot has a long paper record you actually trust.',
+    [
+      { key: 'webhookPayload', label: 'Custom Webhook Dispatch JSON', type: 'json', value: '{\n  "source": "aether-execution-engine",\n  "venue": "NSE",\n  "audit": true\n}' },
+      { key: 'maxNotionalPerOrder', label: 'Max Notional Per Order (₹)', type: 'number', value: 200000 },
+      { key: 'brokerSecret', label: 'Broker API Secret / TOTP Key', type: 'password' },
+    ],
+    {
+      whenToUse: 'Use exclusively for production live execution after passing paper trading hurdles.',
+      whenToSkip: 'Never use during experimental graph design.',
+      bestPractices: ['Keep manual confirmation enabled for the first 30 live executions.'],
+      commonMistakes: ['Connecting live keys before validating daily loss brakes in Layer VIII.'],
+    },
   ),
   c(
     'smart-router',
@@ -1112,9 +1816,21 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'venues', label: 'Venues', type: 'checklist', options: ['NSE', 'BSE', 'Dark pool proxy'], value: ['NSE', 'BSE'] },
     ],
     'Marginal gains that compound at high turnover.',
+    [
+      { key: 'feeWeighting', label: 'Exchange Fee Sensitivity Weight', type: 'slider', min: 0.0, max: 1.0, step: 0.1, value: 0.5 },
+      { key: 'darkPoolRouting', label: 'Attempt Dark Pool Liquidity Probe First', type: 'switch', value: true },
+    ],
+    {
+      whenToUse: 'Use on multi-listed equities and dual exchange instruments (NSE/BSE).',
+      whenToSkip: 'Skip for single-venue derivative contracts (Nifty Index Futures).',
+      bestPractices: ['Account for exchange transaction charges in the routing cost function.'],
+      commonMistakes: ['Routing to secondary venues during wide illiquid spread periods.'],
+    },
   ),
 
-  // ---------- X. Trade Monitoring ----------
+  // ==========================================
+  // ---------- X. Trade Monitoring -----------
+  // ==========================================
   c(
     'pnl-tracker',
     'monitoring',
@@ -1130,6 +1846,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'markTo', label: 'Mark to', type: 'select', options: ['Last', 'Mid', 'Bid/Ask'], value: 'Mid' },
     ],
     'Required input for self-learning and drawdown logic.',
+    [
+      { key: 'benchmarkSymbol', label: 'Alpha Benchmark Symbol', type: 'text', value: 'NIFTY50' },
+      { key: 'trackMfeMae', label: 'Track Max Favorable & Adverse Excursions (MFE/MAE)', type: 'switch', value: true },
+    ],
+    {
+      whenToUse: 'Essential telemetry node for every live and backtested strategy graph.',
+      whenToSkip: 'Never skip.',
+      bestPractices: ['Mark to Mid to prevent unrealized P&L distortion across wide spreads.'],
+      commonMistakes: ['Evaluating strategy alpha without comparing against benchmark return.'],
+    },
   ),
   c(
     'decision-log',
@@ -1145,6 +1871,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'verbosity', label: 'Verbosity', type: 'select', options: ['Decisions only', 'Decisions + inputs', 'Full trace'], value: 'Decisions + inputs' },
     ],
     'The first thing you will want when a bot surprises you.',
+    [
+      { key: 'snapshotFeatures', label: 'Snapshot all 300+ input features per tick', type: 'switch', value: true },
+      { key: 'exportFormat', label: 'Export Telemetry Format', type: 'select', options: ['JSONL', 'Parquet', 'CSV'], value: 'JSONL' },
+    ],
+    {
+      whenToUse: 'Use to record complete rationale, prompt traces, and feature vectors for every trade decision.',
+      whenToSkip: 'Skip during rapid high-frequency simulations if disk throughput is constrained.',
+      bestPractices: ['Keep verbosity on "Decisions + inputs" for the first 3 months of live trading.'],
+      commonMistakes: ['Running blind bots without decision audit trails.'],
+    },
   ),
   c(
     'latency-watch',
@@ -1160,21 +1896,40 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'budget', label: 'Latency budget', type: 'slider', min: 50, max: 5000, step: 50, value: 800, unit: ' ms' },
     ],
     'Matters a lot for intraday, barely at all for weekly rebalances.',
+    [
+      { key: 'alertWebhook', label: 'Ops Alert Webhook URL', type: 'text', value: 'https://hooks.slack.com/services/...' },
+      { key: 'sampleIntervalMs', label: 'Telemetry Profiling Interval', type: 'slider', min: 10, max: 500, step: 10, value: 100, unit: ' ms' },
+    ],
+    {
+      whenToUse: 'Use on intraday and LLM-heavy graphs to prevent lag build-up.',
+      whenToSkip: 'Skip for daily swing strategies where execution latency is non-critical.',
+      bestPractices: ['Set latency budget to half of your bar interval.'],
+      commonMistakes: ['Running heavy 32k-token LLMs on 1-minute scalping strategies.'],
+    },
   ),
   c(
     'anomaly-alerts',
     'monitoring',
     'Anomaly Alerts',
     'Tell me when it is weird.',
-    'Detects unusual bot behaviour  trade frequency spikes, sizing outliers, repeated rejections.',
+    'Detects unusual bot behaviour — trade frequency spikes, sizing outliers, repeated rejections.',
     ['TradeOutcome'],
     ['TradeOutcome'],
     'starter',
     199,
     [
-      { key: 'channels', label: 'Notify via', type: 'checklist', options: ['In-app', 'Email', 'Webhook'], value: ['In-app', 'Email'] },
+      { key: 'channels', label: 'Notify via', type: 'checklist', options: ['In-app', 'Email', 'Webhook', 'Telegram'], value: ['In-app', 'Email'] },
     ],
     'Your smoke alarm for a bot that has started misbehaving.',
+    [
+      { key: 'rateLimitAlertsMin', label: 'Alert Throttle Window', type: 'slider', min: 1, max: 60, step: 1, value: 10, unit: ' min' },
+    ],
+    {
+      whenToUse: 'Mandatory monitoring node for all unattended algorithmic trading bots.',
+      whenToSkip: 'Never skip on production bots.',
+      bestPractices: ['Route critical alerts to Telegram or Webhook for immediate notification.'],
+      commonMistakes: ['Silencing alert notifications instead of investigating anomalous sizing.'],
+    },
   ),
   c(
     'attribution',
@@ -1190,9 +1945,21 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'granularity', label: 'Granularity', type: 'select', options: ['Per layer', 'Per node'], value: 'Per node' },
     ],
     'Tells you which expensive node you can safely switch off.',
+    [
+      { key: 'shapleyValues', label: 'Compute Exact Shapley Attribution Values', type: 'switch', value: true },
+      { key: 'rollingDecay', label: 'Attribution Lookback Window', type: 'slider', min: 10, max: 200, step: 10, value: 60, unit: ' trades' },
+    ],
+    {
+      whenToUse: 'Use to evaluate the marginal value added by each intelligence agent or filter node.',
+      whenToSkip: 'Skip for simple 2-node linear graphs.',
+      bestPractices: ['Prune nodes with negative or zero Shapley attribution scores.'],
+      commonMistakes: ['Retaining expensive paid API models that contribute 0% incremental alpha.'],
+    },
   ),
 
-  // ---------- XI. Self-Learning ----------
+  // ==========================================
+  // ---------- XI. Self-Learning -------------
+  // ==========================================
   c(
     'post-mortem',
     'learning',
@@ -1207,6 +1974,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'depth', label: 'Review depth', type: 'select', options: ['Losses only', 'Outliers', 'Every trade'], value: 'Outliers' },
     ],
     'Where most of the actual learning in this system comes from.',
+    [
+      { key: 'llmReviewPrompt', label: 'Post-Mortem Evaluation Prompt', type: 'prompt', value: 'Analyze the trade outcome from {{input}}. Identify if the loss resulted from execution slippage, false breakout, or unexpected news event.' },
+      { key: 'minPnLDelta', label: 'Outlier P&L Threshold (₹)', type: 'number', value: 2000 },
+    ],
+    {
+      whenToUse: 'Use to automatically generate diagnostic learning reviews for closed losing trades.',
+      whenToSkip: 'Skip during rapid backtests.',
+      bestPractices: ['Feed post-mortem reviews into the Rule Miner node in Layer XI.'],
+      commonMistakes: ['Reviewing every $1 scalp individually rather than focusing on tail loss events.'],
+    },
   ),
   c(
     'rule-miner',
@@ -1220,9 +1997,19 @@ export const COMPONENTS: ComponentDef[] = [
     429,
     [
       { key: 'minSupport', label: 'Min support', type: 'slider', min: 5, max: 200, step: 5, value: 25, unit: ' trades' },
-      { key: 'autoPromote', label: 'Auto-promote rules', type: 'switch', value: false, help: 'Off by default  review rules yourself first.' },
+      { key: 'autoPromote', label: 'Auto-promote rules', type: 'switch', value: false, help: 'Off by default — review rules yourself first.' },
     ],
-    '"Never take this setup in the last 30 minutes"  found automatically.',
+    '"Never take this setup in the last 30 minutes" — found automatically.',
+    [
+      { key: 'minConfidence', label: 'Min Rule Mining Confidence', type: 'slider', min: 0.5, max: 0.95, step: 0.05, value: 0.8 },
+      { key: 'maxRuleComplexity', label: 'Max Conjunction Predicates', type: 'slider', min: 1, max: 6, step: 1, value: 3 },
+    ],
+    {
+      whenToUse: 'Use to discover hidden systematic loss conditions from trade outcome history.',
+      whenToSkip: 'Skip when trade history has fewer than 100 closed positions.',
+      bestPractices: ['Keep auto-promote disabled; manually verify mined rules in the Risk Gate.'],
+      commonMistakes: ['Mining rules with support under 10 trades, resulting in spurious correlations.'],
+    },
   ),
   c(
     'retrainer',
@@ -1240,6 +2027,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'modules', label: 'Retrain modules', type: 'checklist', options: ['Forecast models', 'RL policies', 'Calibrator', 'Meta labeler'], value: ['Forecast models', 'Calibrator'] },
     ],
     'Prevents slow decay as the market changes underneath you.',
+    [
+      { key: 'minWinRateAdvantage', label: 'Min Challenger Advantage Required', type: 'slider', min: 1, max: 15, step: 1, value: 3, unit: '%' },
+      { key: 'validationMetrics', label: 'Challenger Acceptance Gate', type: 'checklist', options: ['Sharpe Ratio', 'Max Drawdown', 'Profit Factor'], value: ['Sharpe Ratio', 'Profit Factor'] },
+    ],
+    {
+      whenToUse: 'Use to automate periodic ML model updates without manual intervention.',
+      whenToSkip: 'Skip for static deterministic rule sets.',
+      bestPractices: ['Require the challenger model to outperform the champion by at least 3% out-of-sample.'],
+      commonMistakes: ['Deploying retrained models without out-of-fold champion vs challenger validation.'],
+    },
   ),
   c(
     'regime-adapter',
@@ -1255,6 +2052,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'minSamples', label: 'Min samples per regime', type: 'slider', min: 20, max: 500, step: 10, value: 100 },
     ],
     'For bots that need to survive both trending and choppy markets.',
+    [
+      { key: 'smoothTransitions', label: 'Smooth Linear Parameter Blending', type: 'switch', value: true },
+      { key: 'hysteresisBars', label: 'Regime Switch Hysteresis Buffer', type: 'slider', min: 5, max: 50, step: 5, value: 15, unit: ' bars' },
+    ],
+    {
+      whenToUse: 'Use when a strategy needs distinct parameter profiles for high-volatility vs low-volatility regimes.',
+      whenToSkip: 'Skip for single-regime specialized breakout bots.',
+      bestPractices: ['Ensure each regime has at least 100 historical samples before fitting parameters.'],
+      commonMistakes: ['Switching parameter sets abruptly bar-to-bar during chop.'],
+    },
   ),
   c(
     'shadow-tester',
@@ -1270,9 +2077,21 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'duration', label: 'Shadow period', type: 'slider', min: 1, max: 90, step: 1, value: 14, unit: ' days' },
     ],
     'The safe way to change a bot that is currently working.',
+    [
+      { key: 'discrepancyThreshold', label: 'Decision Divergence Alarm (α)', type: 'slider', min: 0.01, max: 0.2, step: 0.01, value: 0.05 },
+      { key: 'logShadowDecisions', label: 'Emit Shadow Simulation Order Trace', type: 'switch', value: true },
+    ],
+    {
+      whenToUse: 'Use when testing graph adjustments or new agent prompts alongside an active profitable live bot.',
+      whenToSkip: 'Skip during initial development phase.',
+      bestPractices: ['Run shadow tests for at least 14 live trading days before promoting changes.'],
+      commonMistakes: ['Promoting untested parameter modifications directly to live capital.'],
+    },
   ),
 
-  // ---------- XII. Memory ----------
+  // ==========================================
+  // ---------- XII. Memory -------------------
+  // ==========================================
   c(
     'setup-recall',
     'memory',
@@ -1288,6 +2107,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'minSimilarity', label: 'Min similarity', type: 'slider', min: 0.5, max: 0.99, step: 0.01, value: 0.82 },
     ],
     'Give the debate layer historical base rates instead of vibes.',
+    [
+      { key: 'distanceMetric', label: 'Vector Metric', type: 'select', options: ['Cosine', 'Euclidean', 'Dot Product'], value: 'Cosine' },
+      { key: 'annIndexType', label: 'Index Algorithm', type: 'select', options: ['HNSW (Fast Hierarchical)', 'IVFFlat (Inverted File)', 'Flat (Exact Search)'], value: 'HNSW (Fast Hierarchical)' },
+    ],
+    {
+      whenToUse: 'Use to inject historical precedent and resolution win-rates into LLM agent prompts.',
+      whenToSkip: 'Skip for simple technical indicator momentum graphs.',
+      bestPractices: ['Require at least 0.82 cosine similarity to avoid retrieving irrelevant historical bars.'],
+      commonMistakes: ['Relying on past setup outcomes during completely novel black swan market regimes.'],
+    },
   ),
   c(
     'outcome-store',
@@ -1303,6 +2132,15 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'retention', label: 'Retention', type: 'select', options: ['90 days', '1 year', '5 years'], value: '1 year' },
     ],
     'The substrate every self-learning node reads from.',
+    [
+      { key: 'storageTier', label: 'Storage Engine', type: 'select', options: ['InMemory + Disk Sync', 'SQLite Local', 'ClickHouse Remote'], value: 'InMemory + Disk Sync' },
+    ],
+    {
+      whenToUse: 'Essential database node for all self-learning, rule-mining, and post-mortem review workflows.',
+      whenToSkip: 'Never skip on multi-session strategies.',
+      bestPractices: ['Retain outcomes for at least 1 year across multiple market cycles.'],
+      commonMistakes: ['Wiping outcome history during bot parameter updates.'],
+    },
   ),
   c(
     'lesson-bank',
@@ -1318,6 +2156,15 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'scope', label: 'Scope', type: 'select', options: ['This bot only', 'All my bots', 'My bots + public lessons'], value: 'All my bots' },
     ],
     'Useful once you are running several bots on related markets.',
+    [
+      { key: 'sharingPolicy', label: 'Sync Policy', type: 'select', options: ['Read-Only', 'Bidirectional Sync', 'Isolated'], value: 'Bidirectional Sync' },
+    ],
+    {
+      whenToUse: 'Use when operating a portfolio of multiple correlated algorithmic bots.',
+      whenToSkip: 'Skip if running a single stand-alone bot.',
+      bestPractices: ['Enable bidirectional sync so rules discovered in equity bots protect index bots.'],
+      commonMistakes: ['Applying low-liquidity penny stock lessons to high-liquidity index futures.'],
+    },
   ),
   c(
     'working-memory',
@@ -1333,6 +2180,15 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'span', label: 'Span', type: 'slider', min: 5, max: 200, step: 5, value: 40, unit: ' bars' },
     ],
     'Stops a bot re-entering the same failed trade three times in a row.',
+    [
+      { key: 'bufferStrategy', label: 'Buffer Eviction Strategy', type: 'select', options: ['FIFO Queue', 'Priority by Volatility', 'Surprise Sampling'], value: 'FIFO Queue' },
+    ],
+    {
+      whenToUse: 'Place before intelligence agents to provide recent multi-bar decision memory.',
+      whenToSkip: 'Skip for purely stateless time-invariant models.',
+      bestPractices: ['Set span to 30–50 bars to provide context on recent false breakouts.'],
+      commonMistakes: ['Allowing working memory span to grow too large, causing LLM context bloat.'],
+    },
   ),
   c(
     'embedding-index',
@@ -1349,6 +2205,16 @@ export const COMPONENTS: ComponentDef[] = [
       { key: 'compact', label: 'Auto-compact', type: 'switch', value: true },
     ],
     'Required infrastructure if you use more than one memory node.',
+    [
+      { key: 'mHnsw', label: 'HNSW Graph M-Connections', type: 'slider', min: 8, max: 64, step: 4, value: 16 },
+      { key: 'efSearch', label: 'HNSW Search Depth (ef_search)', type: 'slider', min: 16, max: 256, step: 16, value: 64 },
+    ],
+    {
+      whenToUse: 'Required alongside Setup Recall or Shared Lesson Bank to manage indexing throughput.',
+      whenToSkip: 'Skip if not utilizing vector memory retrieval.',
+      bestPractices: ['Enable auto-compact to prevent index memory fragmentation.'],
+      commonMistakes: ['Setting HNSW search depth above 256 for real-time tick execution.'],
+    },
   ),
 ]
 
@@ -1375,7 +2241,7 @@ export const CONNECTION_RULES: { from: LayerId; to: LayerId; reason: string }[] 
   {
     from: 'data',
     to: 'execution',
-    reason: 'Execution cannot read raw data directly  route it through risk management first.',
+    reason: 'Execution cannot read raw data directly — route it through risk management first.',
   },
   {
     from: 'data',

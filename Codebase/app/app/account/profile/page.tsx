@@ -134,6 +134,13 @@ export default function AccountProfilePage() {
               onCheckedChange={(checked) => setPublicProfile(Boolean(checked))}
             />
           </div>
+
+          <div className="p-3.5 rounded-xl border border-border bg-secondary/40 text-xs text-muted-foreground leading-relaxed flex items-center gap-2.5">
+            <Shield className="size-4 text-brand shrink-0" />
+            <span>
+              <strong>Note:</strong> Market data feed and broker execution API keys now live directly on their respective nodes in the Strategy Builder — open any Data or Execution node&apos;s Deep Customization panel to configure credentials.
+            </span>
+          </div>
         </div>
 
         <div className="flex justify-end">

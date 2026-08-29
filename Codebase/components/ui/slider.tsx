@@ -30,6 +30,7 @@ export function SliderWithValue({
   max,
   step,
   unit,
+  disabled,
   className,
 }: {
   label?: string
@@ -39,10 +40,11 @@ export function SliderWithValue({
   max: number
   step: number
   unit?: string
+  disabled?: boolean
   className?: string
 }) {
   return (
-    <div className={cn('flex flex-col gap-2', className)}>
+    <div className={cn('flex flex-col gap-2', disabled && 'opacity-50 pointer-events-none', className)}>
       <div className="flex items-baseline justify-between gap-3">
         {label ? <span className="text-[13px] font-medium">{label}</span> : <span />}
         <span className="tabular text-[13px] text-muted-foreground">
@@ -51,6 +53,7 @@ export function SliderWithValue({
         </span>
       </div>
       <Slider
+        disabled={disabled}
         value={value}
         min={min}
         max={max}

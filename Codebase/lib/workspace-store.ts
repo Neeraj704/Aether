@@ -29,29 +29,57 @@ import { slugId } from '@/lib/utils'
 /* Node helpers                                                        */
 /* ------------------------------------------------------------------ */
 
-/** Seeds a node's config from the component's declared field defaults. */
+/** Seeds a node's config from the component's declared field defaults (basic + advanced). */
 export function defaultConfig(comp: ComponentDef): Record<string, unknown> {
   const config: Record<string, unknown> = {}
-  for (const f of comp.fields) {
-    const raw = f as Record<string, unknown>
-    if (raw.value !== undefined) {
-      config[raw.key as string] = raw.value
-    } else if (raw.type === 'checklist') {
-      config[raw.key as string] = []
+  const allFields = [...comp.fields, ...(comp.advancedFields || [])]
+  for (const f of allFields) {
+    if (f.type === 'model-select') {
+      config[f.key] = f.value || {
+        providerId: 'openai',
+        modelId: 'gpt-5-mini',
+        temperature: 0.7,
+        maxTokens: 1024,
+      }
+    } else if (f.type === 'credential') {
+      config[f.key] = f.value || ''
+    } else if (f.type === 'dataset-ref') {
+      config[f.key] = f.value || null
+    } else if (f.type === 'key-value') {
+      config[f.key] = f.value || []
+    } else if (f.type === 'weighted-list') {
+      config[f.key] = f.value || {}
+    } else if (f.type === 'prompt' || f.type === 'code' || f.type === 'json') {
+      config[f.key] = f.value || ''
+    } else if (f.type === 'switch') {
+      config[f.key] = typeof f.value === 'boolean' ? f.value : false
+    } else if (f.type === 'select') {
+      config[f.key] = f.value || f.options[0] || ''
+    } else if ('value' in f && (f as any).value !== undefined) {
+      config[f.key] = (f as any).value
     } else {
-      config[raw.key as string] = ''
+      config[f.key] = ''
     }
   }
   return config
 }
 
-/** A node is "needs config" while any free-text field is still blank. */
+/** A node is "needs config" while any required field is still blank. */
 export function computeNeedsConfig(comp: ComponentDef, config: Record<string, unknown>) {
-  return comp.fields.some(
-    (f) =>
-      (f.type === 'text' || f.type === 'password') &&
-      String(config[f.key] ?? '').trim().length === 0,
-  )
+  const allFields = [...comp.fields, ...(comp.advancedFields || [])]
+  return allFields.some((f) => {
+    if (f.type === 'text' || f.type === 'password' || f.type === 'credential') {
+      return String(config[f.key] ?? '').trim().length === 0
+    }
+    if (f.type === 'model-select') {
+      const ms = config[f.key] as any
+      return !ms || !ms.modelId || String(ms.modelId).trim().length === 0
+    }
+    if (f.type === 'dataset-ref') {
+      return config[f.key] === null || config[f.key] === undefined || String(config[f.key]).trim().length === 0
+    }
+    return false
+  })
 }
 
 export function makeNode(componentId: string, x: number, y: number): BotNode {

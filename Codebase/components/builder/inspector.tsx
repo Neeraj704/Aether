@@ -1,5 +1,6 @@
 'use client'
 
+import React, { useState } from 'react'
 import Link from 'next/link'
 import {
   AlignCenterHorizontal,
@@ -11,6 +12,8 @@ import {
   Package,
   Rows3,
   Trash2,
+  SlidersHorizontal,
+  Sparkles,
 } from 'lucide-react'
 import {
   COMPONENT_MAP,
@@ -25,154 +28,12 @@ import { hasComponent } from '@/lib/entitlements'
 import { useSession } from '@/lib/store'
 import { Button } from '@/components/ui/button'
 import { Badge, TierBadge } from '@/components/ui/badge'
-import { Field, Input, Textarea } from '@/components/ui/input'
-import { Select } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { SliderWithValue } from '@/components/ui/slider'
-import { CheckboxRow } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/misc'
 import { Tooltip } from '@/components/ui/tooltip'
+import { FieldRenderer } from '@/components/builder/field-renderer'
+import { DeepCustomizationDialog } from '@/components/builder/deep-customization-dialog'
 import { cn } from '@/lib/utils'
-
-/** One config control, driven entirely by the component's FieldDef. */
-function ConfigField({
-  field,
-  value,
-  onChange,
-  disabled,
-}: {
-  field: FieldDef
-  value: unknown
-  onChange: (v: unknown) => void
-  disabled: boolean
-}) {
-  const id = `cfg-${field.key}`
-
-  switch (field.type) {
-    case 'text':
-      return (
-        <Field label={field.label} help={field.help} htmlFor={id}>
-          {field.key === 'symbols' || (field.placeholder ?? '').length > 24 ? (
-            <Textarea
-              id={id}
-              rows={2}
-              disabled={disabled}
-              value={String(value ?? '')}
-              placeholder={field.placeholder}
-              onChange={(e) => onChange(e.target.value)}
-            />
-          ) : (
-            <Input
-              id={id}
-              disabled={disabled}
-              value={String(value ?? '')}
-              placeholder={field.placeholder}
-              onChange={(e) => onChange(e.target.value)}
-            />
-          )}
-        </Field>
-      )
-
-    case 'password':
-      return (
-        <Field label={field.label} help={field.help} htmlFor={id}>
-          <Input
-            id={id}
-            type="password"
-            disabled={disabled}
-            value={String(value ?? '')}
-            placeholder={field.placeholder ?? '••••••••'}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        </Field>
-      )
-
-    case 'select':
-      return (
-        <Field label={field.label} help={field.help} htmlFor={id}>
-          <Select
-            id={id}
-            disabled={disabled}
-            options={field.options}
-            value={String(value ?? field.value ?? '')}
-            onValueChange={onChange}
-          />
-        </Field>
-      )
-
-    case 'slider':
-      return (
-        <Field help={field.help}>
-          <SliderWithValue
-            label={field.label}
-            min={field.min}
-            max={field.max}
-            step={field.step}
-            unit={field.unit}
-            value={Number(value ?? field.value)}
-            onValueChange={onChange}
-          />
-        </Field>
-      )
-
-    case 'number':
-      return (
-        <Field
-          label={field.unit ? `${field.label} (${field.unit})` : field.label}
-          help={field.help}
-          htmlFor={id}
-        >
-          <Input
-            id={id}
-            type="number"
-            disabled={disabled}
-            min={field.min}
-            max={field.max}
-            value={Number(value ?? field.value)}
-            onChange={(e) => onChange(Number(e.target.value))}
-          />
-        </Field>
-      )
-
-    case 'switch':
-      return (
-        <div className="flex items-start justify-between gap-3 py-0.5">
-          <div className="min-w-0">
-            <p className="text-[13px] font-medium">{field.label}</p>
-            {field.help ? (
-              <p className="mt-0.5 text-xs leading-relaxed text-tertiary">{field.help}</p>
-            ) : null}
-          </div>
-          <Switch
-            disabled={disabled}
-            checked={Boolean(value ?? field.value)}
-            onCheckedChange={onChange}
-            className="mt-0.5 shrink-0"
-          />
-        </div>
-      )
-
-    case 'checklist': {
-      const selected = Array.isArray(value) ? (value as string[]) : field.value
-      return (
-        <Field label={field.label} help={field.help}>
-          <div className="flex flex-col">
-            {field.options.map((opt) => (
-              <CheckboxRow
-                key={opt}
-                label={opt}
-                checked={selected.includes(opt)}
-                onCheckedChange={(on) =>
-                  onChange(on ? [...selected, opt] : selected.filter((s) => s !== opt))
-                }
-              />
-            ))}
-          </div>
-        </Field>
-      )
-    }
-  }
-}
 
 function PortList({ label, types }: { label: string; types: string[] }) {
   if (types.length === 0) return null
@@ -299,10 +160,26 @@ function SingleNodePanel({
   comp: ComponentDef
   onUnlockRequest: (comp: ComponentDef) => void
 }) {
-  const { updateConfig, setEnabled, removeNodes, duplicateSelection } = useBuilder()
-  const { plan, unlocked } = useSession()
+  const { updateConfig, setEnabled, removeNodes, duplicateSelection, edges, nodes } = useBuilder()
+  const { plan, unlocked, onboarding } = useSession()
   const locked = !hasComponent(comp.id, { plan, unlocked })
   const layer = LAYER_MAP[comp.layer]
+  const [deepCustomizationOpen, setDeepCustomizationOpen] = useState(false)
+
+  // Compute incoming variables
+  const incomingEdges = edges.filter((e) => e.target === node.id)
+  const userLabels = (node.config?.__inputLabels as Record<string, string>) || {}
+  const availableVariables = incomingEdges.map((e) => {
+    const srcNode = nodes.find((n) => n.id === e.source)
+    const srcComp = srcNode ? COMPONENT_MAP[srcNode.componentId] : null
+    const defaultLabel = srcComp ? srcComp.name.toLowerCase().replace(/[^a-z0-9]+/g, '_') : 'input'
+    const customLabel = userLabels[e.source] || defaultLabel
+    return {
+      id: e.source,
+      label: srcComp ? srcComp.name : e.source,
+      name: customLabel,
+    }
+  })
 
   return (
     <div className="flex h-full flex-col">
@@ -360,23 +237,35 @@ function SingleNodePanel({
             <>
               <Separator />
               <p className="text-[11px] font-medium tracking-wide text-tertiary uppercase">
-                Configuration
+                Core Parameters
               </p>
               {comp.fields.map((field) => (
-                <ConfigField
+                <FieldRenderer
                   key={field.key}
                   field={field}
                   value={node.config[field.key]}
                   disabled={locked}
                   onChange={(v) => updateConfig(node.id, field.key, v)}
+                  availableVariables={availableVariables}
                 />
               ))}
             </>
           ) : (
-            <p className="text-xs text-tertiary">This node has nothing to configure.</p>
+            <p className="text-xs text-tertiary">This node has no basic parameters.</p>
           )}
 
           <Separator />
+
+          {/* Deep Customization Action */}
+          <Button
+            variant={onboarding.experience === 'beginner' ? 'outline' : 'secondary'}
+            size="sm"
+            className="w-full gap-2 border border-border"
+            onClick={() => setDeepCustomizationOpen(true)}
+          >
+            <SlidersHorizontal className="size-3.5 text-brand" />
+            Deep Customization
+          </Button>
 
           <div className="rounded-[var(--radius-md)] bg-secondary p-3">
             <p className="text-[11px] font-medium tracking-wide text-tertiary uppercase">
@@ -410,6 +299,15 @@ function SingleNodePanel({
           </Button>
         </Tooltip>
       </div>
+
+      {/* Deep Customization Dialog */}
+      {deepCustomizationOpen && (
+        <DeepCustomizationDialog
+          open={deepCustomizationOpen}
+          onOpenChange={setDeepCustomizationOpen}
+          nodeId={node.id}
+        />
+      )}
     </div>
   )
 }

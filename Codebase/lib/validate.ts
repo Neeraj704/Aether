@@ -264,6 +264,49 @@ export function validateGraph(
     }
   }
 
+  /* ---- Unresolved Prompt Variables ---- */
+  for (const node of active) {
+    const comp = COMPONENT_MAP[node.componentId]
+    if (!comp) continue
+    const allFields = [...comp.fields, ...(comp.advancedFields || [])]
+    const promptFields = allFields.filter((f) => f.type === 'prompt')
+    if (promptFields.length === 0) continue
+
+    // Compute available input variable names
+    const incomingEdges = edges.filter((e) => e.target === node.id)
+    const userLabels = (node.config?.__inputLabels as Record<string, string>) || {}
+    const availableVars = new Set<string>(['input', 'symbol'])
+
+    for (const e of incomingEdges) {
+      const srcNode = byId.get(e.source)
+      const srcComp = srcNode ? COMPONENT_MAP[srcNode.componentId] : null
+      if (srcComp) {
+        const defaultVar = srcComp.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')
+        availableVars.add(defaultVar)
+      }
+      if (userLabels[e.source]) {
+        availableVars.add(userLabels[e.source].toLowerCase().replace(/[^a-z0-9]+/g, '_'))
+      }
+    }
+
+    for (const pf of promptFields) {
+      const promptText = String(node.config?.[pf.key] ?? '')
+      const matches = promptText.matchAll(/\{\{([a-zA-Z0-9_\-]+)\}\}/g)
+      for (const match of matches) {
+        const varName = match[1].toLowerCase().replace(/[^a-z0-9]+/g, '_')
+        if (!availableVars.has(varName)) {
+          issues.push({
+            id: `prompt-var-${node.id}-${varName}`,
+            level: 'warning',
+            title: `Unresolved prompt variable {{${match[1]}}}`,
+            detail: `Node "${comp.name}" references {{${match[1]}}} in its prompt, but no connected input provides it.`,
+            nodeIds: [node.id],
+          })
+        }
+      }
+    }
+  }
+
   const order: Record<IssueLevel, number> = { error: 0, warning: 1, info: 2 }
   return issues.sort((a, b) => order[a.level] - order[b.level])
 }

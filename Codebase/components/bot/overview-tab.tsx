@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { LineChart, Globe } from 'lucide-react'
 import type { Bot } from '@/mock/data'
 import { useWorkspace } from '@/lib/workspace-store'
@@ -14,11 +15,12 @@ import { formatDate, formatPct } from '@/lib/utils'
 import { GraphThumbnail } from './graph-thumbnail'
 
 export function OverviewTab({ bot }: { bot: Bot }) {
+  const router = useRouter()
   const runs = useWorkspace((s) => s.runs).filter((r) => r.botId === bot.id)
   const recentRuns = runs.slice(0, 3)
 
   const handlePublish = () => {
-    toast.info('Coming soon', 'Marketplace publishing is not available yet.')
+    router.push(`/app/marketplace/publish/${bot.id}`)
   }
 
   return (

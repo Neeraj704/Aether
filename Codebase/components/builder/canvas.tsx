@@ -492,6 +492,7 @@ function FlowCanvas({
   return (
     <div
       ref={wrapper}
+      data-tour="canvas"
       className={cn(
         'relative h-full min-h-0 flex-1',
         tool === 'hand' && 'cursor-grab active:cursor-grabbing',

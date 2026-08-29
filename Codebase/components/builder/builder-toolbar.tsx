@@ -253,12 +253,12 @@ export function BuilderToolbar({
           Validate
         </Button>
 
-        <Button variant="outline" size="sm" disabled={!dirty} onClick={onSave}>
+        <Button data-tour="save-graph" variant="outline" size="sm" disabled={!dirty} onClick={onSave}>
           <Save data-icon="inline-start" />
           Save
         </Button>
 
-        <Button render={<Link href={`/app/bots/${bot.id}/backtest`} />} size="sm">
+        <Button data-tour="run-backtest" render={<Link href={`/app/bots/${bot.id}/backtest`} />} size="sm">
           <LineChart data-icon="inline-start" />
           Backtest
         </Button>

@@ -18,6 +18,7 @@ export interface UserProfile {
   bio: string
   publicProfile: boolean
   initials: string
+  avatarColor?: string
 }
 
 export interface UserApiKeys {
@@ -28,6 +29,12 @@ export interface UserApiKeys {
 export interface UserNotificationPrefs {
   emailNotifs: boolean
   drawdownAlerts: boolean
+}
+
+export interface OnboardingState {
+  experience: 'beginner' | 'intermediate' | 'advanced' | null
+  startChoice: 'template' | 'blank' | null
+  draftBotId: string | null
 }
 
 interface SessionState {
@@ -45,6 +52,7 @@ interface SessionState {
   profile: UserProfile
   apiKeys: UserApiKeys
   notificationPrefs: UserNotificationPrefs
+  onboarding: OnboardingState
 
   setAuthed: (v: boolean) => void
   setPlan: (p: PlanTier) => void
@@ -52,6 +60,7 @@ interface SessionState {
   spendCredits: (n: number) => boolean
   addCredits: (n: number) => void
   setOnboardingComplete: (v: boolean) => void
+  setOnboardingAnswer: (patch: Partial<OnboardingState>) => void
   setTheme: (t: ThemeMode) => void
   toggleSidebar: () => void
   unlock: (componentId: string) => void
@@ -60,6 +69,7 @@ interface SessionState {
   updateApiKeys: (patch: Partial<UserApiKeys>) => void
   updateNotificationPrefs: (patch: Partial<UserNotificationPrefs>) => void
   reset: () => void
+  logout: () => void
 }
 
 function computeInitials(name: string): string {
@@ -93,6 +103,11 @@ const INITIAL = {
     emailNotifs: true,
     drawdownAlerts: true,
   },
+  onboarding: {
+    experience: null as 'beginner' | 'intermediate' | 'advanced' | null,
+    startChoice: null as 'template' | 'blank' | null,
+    draftBotId: null as string | null,
+  },
 }
 
 export const useSession = create<SessionState>()(
@@ -111,6 +126,8 @@ export const useSession = create<SessionState>()(
       },
       addCredits: (n) => set({ credits: get().credits + n }),
       setOnboardingComplete: (onboardingComplete) => set({ onboardingComplete }),
+      setOnboardingAnswer: (patch) =>
+        set({ onboarding: { ...get().onboarding, ...patch } }),
       setTheme: (theme) => set({ theme }),
       toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
       unlock: (componentId) =>
@@ -143,6 +160,7 @@ export const useSession = create<SessionState>()(
           notificationPrefs: { ...get().notificationPrefs, ...patch },
         }),
       reset: () => set(INITIAL),
+      logout: () => set({ ...INITIAL, authed: false }),
     }),
     {
       name: 'aether.session',

@@ -271,6 +271,7 @@ export function AppTopbar() {
 
         <Tooltip content={`${credits} simulation credits left`}>
           <Link
+            data-tour="credits-badge"
             href="/app/billing/credits"
             className={cn(
               'hidden h-8 items-center gap-1.5 rounded-[var(--radius-pill)] border border-border px-3 sm:flex',

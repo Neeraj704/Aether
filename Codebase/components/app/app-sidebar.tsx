@@ -13,6 +13,10 @@ import {
   Settings,
   Store,
   Wrench,
+  Bookmark,
+  GitCompareArrows,
+  BookMarked,
+  BookOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSession } from '@/lib/store'
@@ -23,14 +27,26 @@ const NAV = [
   { href: '/app', label: 'Dashboard', icon: LayoutDashboard, exact: true },
   { href: '/app/bots', label: 'My Bots', icon: Bot },
   { href: '/app/builder', label: 'Builder', icon: Wrench },
-  { href: '/app/live', label: 'Live', icon: Radio },
+  { href: '/app/presets', label: 'Presets', icon: Bookmark },
   { href: '/app/marketplace', label: 'Marketplace', icon: Store },
+  { href: '/app/compare', label: 'Compare', icon: GitCompareArrows },
+  { href: '/app/library', label: 'Library', icon: BookMarked },
+  { href: '/app/live', label: 'Live', icon: Radio },
 ]
 
 const FOOTER_NAV = [
   { href: '/app/billing', label: 'Billing', icon: CreditCard },
-  { href: '/app/settings', label: 'Settings', icon: Settings },
-  { href: '/docs', label: 'Docs', icon: LifeBuoy },
+  { href: '/app/account/profile', label: 'Settings', icon: Settings },
+  { href: '/app/help', label: 'Help', icon: LifeBuoy },
+  { href: '/docs', label: 'Docs', icon: BookOpen },
+]
+
+const MOBILE_NAV = [
+  { href: '/app', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+  { href: '/app/bots', label: 'My Bots', icon: Bot },
+  { href: '/app/builder', label: 'Builder', icon: Wrench },
+  { href: '/app/live', label: 'Live', icon: Radio },
+  { href: '/app/marketplace', label: 'Marketplace', icon: Store },
 ]
 
 function NavItem({
@@ -141,11 +157,10 @@ export function AppSidebar() {
 /** Bottom tab bar — the mobile counterpart to the sidebar. */
 export function MobileTabBar() {
   const pathname = usePathname()
-  const items = NAV.slice(0, 5)
 
   return (
     <nav className="glass-chrome fixed inset-x-0 bottom-0 z-40 flex items-stretch border-t lg:hidden">
-      {items.map(({ href, label, icon: Icon, exact }) => {
+      {MOBILE_NAV.map(({ href, label, icon: Icon, exact }) => {
         const active = exact ? pathname === href : pathname.startsWith(href)
         return (
           <Link

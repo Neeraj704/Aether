@@ -53,6 +53,8 @@ export interface BotVersion {
   createdAt: string
   note: string
   nodeCount: number
+  nodes?: BotNode[]
+  edges?: BotEdge[]
 }
 
 export interface Bot {
@@ -1985,3 +1987,7 @@ export const NOTIFICATION_EVENTS = [
   { id: 'review_received', label: 'Review received', detail: 'New ratings and comments on your presets.' },
   { id: 'payment_receipt', label: 'Payment receipt', detail: 'Subscription renewals, top-ups and unlocks.' },
 ]
+
+export type ActivityItem = Activity
+
+

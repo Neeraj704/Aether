@@ -1,22 +1,22 @@
 'use client'
 
-import { Check, Sparkles } from 'lucide-react'
+import { useState } from 'react'
+import { Check, Sparkles, Zap, ArrowRight, ShieldCheck } from 'lucide-react'
 import { useSession, toast } from '@/lib/store'
 import { TierBadge } from '@/components/ui/badge'
-import { PLANS, CREDIT_BUNDLES } from '@/mock/data'
+import { PillButton, PillLink } from '@/components/ui/pill-button'
+import { PLANS } from '@/mock/data'
 import type { PlanTier } from '@/mock/layers'
+import { BillingNav } from '@/components/billing/billing-nav'
+import { PlanComparisonMatrix } from '@/components/billing/plan-comparison'
 import { cn, formatINR } from '@/lib/utils'
 
-export default function BillingPage() {
+export default function BillingPlansPage() {
   const plan = useSession((s) => s.plan)
   const setPlan = useSession((s) => s.setPlan)
   const credits = useSession((s) => s.credits)
-  const addCredits = useSession((s) => s.addCredits)
 
-  const handleBuyCredits = (amount: number, price: number) => {
-    addCredits(amount)
-    toast.success('Credits Added!', `Added ${amount} simulation credits to your account for ${formatINR(price)}.`)
-  }
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly')
 
   const handlePlanChange = (targetPlan: PlanTier) => {
     setPlan(targetPlan)
@@ -28,11 +28,11 @@ export default function BillingPage() {
   return (
     <div className="flex flex-col gap-8 p-6 lg:p-8 max-w-[1400px] mx-auto w-full">
       {/* Top Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Billing & Subscriptions</h1>
-          <p className="text-xs text-muted-foreground">
-            Manage your subscription tier, simulation credits, and plan entitlements
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Billing & Subscriptions</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            Manage your subscription tier, simulation quotas, and plan entitlements
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -44,112 +44,106 @@ export default function BillingPage() {
         </div>
       </div>
 
-      {/* Credits Balance & Top-Up Bundles Card */}
-      <div className="rounded-2xl border border-gold/30 bg-gradient-to-r from-gold/10 via-card to-background p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-        <div className="flex items-start gap-4">
-          <div className="p-3 rounded-xl bg-gold/15 text-gold shrink-0">
-            <Sparkles className="size-6" />
+      {/* Subpage Nav */}
+      <BillingNav />
+
+      {/* Subscription Plans Grid */}
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold">Workspace Subscription Tiers</h2>
+            <p className="text-xs text-muted-foreground">Upgrade for higher node limits, unlimited backtests, and multi-agent debates.</p>
           </div>
-          <div className="flex flex-col gap-1">
-            <h2 className="text-lg font-bold">Simulation Credits Balance</h2>
-            <p className="text-xs text-muted-foreground max-w-md">
-              Credits are consumed when running high-frequency backtests, Monte Carlo simulations, and unlocking modular layer components.
-            </p>
+
+          <div className="flex items-center gap-2 rounded-xl border border-border bg-card p-1">
+            <button
+              onClick={() => setBillingCycle('monthly')}
+              className={cn(
+                'px-3 py-1 text-xs font-semibold rounded-lg transition-all',
+                billingCycle === 'monthly' ? 'bg-brand text-brand-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Monthly Billing
+            </button>
+            <button
+              onClick={() => setBillingCycle('annual')}
+              className={cn(
+                'px-3 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1',
+                billingCycle === 'annual' ? 'bg-brand text-brand-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Annual Billing <span className="text-[10px] text-profit font-bold">(-20%)</span>
+            </button>
           </div>
         </div>
-
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
-          <div className="flex flex-col">
-            <span className="text-3xl font-extrabold font-mono text-gold tabular-nums">{credits}</span>
-            <span className="text-xs text-muted-foreground">Credits Available</span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {CREDIT_BUNDLES.map((bundle) => (
-              <button
-                key={bundle.credits}
-                onClick={() => handleBuyCredits(bundle.credits, bundle.price)}
-                className={cn(
-                  'h-9 px-3.5 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5',
-                  bundle.popular
-                    ? 'bg-gold text-black hover:opacity-90 font-bold shadow-sm'
-                    : 'border border-gold/40 bg-gold/15 text-gold hover:bg-gold/25',
-                )}
-                title={bundle.blurb}
-              >
-                +{bundle.credits} Credits ({formatINR(bundle.price)})
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Subscription Plans Matrix */}
-      <div className="flex flex-col gap-4">
-        <h2 className="text-xl font-bold tracking-tight">Select Subscription Plan</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {subscriptionPlans.map((p) => {
             const isCurrent = plan === p.id
-            const tierId = p.id as PlanTier
+            const price = billingCycle === 'annual' ? Math.round(p.annual / 12) : p.monthly
 
             return (
               <div
                 key={p.id}
                 className={cn(
-                  'rounded-xl border p-6 flex flex-col justify-between gap-6 transition-all',
-                  isCurrent
-                    ? 'border-brand bg-brand/5 ring-1 ring-brand'
-                    : p.highlight
-                      ? 'border-gold/40 bg-gold/[0.03]'
-                      : 'border-border bg-card',
+                  'flex flex-col justify-between rounded-2xl border p-6 transition-all relative',
+                  p.id === 'pro'
+                    ? 'border-brand/60 bg-gradient-to-b from-brand/10 via-card to-card shadow-xl shadow-brand/10'
+                    : 'border-border bg-card',
+                  isCurrent && 'ring-2 ring-brand',
                 )}
               >
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-bold">{p.name} Tier</h3>
-                    {isCurrent && (
-                      <span className="text-xs font-bold text-brand bg-brand/15 px-2.5 py-0.5 rounded-full">
-                        Current Plan
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-3xl font-extrabold tracking-tight">
-                    {p.monthly === 0 ? 'Free' : formatINR(p.monthly)}{' '}
-                    <span className="text-xs font-normal text-muted-foreground">/ month</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground min-h-[2rem] leading-relaxed">
-                    {p.blurb}
-                  </p>
+                {p.id === 'pro' && (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-brand px-3 py-0.5 text-[11px] font-bold text-brand-foreground uppercase tracking-wider">
+                    Most Popular
+                  </span>
+                )}
 
-                  <ul className="flex flex-col gap-2 pt-3 text-xs text-muted-foreground border-t border-border">
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-bold">{p.name}</h3>
+                    <TierBadge tier={p.id as PlanTier} />
+                  </div>
+                  <p className="text-xs text-muted-foreground min-h-8">{p.blurb}</p>
+
+                  <div className="flex items-baseline gap-1 pt-2">
+                    <span className="text-3xl font-extrabold">{price === 0 ? 'Free' : formatINR(price)}</span>
+                    {price > 0 && <span className="text-xs text-muted-foreground">/ month</span>}
+                  </div>
+
+                  <div className="flex flex-col gap-2.5 pt-4 border-t border-border">
                     {p.features.map((f) => (
-                      <li key={f} className="flex items-start gap-2">
-                        <Check className="size-4 text-profit shrink-0 mt-0.5" />
-                        <span>{f}</span>
-                      </li>
+                      <div key={f} className="flex items-center gap-2 text-xs">
+                        <Check className="size-3.5 text-profit shrink-0" />
+                        <span className="text-foreground/90">{f}</span>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 </div>
 
-                <button
-                  disabled={isCurrent}
-                  onClick={() => handlePlanChange(tierId)}
-                  className={cn(
-                    'h-10 rounded-lg text-xs font-bold transition-all cursor-pointer',
-                    isCurrent
-                      ? 'border border-border text-muted-foreground bg-secondary/50 cursor-default'
-                      : p.highlight
-                        ? 'bg-gold text-black hover:opacity-90'
-                        : 'bg-brand text-brand-foreground hover:opacity-90',
+                <div className="pt-6 mt-4">
+                  {isCurrent ? (
+                    <div className="w-full py-2.5 text-center text-xs font-bold text-profit border border-profit/30 bg-profit/10 rounded-xl">
+                      ✓ Current Active Plan
+                    </div>
+                  ) : (
+                    <PillButton
+                      onClick={() => handlePlanChange(p.id as PlanTier)}
+                      variant={p.id === 'pro' ? 'primary' : 'secondary'}
+                      className="w-full justify-center"
+                    >
+                      {p.id === 'free' ? 'Downgrade to Free' : `Upgrade to ${p.name}`}
+                    </PillButton>
                   )}
-                >
-                  {isCurrent ? 'Active Plan' : `Switch to ${p.name}`}
-                </button>
+                </div>
               </div>
             )
           })}
         </div>
       </div>
+
+      {/* Plan Comparison Breakdown */}
+      <PlanComparisonMatrix />
     </div>
   )
 }

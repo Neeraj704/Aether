@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { motion } from 'motion/react'
 import { cn } from '@/lib/utils'
 
-type Variant = 'primary' | 'secondary' | 'ghost'
+type Variant = 'primary' | 'secondary' | 'ghost' | 'destructive'
 type Size = 'sm' | 'md' | 'lg'
 
 const VARIANTS: Record<Variant, string> = {
@@ -12,6 +12,7 @@ const VARIANTS: Record<Variant, string> = {
   secondary:
     'bg-secondary text-secondary-foreground hover:bg-muted border border-border backdrop-blur-xl',
   ghost: 'text-brand hover:bg-accent',
+  destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
 }
 
 const SIZES: Record<Size, string> = {

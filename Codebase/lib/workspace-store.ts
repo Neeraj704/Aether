@@ -9,6 +9,8 @@ import {
   BOTS,
   MY_PRESETS,
   NOTIFICATIONS,
+  PUBLISHED_PRESETS,
+  CREATOR_EARNINGS,
   type Bot,
   type BotEdge,
   type BotNode,
@@ -19,6 +21,7 @@ import {
   type MyPreset,
   type Notification,
   type Preset,
+  type PublishedPreset,
 } from '@/mock/data'
 import { slugId } from '@/lib/utils'
 
@@ -73,13 +76,18 @@ export function makeNode(componentId: string, x: number, y: number): BotNode {
  * Saved mini-presets carry their own graph so they can be re-instantiated on
  * the canvas. The seeded fixtures describe blocks only, hence the optionals.
  */
-export type StoredPreset = MyPreset & { nodes?: BotNode[]; edges?: BotEdge[] }
+export type StoredPreset = MyPreset & {
+  nodes?: BotNode[]
+  edges?: BotEdge[]
+}
 
 interface WorkspaceState {
   hydrated: boolean
   bots: Bot[]
   runs: BacktestRun[]
   myPresets: StoredPreset[]
+  publishedPresets: PublishedPreset[]
+  creatorEarnings: typeof CREATOR_EARNINGS
   notifications: Notification[]
   /** Preset ids the user has forked, so the marketplace can show "Forked". */
   forkedPresets: string[]
@@ -106,9 +114,15 @@ interface WorkspaceState {
 
   /* Presets */
   forkPreset: (preset: Preset) => Bot
+  createBotFromPreset: (presetId: string) => Bot
+  duplicatePreset: (id: string) => void
+  updatePresetVisibility: (id: string, visibility: 'private' | 'unlisted' | 'public') => void
+  renamePreset: (id: string, name: string) => void
   toggleLikePreset: (id: string) => void
   savePreset: (input: { name: string; description: string; nodes: BotNode[]; edges: BotEdge[] }) => void
   deletePreset: (id: string) => void
+  publishPreset: (preset: PublishedPreset) => void
+  requestCreatorPayout: () => void
 
   /* Notifications */
   markRead: (id: string) => void
@@ -122,7 +136,9 @@ interface WorkspaceState {
 const seed = () => ({
   bots: BOTS,
   runs: BACKTEST_RUNS,
-  myPresets: MY_PRESETS,
+  myPresets: MY_PRESETS as StoredPreset[],
+  publishedPresets: PUBLISHED_PRESETS,
+  creatorEarnings: CREATOR_EARNINGS,
   notifications: NOTIFICATIONS,
   forkedPresets: [] as string[],
   likedPresets: [] as string[],
@@ -240,6 +256,8 @@ export const useWorkspace = create<WorkspaceState>()(
                       createdAt: nowISO(),
                       note,
                       nodeCount: b.nodes.length,
+                      nodes: JSON.parse(JSON.stringify(b.nodes)),
+                      edges: JSON.parse(JSON.stringify(b.edges)),
                     },
                     ...b.versions,
                   ],
@@ -290,6 +308,44 @@ export const useWorkspace = create<WorkspaceState>()(
         return bot
       },
 
+      createBotFromPreset: (presetId) => {
+        const preset = get().myPresets.find((p) => p.id === presetId)
+        const nodes = preset && preset.nodes ? JSON.parse(JSON.stringify(preset.nodes)) : []
+        const edges = preset && preset.edges ? JSON.parse(JSON.stringify(preset.edges)) : []
+        const bot = get().createBot({
+          name: preset ? `${preset.name} (Instance)` : 'New Strategy Bot',
+          description: preset?.description || 'Created from saved preset.',
+          nodes,
+          edges,
+          tags: ['preset', 'custom'],
+        })
+        return bot
+      },
+
+      duplicatePreset: (id) => {
+        const preset = get().myPresets.find((p) => p.id === id)
+        if (!preset) return
+        const clone: StoredPreset = {
+          ...preset,
+          id: slugId('mp'),
+          name: `Copy of ${preset.name}`,
+          createdAt: nowISO(),
+        }
+        set({ myPresets: [clone, ...get().myPresets] })
+      },
+
+      updatePresetVisibility: (id, visibility) => {
+        set({
+          myPresets: get().myPresets.map((p) => (p.id === id ? { ...p, visibility } : p)),
+        })
+      },
+
+      renamePreset: (id, name) => {
+        set({
+          myPresets: get().myPresets.map((p) => (p.id === id ? { ...p, name } : p)),
+        })
+      },
+
       toggleLikePreset: (id) => {
         const liked = get().likedPresets
         set({
@@ -322,6 +378,24 @@ export const useWorkspace = create<WorkspaceState>()(
       },
 
       deletePreset: (id) => set({ myPresets: get().myPresets.filter((p) => p.id !== id) }),
+
+      publishPreset: (preset) =>
+        set({
+          publishedPresets: [preset, ...get().publishedPresets],
+        }),
+
+      requestCreatorPayout: () =>
+        set({
+          creatorEarnings: {
+            ...get().creatorEarnings,
+            pendingPayout: 0,
+            lastPayout: {
+              amount: get().creatorEarnings.pendingPayout,
+              date: nowISO(),
+              status: 'paid',
+            },
+          },
+        }),
 
       /* ---------------- Notifications ---------------- */
 

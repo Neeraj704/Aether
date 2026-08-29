@@ -5,17 +5,35 @@ import { useRouter } from 'next/navigation'
 import {
   Plus,
   TrendingUp,
-  Activity,
+  Activity as ActivityIcon,
   Zap,
   Sparkles,
   ArrowUpRight,
   Radio,
+  LineChart,
+  Pencil,
+  Lock,
+  Globe,
+  CreditCard,
 } from 'lucide-react'
 import { useWorkspace } from '@/lib/workspace-store'
 import { useSession, toast } from '@/lib/store'
+import { ACTIVITY, type ActivityItem } from '@/mock/data'
+import { MONTHLY_BACKTEST_LIMIT } from '@/lib/entitlements'
 import { StatusBadge, Badge } from '@/components/ui/badge'
 import { PillButton, PillLink } from '@/components/ui/pill-button'
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
+import { UpgradeNudge } from '@/components/ui/empty-state'
+import { relativeTime, cn } from '@/lib/utils'
+
+const ACTIVITY_ICONS: Record<ActivityItem['kind'], typeof LineChart> = {
+  backtest: LineChart,
+  live: Radio,
+  edit: Pencil,
+  unlock: Lock,
+  publish: Globe,
+  payment: CreditCard,
+}
 
 export default function WorkspaceDashboard() {
   const router = useRouter()
@@ -25,6 +43,7 @@ export default function WorkspaceDashboard() {
   const setBotStatus = useWorkspace((s) => s.setBotStatus)
   const credits = useSession((s) => s.credits)
   const profile = useSession((s) => s.profile)
+  const plan = useSession((s) => s.plan)
 
   const activeBots = bots.filter((b) => b.status === 'live').length
   const totalBots = bots.length
@@ -35,6 +54,12 @@ export default function WorkspaceDashboard() {
       ? (runs.reduce((sum, r) => sum + r.metrics.sharpe, 0) / runs.length).toFixed(2)
       : '—'
 
+  // Monthly backtest usage calculation for free plan upgrade nudge
+  const currentMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  const usedThisMonth = runs.filter((r) => new Date(r.createdAt) >= currentMonthStart).length || runs.length
+  const monthlyLimit = MONTHLY_BACKTEST_LIMIT[plan]
+  const showUpgradeNudge = plan === 'free' && usedThisMonth >= monthlyLimit * 0.8
+
   const handleCreateBot = () => {
     const bot = createBot({ name: 'New Strategy Bot' })
     toast.success('Bot created', 'Opening strategy builder canvas...')
@@ -43,6 +68,13 @@ export default function WorkspaceDashboard() {
 
   return (
     <div className="flex flex-col gap-8 p-6 lg:p-8 max-w-[1400px] mx-auto w-full">
+      {/* Upgrade Banner (Conditional) */}
+      {showUpgradeNudge && (
+        <UpgradeNudge
+          message={`You have used ${usedThisMonth} of your ${monthlyLimit} free monthly backtests. Upgrade to Starter or Pro for unlimited simulations and multi-agent debate nodes.`}
+        />
+      )}
+
       {/* Welcome Banner */}
       <div className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-r from-brand/10 via-secondary/40 to-background p-6 sm:p-8">
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
@@ -81,7 +113,7 @@ export default function WorkspaceDashboard() {
 
         <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-1">
           <span className="text-xs text-muted-foreground font-medium flex items-center justify-between">
-            Simulations Executed <Activity className="size-3.5 text-brand" />
+            Simulations Executed <ActivityIcon className="size-3.5 text-brand" />
           </span>
           <div className="text-2xl font-bold tracking-tight">
             {totalRuns} <span className="text-xs text-muted-foreground font-normal">runs</span>
@@ -190,6 +222,52 @@ export default function WorkspaceDashboard() {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Activity Feed Section */}
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">Recent Activity Feed</h2>
+            <p className="text-xs text-muted-foreground">Historical actions across your strategies, simulations, and account</p>
+          </div>
+          <Link href="/app/notifications" className="text-xs text-brand hover:underline font-medium">
+            Notifications Log &rarr;
+          </Link>
+        </div>
+
+        <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
+          {ACTIVITY.map((act) => {
+            const Icon = ACTIVITY_ICONS[act.kind] || ActivityIcon
+            return (
+              <Link
+                key={act.id}
+                href={act.href}
+                className="flex items-start sm:items-center justify-between gap-4 p-4 hover:bg-secondary/40 transition-colors group"
+              >
+                <div className="flex items-start sm:items-center gap-3 min-w-0">
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-brand group-hover:bg-brand group-hover:text-brand-foreground transition-colors">
+                    <Icon className="size-4" />
+                  </div>
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <span className="text-xs font-bold text-foreground group-hover:text-brand transition-colors truncate">
+                      {act.title}
+                    </span>
+                    <span className="text-xs text-muted-foreground line-clamp-1">
+                      {act.detail}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[11px] text-tertiary">
+                    {relativeTime(act.createdAt)}
+                  </span>
+                  <ArrowUpRight className="size-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                </div>
+              </Link>
+            )
+          })}
         </div>
       </div>
 

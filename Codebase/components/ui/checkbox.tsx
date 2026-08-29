@@ -40,22 +40,29 @@ export function CheckboxRow({
   checked,
   onCheckedChange,
   label,
+  description,
   className,
 }: {
   checked: boolean
   onCheckedChange: (v: boolean) => void
   label: string
+  description?: string
   className?: string
 }) {
   return (
     <label
       className={cn(
-        'flex cursor-pointer items-center gap-2.5 rounded-[var(--radius-sm)] px-1 py-1 text-[13px] hover:bg-secondary',
+        'flex cursor-pointer items-start gap-2.5 rounded-[var(--radius-sm)] px-1 py-1 text-[13px] hover:bg-secondary',
         className,
       )}
     >
-      <Checkbox checked={checked} onCheckedChange={onCheckedChange} />
-      <span className="select-none">{label}</span>
+      <div className="pt-0.5">
+        <Checkbox checked={checked} onCheckedChange={onCheckedChange} />
+      </div>
+      <div className="flex flex-col min-w-0">
+        <span className="select-none font-medium">{label}</span>
+        {description && <span className="text-[11px] text-muted-foreground">{description}</span>}
+      </div>
     </label>
   )
 }

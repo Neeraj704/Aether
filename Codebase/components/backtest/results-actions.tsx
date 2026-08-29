@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Download, Bookmark, GitCompare, Play } from 'lucide-react'
 import type { Bot, BacktestRun } from '@/mock/data'
 import { useWorkspace } from '@/lib/workspace-store'
@@ -19,6 +20,7 @@ import {
 import { Field, Input } from '@/components/ui/input'
 
 export function ResultsActions({ bot, run }: { bot: Bot; run: BacktestRun }) {
+  const router = useRouter()
   const savePreset = useWorkspace((s) => s.savePreset)
   const setBotStatus = useWorkspace((s) => s.setBotStatus)
 
@@ -26,11 +28,19 @@ export function ResultsActions({ bot, run }: { bot: Bot; run: BacktestRun }) {
   const [presetName, setPresetName] = useState(`${bot.name} — from this run`)
 
   const handleExport = () => {
-    toast.info('Coming soon', "Report export isn't available yet.")
+    toast.info('Exporting Report', 'Generating summary download...')
+    const dataStr = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify({ bot: bot.name, run }, null, 2))}`
+    const downloadAnchor = document.createElement('a')
+    downloadAnchor.setAttribute('href', dataStr)
+    downloadAnchor.setAttribute('download', `report-${run.id}.json`)
+    document.body.appendChild(downloadAnchor)
+    downloadAnchor.click()
+    downloadAnchor.remove()
+    toast.success('Report Exported', `Saved report-${run.id}.json`)
   }
 
   const handleCompare = () => {
-    toast.info('Coming soon', "Run comparison isn't available yet.")
+    router.push(`/app/compare?run=${run.id}`)
   }
 
   const handleSavePreset = () => {

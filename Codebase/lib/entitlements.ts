@@ -11,6 +11,9 @@ export const LIVE_LIMIT: Record<PlanTier, number> = { free: 0, starter: 1, pro: 
 /** Monthly simulation credit grant per plan. */
 export const CREDIT_GRANT: Record<PlanTier, number> = { free: 20, starter: 120, pro: 400 }
 
+/** Monthly backtest simulation runs allowed per plan. */
+export const MONTHLY_BACKTEST_LIMIT: Record<PlanTier, number> = { free: 10, starter: 150, pro: Infinity }
+
 export interface Access {
   plan: PlanTier
   unlocked: string[]

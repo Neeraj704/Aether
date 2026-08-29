@@ -114,7 +114,7 @@ export function LibraryPanel({
   const savedBlocks = myPresets.filter((p) => p.nodes && p.nodes.length > 0)
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-border bg-background">
+    <aside data-tour="library-panel" className="flex h-full w-64 shrink-0 flex-col border-r border-border bg-background">
       <div className="border-b border-border p-3">
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-tertiary" />

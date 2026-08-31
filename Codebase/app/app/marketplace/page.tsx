@@ -9,8 +9,8 @@ import {
   GitFork,
   Star,
 } from 'lucide-react'
-import { MARKETPLACE_PRESETS, type Preset } from '@/mock/data'
-import { useWorkspace } from '@/lib/workspace-store'
+import { type Preset } from '@/mock/data'
+import { useWorkspace, useMarketplacePresets } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { PillButton } from '@/components/ui/pill-button'
@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 
 export default function MarketplacePage() {
   const router = useRouter()
+  const marketplacePresets = useMarketplacePresets()
   const forkPreset = useWorkspace((s) => s.forkPreset)
   const forkedPresets = useWorkspace((s) => s.forkedPresets)
   const likedPresets = useWorkspace((s) => s.likedPresets)
@@ -28,7 +29,7 @@ export default function MarketplacePage() {
 
   const categories = ['All', 'Starter', 'Debate', 'Options', 'Momentum']
 
-  const filteredPresets = MARKETPLACE_PRESETS.filter((preset) => {
+  const filteredPresets = marketplacePresets.filter((preset) => {
     const matchesSearch =
       preset.name.toLowerCase().includes(search.toLowerCase()) ||
       preset.tagline.toLowerCase().includes(search.toLowerCase()) ||

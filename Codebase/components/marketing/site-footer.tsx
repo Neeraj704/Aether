@@ -7,8 +7,7 @@ const COLUMNS = [
     links: [
       { href: '/how-it-works', label: 'How it works' },
       { href: '/pricing', label: 'Pricing' },
-      // TODO(phase5): point at public /marketplace once built
-      { href: '/app/marketplace', label: 'Marketplace' },
+      { href: '/marketplace', label: 'Marketplace' },
       { href: '/app/library', label: 'Component library' },
       { href: '/app/compare', label: 'Compare bots' },
     ],

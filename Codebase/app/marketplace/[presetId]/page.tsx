@@ -21,15 +21,18 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import { MARKETPLACE_PRESETS, BACKTEST_RUNS, type Preset } from '@/mock/data'
+import { BACKTEST_RUNS, type Preset } from '@/mock/data'
 import { LAYER_MAP, COMPONENT_MAP } from '@/mock/layers'
+import { useMarketplacePresets } from '@/lib/workspace-store'
+import { Logo } from '@/components/brand/logo'
 import { TierBadge, Badge } from '@/components/ui/badge'
 import { PillLink } from '@/components/ui/pill-button'
 import { formatINR } from '@/lib/utils'
 
 export default function PublicPresetDetailPage() {
   const { presetId } = useParams<{ presetId: string }>()
-  const preset = MARKETPLACE_PRESETS.find((p) => p.id === presetId)
+  const marketplacePresets = useMarketplacePresets()
+  const preset = marketplacePresets.find((p) => p.id === presetId)
 
   if (!preset) {
     notFound()
@@ -41,12 +44,7 @@ export default function PublicPresetDetailPage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       {/* Navbar */}
       <header className="sticky top-0 z-40 border-b border-border/80 bg-background/80 backdrop-blur-xl px-6 py-3.5 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2">
-          <div className="flex size-7 items-center justify-center rounded-lg bg-brand text-brand-foreground font-bold text-sm">
-            Æ
-          </div>
-          <span className="font-bold tracking-tight text-base">Aether</span>
-        </Link>
+        <Logo />
 
         <div className="flex items-center gap-3">
           <Link href="/pricing" className="text-xs font-medium text-muted-foreground hover:text-foreground">

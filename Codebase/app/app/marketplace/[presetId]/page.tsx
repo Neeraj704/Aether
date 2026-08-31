@@ -24,9 +24,9 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import { MARKETPLACE_PRESETS, BACKTEST_RUNS, type Preset } from '@/mock/data'
+import { BACKTEST_RUNS, type Preset } from '@/mock/data'
 import { LAYER_MAP } from '@/mock/layers'
-import { useWorkspace } from '@/lib/workspace-store'
+import { useWorkspace, useMarketplacePresets } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
 import { TierBadge, Badge } from '@/components/ui/badge'
 import { PillButton } from '@/components/ui/pill-button'
@@ -45,12 +45,13 @@ import { formatINR } from '@/lib/utils'
 export default function AppMarketplaceDetailPage() {
   const { presetId } = useParams<{ presetId: string }>()
   const router = useRouter()
+  const marketplacePresets = useMarketplacePresets()
   const forkPreset = useWorkspace((s) => s.forkPreset)
   const forkedPresets = useWorkspace((s) => s.forkedPresets)
   const likedPresets = useWorkspace((s) => s.likedPresets)
   const toggleLikePreset = useWorkspace((s) => s.toggleLikePreset)
 
-  const preset = MARKETPLACE_PRESETS.find((p) => p.id === presetId)
+  const preset = marketplacePresets.find((p) => p.id === presetId)
   if (!preset) {
     notFound()
   }

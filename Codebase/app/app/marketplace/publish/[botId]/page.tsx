@@ -16,7 +16,8 @@ import {
 } from 'lucide-react'
 import { useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { useSession, toast } from '@/lib/store'
-import type { PublishedPreset } from '@/mock/data'
+import { CURRENT_USER, type Preset, type PublishedPreset } from '@/mock/data'
+import { COMPONENT_MAP, type LayerId } from '@/mock/layers'
 import { cloneGraph } from '@/lib/graph-utils'
 import { PillButton, PillLink } from '@/components/ui/pill-button'
 import { Input, Textarea, Field } from '@/components/ui/input'
@@ -89,19 +90,62 @@ export default function PublishWizardPage() {
   const selectedRun = runs.find((r) => r.id === selectedRunId) || runs[0]
 
   const handlePublish = () => {
+    const presetId = slugId('preset')
+    const finalPrice = pricingType === 'paid' ? parseInt(price) || 0 : 0
+
     const publishedItem: PublishedPreset = {
-      id: slugId('preset'),
+      id: presetId,
       name: name.trim() || bot.name,
       clones: 0,
       revenue: 0,
       rating: 5.0,
       reviews: 0,
       publishedAt: new Date().toISOString(),
-      price: pricingType === 'paid' ? parseInt(price) || 0 : 0,
+      price: finalPrice,
       graph: cloneGraph(bot.graph),
     }
 
-    publishPreset(publishedItem)
+    const uniqueLayers = Array.from(
+      new Set(
+        bot.graph.nodes
+          .map((n) => COMPONENT_MAP[n.componentId]?.layer)
+          .filter((l): l is LayerId => Boolean(l)),
+      ),
+    )
+
+    const marketplaceItem: Preset = {
+      id: presetId,
+      name: name.trim() || bot.name,
+      tagline: tagline.trim() || bot.description.slice(0, 80) || 'Quantitative trading strategy',
+      description: description.trim() || bot.description || 'Systematic strategy for automated execution.',
+      authorNotes: 'Published from Aether Strategy Studio.',
+      author: {
+        name: CURRENT_USER.name,
+        initials: CURRENT_USER.initials,
+        handle: `@${CURRENT_USER.name.toLowerCase().replace(/\s+/g, '')}`,
+      },
+      price: finalPrice,
+      forks: 0,
+      rating: 5.0,
+      reviewCount: 0,
+      layers: uniqueLayers,
+      nodeCount: bot.graph.nodes.length,
+      tier: plan === 'pro' ? 'pro' : 'free',
+      headline: {
+        label: 'Verified Return',
+        value: `+${selectedRun?.metrics.totalReturn ?? 0}%`,
+        positive: (selectedRun?.metrics.totalReturn ?? 0) >= 0,
+      },
+      createdAt: new Date().toISOString(),
+      category: category || 'Momentum',
+      tags: tagsInput.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean),
+      graph: cloneGraph(bot.graph),
+      reviews: [],
+      sampleRunId: selectedRun.id,
+      trending: true,
+    }
+
+    publishPreset(publishedItem, marketplaceItem)
     toast.success('Strategy Published!', `"${publishedItem.name}" is now live on the community marketplace.`)
     router.push('/app/creator/dashboard')
   }

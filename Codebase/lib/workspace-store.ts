@@ -10,6 +10,7 @@ import {
   MY_PRESETS,
   NOTIFICATIONS,
   PUBLISHED_PRESETS,
+  MARKETPLACE_PRESETS,
   CREATOR_EARNINGS,
   type Bot,
   type BotEdge,
@@ -163,6 +164,7 @@ interface WorkspaceState {
   runs: BacktestRun[]
   myPresets: MyPreset[]
   publishedPresets: PublishedPreset[]
+  marketplacePresets: Preset[]
   creatorEarnings: typeof CREATOR_EARNINGS
   notifications: Notification[]
   /** Preset ids the user has forked, so the marketplace can show "Forked". */
@@ -192,7 +194,8 @@ interface WorkspaceState {
   toggleLikePreset: (id: string) => void
   savePreset: (input: { name: string; description: string; graph: BotGraph }) => void
   deletePreset: (id: string) => void
-  publishPreset: (preset: PublishedPreset) => void
+  publishPreset: (preset: PublishedPreset, marketplacePreset?: Preset) => void
+  deletePublishedPreset: (id: string) => void
   requestCreatorPayout: () => void
 
   /* Notifications */
@@ -209,6 +212,7 @@ const seed = () => ({
   runs: BACKTEST_RUNS,
   myPresets: MY_PRESETS,
   publishedPresets: PUBLISHED_PRESETS,
+  marketplacePresets: [] as Preset[],
   creatorEarnings: CREATOR_EARNINGS,
   notifications: NOTIFICATIONS,
   forkedPresets: [] as string[],
@@ -447,9 +451,18 @@ export const useWorkspace = create<WorkspaceState>()(
 
       deletePreset: (id) => set({ myPresets: get().myPresets.filter((p) => p.id !== id) }),
 
-      publishPreset: (preset) =>
+      publishPreset: (preset, marketplacePreset) =>
         set({
           publishedPresets: [preset, ...get().publishedPresets],
+          marketplacePresets: marketplacePreset
+            ? [marketplacePreset, ...(get().marketplacePresets || []).filter((p) => p.id !== marketplacePreset.id)]
+            : get().marketplacePresets || [],
+        }),
+
+      deletePublishedPreset: (id) =>
+        set({
+          publishedPresets: get().publishedPresets.filter((p) => p.id !== id),
+          marketplacePresets: (get().marketplacePresets || []).filter((p) => p.id !== id),
         }),
 
       requestCreatorPayout: () =>
@@ -490,7 +503,15 @@ export const useWorkspace = create<WorkspaceState>()(
     }),
     {
       name: 'aether.workspace',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() =>
+        typeof window !== 'undefined'
+          ? localStorage
+          : ({
+              getItem: () => null,
+              setItem: () => {},
+              removeItem: () => {},
+            } as any),
+      ),
       version: 2,
       partialize: ({ hydrated, ...rest }) => rest,
       migrate: (persistedState: any) => {
@@ -500,6 +521,7 @@ export const useWorkspace = create<WorkspaceState>()(
           bots: (persistedState.bots || []).map(normalizeBot),
           myPresets: (persistedState.myPresets || []).map(normalizePreset),
           publishedPresets: (persistedState.publishedPresets || []).map(normalizePreset),
+          marketplacePresets: (persistedState.marketplacePresets || []).map(normalizePreset),
         }
       },
       onRehydrateStorage: () => (state) => {
@@ -509,7 +531,8 @@ export const useWorkspace = create<WorkspaceState>()(
           const bots = (state.bots || []).map(normalizeBot)
           const myPresets = (state.myPresets || []).map(normalizePreset)
           const publishedPresets = (state.publishedPresets || []).map(normalizePreset)
-          useWorkspace.setState({ bots, myPresets, publishedPresets })
+          const marketplacePresets = (state.marketplacePresets || []).map(normalizePreset)
+          useWorkspace.setState({ bots, myPresets, publishedPresets, marketplacePresets })
         }
         useWorkspace.setState({ hydrated: true })
       },
@@ -531,6 +554,16 @@ export function useRun(id: string | undefined) {
 
 export function useUnreadCount() {
   return useWorkspace((s) => s.notifications.filter((n) => !n.read).length)
+}
+
+export function getMarketplacePresets(): Preset[] {
+  const customPresets = useWorkspace.getState().marketplacePresets || []
+  return [...customPresets, ...MARKETPLACE_PRESETS]
+}
+
+export function useMarketplacePresets(): Preset[] {
+  const customPresets = useWorkspace((s) => s.marketplacePresets) || []
+  return [...customPresets, ...MARKETPLACE_PRESETS]
 }
 
 export function useHydrated() {

@@ -45,8 +45,7 @@ export function ClosingCta() {
             Open the builder
             <ArrowRight className="size-4" strokeWidth={2} />
           </PillLink>
-          {/* TODO(phase5): point at public /marketplace once built */}
-          <PillLink href="/app/marketplace" size="lg" variant="secondary">
+          <PillLink href="/marketplace" size="lg" variant="secondary">
             Browse strategies
           </PillLink>
         </div>

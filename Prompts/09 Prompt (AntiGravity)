@@ -1,0 +1,223 @@
+# Phase 7.1 — Publish→Marketplace Bridge & Dead Nav Links
+
+Two consequential gaps remain after Phase 7's storage normalization. This patch closes both.
+
+---
+
+## Problem 1: Publishing a bot doesn't make it discoverable
+
+### Current behaviour
+
+When a user publishes a bot via the 5-step wizard at `/app/marketplace/publish/[botId]`:
+
+1. `handlePublish()` creates a `PublishedPreset` object (with `cloneGraph(bot.graph)` — correct).
+2. `publishPreset(preset)` pushes it into `state.publishedPresets`.
+3. The user is redirected to `/app/creator/dashboard`, which reads `state.publishedPresets` — so the creator **can** see their own listing. ✓
+
+But the actual browsable marketplace pages — both `/app/marketplace` (logged-in) and `/marketplace` (public, logged-out) — read exclusively from the **static** `MARKETPLACE_PRESETS` array imported from `mock/data.ts`. They never consult `state.publishedPresets`.
+
+**Net effect**: A published strategy is permanently invisible to every other user. Nobody can discover or fork it through the marketplace UI. This was the exact fidelity concern flagged in the original Phase 7 spec.
+
+### Current behaviour (creator dashboard → "View in Market" link)
+
+The Creator Dashboard table links each published preset to `/app/marketplace/${preset.id}`. That detail page does `MARKETPLACE_PRESETS.find(p => p.id === presetId)` — a freshly published preset won't be in that static array, so the link 404s immediately.
+
+---
+
+## Problem 2: Dead navigation links for logged-out visitors
+
+Four files still have `TODO(phase5)` comments pointing marketplace links at `/app/marketplace` (requires auth) instead of `/marketplace` (public page that already exists):
+
+| File | Current href | Should be |
+|------|-------------|-----------|
+| [`site-nav.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/components/marketing/site-nav.tsx#L17) | `/app/marketplace` | `/marketplace` |
+| [`site-footer.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/components/marketing/site-footer.tsx#L11) | `/app/marketplace` | `/marketplace` |
+| [`closing-cta.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/components/landing/closing-cta.tsx#L49) | `/app/marketplace` | `/marketplace` |
+| [`marketplace-teaser.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/components/landing/marketplace-teaser.tsx#L32) | `/app/marketplace` | `/marketplace` |
+
+A logged-out visitor clicking "Marketplace" anywhere on the homepage, footer, or CTA gets bounced to a login wall instead of browsing the public catalogue.
+
+---
+
+## Proposed Changes
+
+### Approach: Unified Marketplace Data Source
+
+Rather than merging the `Preset` and `PublishedPreset` types into one (which would require a large type overhaul across 15+ files and risk breaking the rich `Preset` shape the marketplace cards depend on), we'll:
+
+1. **Enrich `publishPreset()` to produce a full `Preset`** — the publish wizard already collects all the data needed (name, tagline, description, category, tags, pricing, backtest proof).
+2. **Create a `useMarketplacePresets()` selector** that merges the static `MARKETPLACE_PRESETS` seeds with user-published presets from the store.
+3. **Replace all `MARKETPLACE_PRESETS` direct imports** in marketplace list and detail pages with this unified selector.
+
+This keeps the `Preset` type as the single rich marketplace card shape, avoids touching the `PublishedPreset` type (which the Creator Dashboard uses for its leaner earnings/stats view), and makes user-published strategies instantly browsable and forkable.
+
+---
+
+### Data Layer
+
+#### [MODIFY] [`mock/data.ts`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/mock/data.ts)
+
+No type changes needed. The existing `Preset` interface already has every field the marketplace cards need. We'll just verify that `CURRENT_USER` data is accessible for author attribution.
+
+---
+
+### Store Layer
+
+#### [MODIFY] [`lib/workspace-store.ts`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/lib/workspace-store.ts)
+
+1. **Update `publishPreset` action**: Change its signature from `(preset: PublishedPreset) => void` to `(preset: PublishedPreset, marketplaceEntry: Preset) => void`, or better: restructure the action to accept the full publish wizard data and produce both a `PublishedPreset` (for creator dashboard) **and** a `Preset` (for the marketplace list).
+
+   **Preferred approach**: Add a new `marketplacePresets: Preset[]` field to `WorkspaceState`. The `publishPreset` action pushes to *both* `publishedPresets` (creator dashboard) and `marketplacePresets` (browsable catalogue).
+
+2. **Add `useMarketplacePresets()` selector** (exported hook):
+   ```ts
+   export function useMarketplacePresets(): Preset[] {
+     const userPublished = useWorkspace((s) => s.marketplacePresets)
+     return [...userPublished, ...MARKETPLACE_PRESETS]
+   }
+   ```
+   User-published presets appear first (newest on top), then the static seed presets.
+
+3. **Update `seed()`**: Add `marketplacePresets: [] as Preset[]` initial state.
+
+4. **Update persist config**: Include `marketplacePresets` in the `migrate` and `onRehydrateStorage` normalization.
+
+---
+
+### Publish Wizard
+
+#### [MODIFY] [`app/app/marketplace/publish/[botId]/page.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/app/app/marketplace/publish/%5BbotId%5D/page.tsx)
+
+Update `handlePublish()` to pass the full marketplace entry data alongside the creator dashboard entry:
+
+- Build a complete `Preset` object using the wizard's collected fields: `name`, `tagline`, `description`, `category`, `tags`, `price`, the selected `backtest run` for `sampleRunId` and `headline` metrics, `author` info from `CURRENT_USER`, and `graph: cloneGraph(bot.graph)`.
+- The `publishPreset` store action receives this data and writes to both lists.
+
+This is where the wizard already collects everything but currently throws away the `tagline`, `category`, `tags`, and `selectedRun` — they only render in the review step and are never persisted.
+
+---
+
+### Marketplace List Pages
+
+#### [MODIFY] [`app/app/marketplace/page.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/app/app/marketplace/page.tsx)
+
+- Replace `import { MARKETPLACE_PRESETS }` with `import { useMarketplacePresets }`.
+- Replace `const filteredPresets = MARKETPLACE_PRESETS.filter(...)` with `const allPresets = useMarketplacePresets()` + `const filteredPresets = allPresets.filter(...)`.
+
+#### [MODIFY] [`app/marketplace/page.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/app/marketplace/page.tsx)
+
+- Same treatment: replace `MARKETPLACE_PRESETS` with `useMarketplacePresets()`.
+
+> [!NOTE]
+> The public `/marketplace` page currently doesn't import the workspace store (it's a logged-out page). We'll need to add the workspace store import here. Since `useWorkspace` is client-side Zustand backed by localStorage, it works fine even for logged-out visitors — it will simply have an empty `marketplacePresets` array, so only the static seeds show. When a logged-in user views it, their published presets will appear too.
+
+---
+
+### Marketplace Detail Pages
+
+#### [MODIFY] [`app/app/marketplace/[presetId]/page.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/app/app/marketplace/%5BpresetId%5D/page.tsx)
+
+- Replace `MARKETPLACE_PRESETS.find(p => p.id === presetId)` with `useMarketplacePresets().find(...)` (or inline the merge).
+- This fixes the Creator Dashboard's "View in Market" link from 404-ing for freshly published presets.
+
+#### [MODIFY] [`app/marketplace/[presetId]/page.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/app/marketplace/%5BpresetId%5D/page.tsx)
+
+- Same treatment: replace `MARKETPLACE_PRESETS.find(...)` with the unified source.
+
+---
+
+### Compare Page & Search Index
+
+#### [MODIFY] [`app/app/compare/page.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/app/app/compare/page.tsx)
+
+- Replace `MARKETPLACE_PRESETS` import and usage in the preset picker with `useMarketplacePresets()`.
+
+#### [MODIFY] [`lib/search-index.ts`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/lib/search-index.ts)
+
+- Update `buildIndex()` to accept marketplace presets as a parameter (or import the hook equivalent for SSR-safe usage).
+
+---
+
+### Landing Page / Marketing Components
+
+#### [MODIFY] [`components/landing/marketplace-teaser.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/components/landing/marketplace-teaser.tsx)
+
+- The "Browse all presets" link: change `href="/app/marketplace"` → `href="/marketplace"`.
+- The individual card links already point to `/marketplace/${p.id}` — these are correct. ✓
+- Remove the `TODO(phase5)` comments.
+- The `MARKETPLACE_PRESETS` import can stay here since this is a marketing teaser that only shows static featured presets.
+
+#### [MODIFY] [`components/marketing/site-nav.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/components/marketing/site-nav.tsx)
+
+- Change `href: '/app/marketplace'` → `href: '/marketplace'` in the `LINKS` array.
+- Remove the `TODO(phase5)` comment.
+
+#### [MODIFY] [`components/marketing/site-footer.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/components/marketing/site-footer.tsx)
+
+- Change `href: '/app/marketplace'` → `href: '/marketplace'` in the Product column.
+- Remove the `TODO(phase5)` comment.
+
+#### [MODIFY] [`components/landing/closing-cta.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/components/landing/closing-cta.tsx)
+
+- Change `href="/app/marketplace"` → `href="/marketplace"` on the "Browse strategies" PillLink.
+- Remove the `TODO(phase5)` comment.
+
+---
+
+### Onboarding
+
+#### [MODIFY] [`app/onboarding/start/page.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/app/onboarding/start/page.tsx)
+
+- This page uses `MARKETPLACE_PRESETS.slice(0, 3)` for curated starter picks. Keep as-is — onboarding should show stable seed presets, not user-published content.
+
+---
+
+### Creator Dashboard
+
+#### No changes needed to [`app/app/creator/dashboard/page.tsx`](file:///home/neeraj/Desktop/Coding/Trading/My%20Trading%20Bot/Codebase/app/app/creator/dashboard/page.tsx)
+
+The dashboard reads from `state.publishedPresets` (the lean creator-earnings view) which continues to work. The "View in Market" links will now resolve correctly because the marketplace detail pages will search the unified source.
+
+---
+
+## Open Questions
+
+> [!IMPORTANT]
+> **De-listing / unpublishing**: The publish wizard currently has no "unpublish" or "delist" action. Once published, a preset lives in the marketplace forever (in the mock data layer). Should we add a `deletePublishedPreset(id)` action that removes from both `publishedPresets` and `marketplacePresets`? I'd recommend yes — even as a stub, it keeps the data model clean. The Creator Dashboard table already has an "Actions" column where we can wire a "Delist" button.
+
+> [!NOTE]
+> **Duplicate ID guard**: If a user publishes the same bot twice, they'd get two marketplace entries. The publish action should either update the existing entry (upsert by `botId`) or prevent re-publishing. The publish wizard page could check `publishedPresets` for an existing entry and show an "Update Listing" flow instead. For now, I'd allow multiple publications (each creates a new preset ID) — this matches real marketplace behaviour where you can list multiple variations.
+
+---
+
+## Summary of Files Touched
+
+| File | Change |
+|------|--------|
+| `lib/workspace-store.ts` | Add `marketplacePresets` state field, enriched `publishPreset` action, `useMarketplacePresets()` selector |
+| `app/app/marketplace/publish/[botId]/page.tsx` | Build full `Preset` in `handlePublish()` |
+| `app/app/marketplace/page.tsx` | Use `useMarketplacePresets()` instead of static import |
+| `app/app/marketplace/[presetId]/page.tsx` | Use `useMarketplacePresets()` for lookup |
+| `app/marketplace/page.tsx` | Use `useMarketplacePresets()` instead of static import |
+| `app/marketplace/[presetId]/page.tsx` | Use `useMarketplacePresets()` for lookup |
+| `app/app/compare/page.tsx` | Use `useMarketplacePresets()` in preset picker |
+| `lib/search-index.ts` | Accept marketplace presets as param |
+| `components/marketing/site-nav.tsx` | Fix link: `/marketplace` |
+| `components/marketing/site-footer.tsx` | Fix link: `/marketplace` |
+| `components/landing/closing-cta.tsx` | Fix link: `/marketplace` |
+| `components/landing/marketplace-teaser.tsx` | Fix link: `/marketplace` |
+
+---
+
+## Verification Plan
+
+### Automated Tests
+- `npx tsc --noEmit` — 0 errors
+- `npm run build` — all routes compile cleanly
+
+### Manual Verification
+1. **Publish flow**: Navigate to any bot → Publish to Marketplace → complete all 5 wizard steps → verify the preset appears on both `/app/marketplace` and `/marketplace`
+2. **Fork from marketplace**: Click Fork/Clone on the freshly published preset → verify builder opens with full graph including notes and frames
+3. **Creator Dashboard → View in Market**: Click the "View in Market" link → verify it resolves to the detail page (not 404)
+4. **Logged-out navigation**: Visit the landing page → click "Marketplace" in the navbar, footer, CTA, and teaser section → verify all four navigate to `/marketplace` (not `/app/marketplace`)
+5. **Existing seed presets**: Verify the 8 original marketplace presets still display correctly alongside any user-published ones

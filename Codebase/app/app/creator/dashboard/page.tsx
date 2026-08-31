@@ -33,6 +33,7 @@ export default function CreatorDashboardPage() {
   const publishedPresets = useWorkspace((s) => s.publishedPresets)
   const creatorEarnings = useWorkspace((s) => s.creatorEarnings)
   const requestCreatorPayout = useWorkspace((s) => s.requestCreatorPayout)
+  const deletePublishedPreset = useWorkspace((s) => s.deletePublishedPreset)
 
   const [payoutDialogOpen, setPayoutDialogOpen] = useState(false)
 
@@ -163,12 +164,23 @@ export default function CreatorDashboardPage() {
                   </TD>
                   <TD className="text-tertiary text-xs">{formatDate(preset.publishedAt)}</TD>
                   <TD className="pr-4 text-right">
-                    <Link
-                      href={`/app/marketplace/${preset.id}`}
-                      className="text-xs font-semibold text-brand hover:underline inline-flex items-center gap-1"
-                    >
-                      View in Market <ArrowUpRight className="size-3.5" />
-                    </Link>
+                    <div className="flex items-center justify-end gap-3">
+                      <Link
+                        href={`/app/marketplace/${preset.id}`}
+                        className="text-xs font-semibold text-brand hover:underline inline-flex items-center gap-1"
+                      >
+                        View in Market <ArrowUpRight className="size-3.5" />
+                      </Link>
+                      <button
+                        onClick={() => {
+                          deletePublishedPreset(preset.id)
+                          toast.info('Strategy Delisted', `"${preset.name}" was removed from the marketplace.`)
+                        }}
+                        className="text-xs text-muted-foreground hover:text-loss transition-colors cursor-pointer"
+                      >
+                        Delist
+                      </button>
+                    </div>
                   </TD>
                 </TR>
               ))}

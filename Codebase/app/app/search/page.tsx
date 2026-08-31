@@ -14,7 +14,7 @@ import {
   ArrowRight,
   Sparkles,
 } from 'lucide-react'
-import { useWorkspace, useHydrated } from '@/lib/workspace-store'
+import { useWorkspace, useHydrated, useMarketplacePresets } from '@/lib/workspace-store'
 import { buildIndex, searchIndex, KIND_LABEL, type ResultKind, type SearchResult } from '@/lib/search-index'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -37,6 +37,7 @@ function SearchPageContent() {
   const router = useRouter()
   const hydrated = useHydrated()
   const bots = useWorkspace((s) => s.bots)
+  const marketplacePresets = useMarketplacePresets()
 
   const initialQuery = searchParams.get('q') || ''
   const [query, setQuery] = useState(initialQuery)
@@ -49,7 +50,7 @@ function SearchPageContent() {
     }
   }, [searchParams])
 
-  const index = useMemo(() => buildIndex(bots), [bots])
+  const index = useMemo(() => buildIndex(bots, marketplacePresets), [bots, marketplacePresets])
   const results = useMemo(() => searchIndex(index, query), [index, query])
 
   const filteredResults = useMemo(() => {

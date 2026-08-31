@@ -12,18 +12,20 @@ import {
   ShieldCheck,
   Zap,
 } from 'lucide-react'
-import { MARKETPLACE_PRESETS } from '@/mock/data'
+import { useMarketplacePresets } from '@/lib/workspace-store'
+import { Logo } from '@/components/brand/logo'
 import { TierBadge, Badge } from '@/components/ui/badge'
 import { PillLink } from '@/components/ui/pill-button'
 import { Input } from '@/components/ui/input'
 
 export default function PublicMarketplacePage() {
+  const marketplacePresets = useMarketplacePresets()
   const [search, setSearch] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('All')
 
   const categories = ['All', 'Starter', 'Debate', 'Options', 'Momentum']
 
-  const filteredPresets = MARKETPLACE_PRESETS.filter((preset) => {
+  const filteredPresets = marketplacePresets.filter((preset) => {
     const matchesSearch =
       preset.name.toLowerCase().includes(search.toLowerCase()) ||
       preset.tagline.toLowerCase().includes(search.toLowerCase()) ||
@@ -37,12 +39,7 @@ export default function PublicMarketplacePage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       {/* Public Top Navbar */}
       <header className="sticky top-0 z-40 border-b border-border/80 bg-background/80 backdrop-blur-xl px-6 py-3.5 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2">
-          <div className="flex size-7 items-center justify-center rounded-lg bg-brand text-brand-foreground font-bold text-sm">
-            Æ
-          </div>
-          <span className="font-bold tracking-tight text-base">Aether</span>
-        </Link>
+        <Logo />
 
         <div className="flex items-center gap-3">
           <Link href="/pricing" className="text-xs font-medium text-muted-foreground hover:text-foreground">

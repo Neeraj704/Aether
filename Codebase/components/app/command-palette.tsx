@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSession, toast } from '@/lib/store'
-import { useWorkspace } from '@/lib/workspace-store'
+import { useWorkspace, useMarketplacePresets } from '@/lib/workspace-store'
 import {
   KIND_LABEL,
   buildIndex,
@@ -63,13 +63,14 @@ export function CommandPalette() {
   const listRef = useRef<HTMLDivElement>(null)
 
   const bots = useWorkspace((s) => s.bots)
+  const marketplacePresets = useMarketplacePresets()
   const createBot = useWorkspace((s) => s.createBot)
   const markAllRead = useWorkspace((s) => s.markAllRead)
   const setTheme = useSession((s) => s.setTheme)
   const theme = useSession((s) => s.theme)
   const toggleSidebar = useSession((s) => s.toggleSidebar)
 
-  const index = useMemo(() => buildIndex(bots), [bots])
+  const index = useMemo(() => buildIndex(bots, marketplacePresets), [bots, marketplacePresets])
   const results = useMemo(() => searchIndex(index, query), [index, query])
   const groups = useMemo(() => groupResults(results), [results])
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups])

@@ -1,5 +1,5 @@
 import { COMPONENTS, LAYERS, LAYER_MAP } from '@/mock/layers'
-import { BLOG_POSTS, DOC_SECTIONS, MARKETPLACE_PRESETS, type Bot } from '@/mock/data'
+import { BLOG_POSTS, DOC_SECTIONS, MARKETPLACE_PRESETS, type Bot, type Preset } from '@/mock/data'
 import { fuzzyScore } from '@/lib/utils'
 
 export type ResultKind = 'bot' | 'component' | 'preset' | 'doc' | 'layer' | 'page' | 'action' | 'post'
@@ -65,7 +65,7 @@ const ACTIONS: SearchResult[] = [
  * Builds the full searchable set. Bots come from the live store so newly
  * created agents are findable immediately.
  */
-export function buildIndex(bots: Bot[]): SearchResult[] {
+export function buildIndex(bots: Bot[], presets: Preset[] = MARKETPLACE_PRESETS): SearchResult[] {
   return [
     ...ACTIONS,
     ...bots.map<SearchResult>((b) => ({
@@ -91,7 +91,7 @@ export function buildIndex(bots: Bot[]): SearchResult[] {
       subtitle: l.short,
       href: `/app/library?layer=${l.id}`,
     })),
-    ...MARKETPLACE_PRESETS.map<SearchResult>((p) => ({
+    ...presets.map<SearchResult>((p) => ({
       id: `preset-${p.id}`,
       kind: 'preset',
       title: p.name,

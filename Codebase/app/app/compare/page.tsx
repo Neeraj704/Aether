@@ -24,8 +24,8 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import { useWorkspace, useHydrated } from '@/lib/workspace-store'
-import { BACKTEST_RUNS, MARKETPLACE_PRESETS, type Bot, type BacktestRun, type Preset, type MyPreset } from '@/mock/data'
+import { useWorkspace, useHydrated, useMarketplacePresets } from '@/lib/workspace-store'
+import { BACKTEST_RUNS, type Bot, type BacktestRun, type Preset, type MyPreset } from '@/mock/data'
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
 import { PillButton } from '@/components/ui/pill-button'
 import { Badge } from '@/components/ui/badge'
@@ -57,6 +57,7 @@ function CompareContent() {
   const bots = useWorkspace((s) => s.bots)
   const runs = useWorkspace((s) => s.runs)
   const myPresets = useWorkspace((s) => s.myPresets)
+  const marketplacePresets = useMarketplacePresets()
 
   const [slots, setSlots] = useState<(CompareSlot | null)[]>([null, null, null, null])
   const [activeSlotIdx, setActiveSlotIdx] = useState<number | null>(null)
@@ -459,7 +460,7 @@ function CompareContent() {
                 options={[
                   { value: 'bots', label: `My Bots (${bots.length})` },
                   { value: 'runs', label: `Backtests (${runs.length})` },
-                  { value: 'presets', label: `Presets (${myPresets.length + MARKETPLACE_PRESETS.length})` },
+                  { value: 'presets', label: `Presets (${myPresets.length + marketplacePresets.length})` },
                 ]}
               />
 
@@ -517,7 +518,7 @@ function CompareContent() {
                   ))}
 
                 {pickerTab === 'presets' &&
-                  [...myPresets, ...MARKETPLACE_PRESETS].map((p) => {
+                  [...myPresets, ...marketplacePresets].map((p) => {
                     const tagline = 'tagline' in p ? p.tagline : p.description
                     return (
                       <div

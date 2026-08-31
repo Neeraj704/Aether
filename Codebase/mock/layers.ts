@@ -1534,7 +1534,7 @@ export const COMPONENTS: ComponentDef[] = [
     'Risk Gate',
     'The final yes or no.',
     'Evaluates every proposed trade against all limits and emits an explicit allow/block with a reason.',
-    ['Signal'],
+    ['Signal', 'RiskDecision'],
     ['RiskDecision'],
     'free',
     0,

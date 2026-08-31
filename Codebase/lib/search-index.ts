@@ -72,7 +72,7 @@ export function buildIndex(bots: Bot[]): SearchResult[] {
       id: `bot-${b.id}`,
       kind: 'bot',
       title: b.name,
-      subtitle: `${b.status} · ${b.nodes.length} nodes`,
+      subtitle: `${b.status} · ${b.graph?.nodes?.length ?? (b as any).nodes?.length ?? 0} nodes`,
       href: `/app/bots/${b.id}`,
       keywords: b.tags.join(' '),
     })),

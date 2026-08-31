@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useBot, useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { useBuilder } from '@/lib/builder-store'
+import { cloneGraph } from '@/lib/graph-utils'
 import { toast } from '@/lib/store'
 import { PillButton } from '@/components/ui/pill-button'
 import { Badge } from '@/components/ui/badge'
@@ -35,9 +36,8 @@ export default function VersionRestorePage() {
 
   useEffect(() => {
     if (version && bot) {
-      const nodes = version.nodes || bot.nodes
-      const edges = version.edges || bot.edges
-      load(bot.id, nodes, edges, bot.notes, bot.frames)
+      const graph = version.graph
+      load(bot.id, graph.nodes, graph.edges, graph.notes, graph.frames)
     }
   }, [version, bot, load])
 
@@ -63,11 +63,10 @@ export default function VersionRestorePage() {
   }
 
   const handleRestore = () => {
-    const nodes = version.nodes || bot.nodes
-    const edges = version.edges || bot.edges
-    saveGraph(bot.id, nodes, edges)
+    const graph = cloneGraph(version.graph)
+    saveGraph(bot.id, graph)
     snapshotVersion(bot.id, `Restored from ${version.label}`)
-    toast.success('Version Restored', `Loaded graph state from ${version.label}.`)
+    toast.success('Version Restored', `Loaded graph state from ${version.label}, including its notes and section frames.`)
     router.push(`/app/builder/${bot.id}`)
   }
 

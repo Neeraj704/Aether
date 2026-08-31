@@ -18,8 +18,9 @@ import {
   ArrowUpRight,
   Sparkles,
 } from 'lucide-react'
-import { useWorkspace, useHydrated, type StoredPreset } from '@/lib/workspace-store'
+import { useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
+import type { MyPreset } from '@/mock/data'
 import { LAYER_MAP, type LayerId } from '@/mock/layers'
 import { Badge } from '@/components/ui/badge'
 import { PillButton, PillLink } from '@/components/ui/pill-button'
@@ -54,8 +55,8 @@ export default function MyPresetsPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
 
-  const [deleteCandidate, setDeleteCandidate] = useState<StoredPreset | null>(null)
-  const [shareCandidate, setShareCandidate] = useState<StoredPreset | null>(null)
+  const [deleteCandidate, setDeleteCandidate] = useState<MyPreset | null>(null)
+  const [shareCandidate, setShareCandidate] = useState<MyPreset | null>(null)
   const [copiedLink, setCopiedLink] = useState(false)
 
   const filteredPresets = myPresets.filter((preset) => {
@@ -72,7 +73,7 @@ export default function MyPresetsPage() {
     router.push(`/app/builder/${newBot.id}`)
   }
 
-  const handleStartRename = (preset: StoredPreset) => {
+  const handleStartRename = (preset: MyPreset) => {
     setEditingId(preset.id)
     setEditingName(preset.name)
   }
@@ -85,7 +86,7 @@ export default function MyPresetsPage() {
     setEditingId(null)
   }
 
-  const handleCopyShareLink = (preset: StoredPreset) => {
+  const handleCopyShareLink = (preset: MyPreset) => {
     const shareUrl = typeof window !== 'undefined'
       ? `${window.location.origin}/app/marketplace/${preset.publishedId || preset.id}`
       : `/app/marketplace/${preset.id}`

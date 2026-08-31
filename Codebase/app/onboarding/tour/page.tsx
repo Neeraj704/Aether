@@ -22,7 +22,7 @@ export default function OnboardingTourPage() {
 
   useEffect(() => {
     if (bot) {
-      load(bot.id, bot.nodes, bot.edges, bot.notes, bot.frames)
+      load(bot.id, bot.graph.nodes, bot.graph.edges, bot.graph.notes, bot.graph.frames)
     }
   }, [bot, load])
 

@@ -111,7 +111,7 @@ export function LibraryPanel({
     })).filter((g) => g.items.length > 0)
   }, [query])
 
-  const savedBlocks = myPresets.filter((p) => p.nodes && p.nodes.length > 0)
+  const savedBlocks = myPresets.filter((p) => p.graph?.nodes && p.graph.nodes.length > 0)
 
   return (
     <aside data-tour="library-panel" className="flex h-full w-64 shrink-0 flex-col border-r border-border bg-background">
@@ -154,7 +154,7 @@ export function LibraryPanel({
                       e.dataTransfer.setData(DRAG_PRESET_MIME, p.id)
                       e.dataTransfer.effectAllowed = 'copy'
                     }}
-                    onDoubleClick={() => addBlock(p.nodes ?? [], p.edges ?? [])}
+                    onDoubleClick={() => addBlock(p.graph.nodes, p.graph.edges)}
                     className="flex cursor-grab items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-[13px] hover:bg-secondary active:cursor-grabbing"
                   >
                     <Package className="size-3.5 shrink-0 text-brand" />

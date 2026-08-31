@@ -2,10 +2,11 @@
 
 import { create } from 'zustand'
 import { COMPONENT_MAP, LAYERS, type LayerId } from '@/mock/layers'
-import type { BotEdge, BotNode, CanvasFrame, CanvasNote } from '@/mock/data'
+import { CURRENT_GRAPH_SCHEMA_VERSION, type BotEdge, type BotGraph, type BotNode, type CanvasFrame, type CanvasNote } from '@/mock/data'
 import { computeNeedsConfig, defaultConfig, makeNode } from '@/lib/workspace-store'
 import { canConnect, createsCycle, type Issue } from '@/lib/validate'
 import { slugId } from '@/lib/utils'
+import { migrateGraph } from '@/lib/graph-utils'
 
 /* ------------------------------------------------------------------ */
 /* Canvas geometry                                                     */
@@ -63,12 +64,7 @@ export interface ViewPrefs {
 /* History                                                             */
 /* ------------------------------------------------------------------ */
 
-interface Snapshot {
-  nodes: BotNode[]
-  edges: BotEdge[]
-  notes: CanvasNote[]
-  frames: CanvasFrame[]
-}
+export type Snapshot = BotGraph
 
 const HISTORY_LIMIT = 80
 
@@ -148,7 +144,6 @@ interface BuilderState extends Snapshot {
   selectAll: () => void
   focusNodes: (ids: string[]) => void
   toggleLayer: (layer: LayerId) => void
-
   align: (mode: AlignMode) => void
   distribute: (axis: 'h' | 'v') => void
   tidyUp: () => void
@@ -159,18 +154,8 @@ interface BuilderState extends Snapshot {
   setIssues: (issues: Issue[]) => void
   setConsole: (open: boolean, tab?: ConsoleTab) => void
   pushLog: (level: 'info' | 'warn' | 'error', message: string) => void
+  clearLog: () => void
   clearRejection: () => void
-}
-
-/**
- * Older fixtures stored `y` as a layer index (0-9) rather than a pixel offset.
- * Anything that small can only be an index, so it is promoted to lane space.
- */
-function migratePositions(nodes: BotNode[]): BotNode[] {
-  const legacy =
-    nodes.length > 0 && nodes.every((n) => Number.isInteger(n.y) && n.y >= 0 && n.y < LAYERS.length)
-  if (!legacy) return nodes
-  return nodes.map((n) => ({ ...n, y: laneCenterY(n.y) }))
 }
 
 export const useBuilder = create<BuilderState>((set, get) => {
@@ -178,7 +163,10 @@ export const useBuilder = create<BuilderState>((set, get) => {
   const commit = (next: Partial<Snapshot>) => {
     const { nodes, edges, notes, frames, past } = get()
     set({
-      past: [...past, { nodes, edges, notes, frames }].slice(-HISTORY_LIMIT),
+      past: [
+        ...past,
+        { nodes, edges, notes, frames, schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION },
+      ].slice(-HISTORY_LIMIT),
       future: [],
       dirty: true,
       validated: false,
@@ -194,6 +182,7 @@ export const useBuilder = create<BuilderState>((set, get) => {
     edges: [],
     notes: [],
     frames: [],
+    schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
     selection: [],
     selectedEdges: [],
     tool: 'select',
@@ -219,8 +208,15 @@ export const useBuilder = create<BuilderState>((set, get) => {
     focusToken: 0,
 
     load: (botId, nodes, edges, notes = [], frames = []) => {
-      const migrated = migratePositions(nodes)
-      const hydratedNodes = migrated.map((n) => {
+      const rawGraph: BotGraph = {
+        nodes,
+        edges,
+        notes: notes ?? [],
+        frames: frames ?? [],
+        schemaVersion: 1, // let migrateGraph verify and upgrade
+      }
+      const { graph: migrated } = migrateGraph(rawGraph)
+      const hydratedNodes = migrated.nodes.map((n) => {
         const comp = COMPONENT_MAP[n.componentId]
         if (!comp) return n
         const mergedConfig = { ...defaultConfig(comp), ...(n.config || {}) }
@@ -234,9 +230,10 @@ export const useBuilder = create<BuilderState>((set, get) => {
       set({
         botId,
         nodes: hydratedNodes,
-        edges,
-        notes,
-        frames,
+        edges: migrated.edges,
+        notes: migrated.notes,
+        frames: migrated.frames,
+        schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
         selection: [],
         selectedEdges: [],
         tool: 'select',
@@ -274,13 +271,20 @@ export const useBuilder = create<BuilderState>((set, get) => {
     addBlock: (nodes, edges, at) => {
       // Re-key so a block can be dropped repeatedly without id collisions.
       const map = new Map(nodes.map((n) => [n.id, slugId('n')]))
-      const migrated = migratePositions(nodes)
-      const minX = Math.min(...migrated.map((n) => n.x))
-      const minY = Math.min(...migrated.map((n) => n.y))
+      const rawGraph: BotGraph = {
+        nodes,
+        edges,
+        notes: [],
+        frames: [],
+        schemaVersion: 1,
+      }
+      const { graph: migrated } = migrateGraph(rawGraph)
+      const minX = Math.min(...migrated.nodes.map((n) => n.x))
+      const minY = Math.min(...migrated.nodes.map((n) => n.y))
       const dx = at ? snap(at.x) - minX : 40
       const dy = at ? snap(at.y) - minY : 40
 
-      const fresh = migrated.map((n) => ({
+      const fresh = migrated.nodes.map((n) => ({
         ...n,
         id: map.get(n.id)!,
         x: snap(n.x + dx),
@@ -376,6 +380,7 @@ export const useBuilder = create<BuilderState>((set, get) => {
           edges: edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
           notes: [],
           frames: [],
+          schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
         },
       })
       get().pushLog('info', `Copied ${picked.length} node${picked.length > 1 ? 's' : ''}.`)
@@ -518,7 +523,7 @@ export const useBuilder = create<BuilderState>((set, get) => {
 
     /* ---------------- Arrangement ---------------- */
 
-    align: (mode) => {
+    align: (mode: AlignMode) => {
       const { nodes, selection } = get()
       const picked = nodes.filter((n) => selection.includes(n.id))
       if (picked.length < 2) return
@@ -541,6 +546,8 @@ export const useBuilder = create<BuilderState>((set, get) => {
             return { ...n, y: Math.max(...ys) }
           case 'middle':
             return { ...n, y: Math.round(avg(ys)) }
+          default:
+            return n
         }
       }
 
@@ -548,7 +555,7 @@ export const useBuilder = create<BuilderState>((set, get) => {
       set({ focusToken: get().focusToken + 1 })
     },
 
-    distribute: (axis) => {
+    distribute: (axis: 'h' | 'v') => {
       const { nodes, selection } = get()
       const key = axis === 'h' ? 'x' : 'y'
       const picked = nodes
@@ -597,7 +604,10 @@ export const useBuilder = create<BuilderState>((set, get) => {
       if (!prev) return
       set({
         past: past.slice(0, -1),
-        future: [{ nodes, edges, notes, frames }, ...future].slice(0, HISTORY_LIMIT),
+        future: [
+          { nodes, edges, notes, frames, schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION },
+          ...future,
+        ].slice(0, HISTORY_LIMIT),
         ...prev,
         dirty: true,
         validated: false,
@@ -610,7 +620,10 @@ export const useBuilder = create<BuilderState>((set, get) => {
       const next = future[0]
       if (!next) return
       set({
-        past: [...past, { nodes, edges, notes, frames }].slice(-HISTORY_LIMIT),
+        past: [
+          ...past,
+          { nodes, edges, notes, frames, schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION },
+        ].slice(-HISTORY_LIMIT),
         future: future.slice(1),
         ...next,
         dirty: true,
@@ -633,6 +646,8 @@ export const useBuilder = create<BuilderState>((set, get) => {
           { id: slugId('log'), at: new Date().toISOString(), level, message },
         ].slice(-200),
       }),
+
+    clearLog: () => set({ log: [] }),
 
     clearRejection: () => set({ rejection: null }),
   }

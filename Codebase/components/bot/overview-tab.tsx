@@ -2,10 +2,11 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { LineChart, Globe } from 'lucide-react'
+import { LineChart, Globe, Download } from 'lucide-react'
 import type { Bot } from '@/mock/data'
 import { useWorkspace } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
+import { downloadBotExport } from '@/lib/graph-utils'
 import { Stat } from '@/components/ui/stat'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -23,16 +24,21 @@ export function OverviewTab({ bot }: { bot: Bot }) {
     router.push(`/app/marketplace/publish/${bot.id}`)
   }
 
+  const handleExport = () => {
+    downloadBotExport(bot)
+    toast.success('Strategy Exported', `Saved ${bot.name}.aether.json`)
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {/* Thumbnail + Stats Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1">
-          <GraphThumbnail botId={bot.id} nodes={bot.nodes} />
+          <GraphThumbnail botId={bot.id} nodes={bot.graph?.nodes ?? (bot as any).nodes ?? []} />
         </div>
 
         <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-4 p-5 rounded-xl border border-border bg-card">
-          <Stat label="Nodes" value={bot.nodes.length} hint="Total component nodes in graph" />
+          <Stat label="Nodes" value={bot.graph?.nodes?.length ?? (bot as any).nodes?.length ?? 0} hint="Total component nodes in graph" />
           <Stat label="Versions" value={bot.versions.length} hint="Saved strategy revisions" />
           <Stat label="Total Backtests" value={bot.runIds.length} hint="Historical simulation runs" />
           <Stat
@@ -48,9 +54,14 @@ export function OverviewTab({ bot }: { bot: Bot }) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle>Strategy Overview</CardTitle>
-          <PillButton variant="secondary" size="sm" onClick={handlePublish}>
-            <Globe className="size-3.5 mr-1" /> Publish to marketplace
-          </PillButton>
+          <div className="flex items-center gap-2">
+            <PillButton variant="secondary" size="sm" onClick={handleExport}>
+              <Download className="size-3.5 mr-1" /> Export JSON
+            </PillButton>
+            <PillButton variant="secondary" size="sm" onClick={handlePublish}>
+              <Globe className="size-3.5 mr-1" /> Publish to marketplace
+            </PillButton>
+          </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <p className="text-sm leading-relaxed text-muted-foreground">

@@ -45,6 +45,36 @@ export interface CanvasFrame {
   hue: string
 }
 
+/**
+ * The single canonical shape for "a strategy graph as it exists on a canvas."
+ * Every entity that can be dragged onto, saved from, or restored onto the
+ * Builder canvas stores exactly this shape — not a partial or optional
+ * subset of it. Bot, BotVersion, Preset, MyPreset, and PublishedPreset all
+ * embed one of these rather than duplicating nodes/edges/notes/frames as
+ * separate optional fields.
+ */
+export interface BotGraph {
+  nodes: BotNode[]
+  edges: BotEdge[]
+  notes: CanvasNote[]
+  frames: CanvasFrame[]
+  /**
+   * Bumped whenever the shape of BotNode/BotEdge/CanvasNote/CanvasFrame
+   * changes in a way that requires migration. Current value: 2.
+   * (1 = pre-Phase-7 shape with y-as-lane-index legacy fixtures and no
+   * notes/frames guarantee. 2 = this phase: pixel-space y, notes/frames
+   * always present as arrays, never undefined.)
+   */
+  schemaVersion: number
+}
+
+export const CURRENT_GRAPH_SCHEMA_VERSION = 2
+
+/** An empty, valid graph — use this instead of hand-rolling `{ nodes: [], edges: [], ... }` anywhere. */
+export function emptyGraph(): BotGraph {
+  return { nodes: [], edges: [], notes: [], frames: [], schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION }
+}
+
 export type BotStatus = 'draft' | 'backtested' | 'live' | 'paused' | 'error'
 
 export interface BotVersion {
@@ -53,8 +83,7 @@ export interface BotVersion {
   createdAt: string
   note: string
   nodeCount: number
-  nodes?: BotNode[]
-  edges?: BotEdge[]
+  graph: BotGraph
 }
 
 export interface Bot {
@@ -65,11 +94,7 @@ export interface Bot {
   updatedAt: string
   createdAt: string
   tags: string[]
-  nodes: BotNode[]
-  edges: BotEdge[]
-  /** Canvas annotations — optional so older saved graphs keep working. */
-  notes?: CanvasNote[]
-  frames?: CanvasFrame[]
+  graph: BotGraph
   headlineMetric: { label: string; value: string; positive: boolean }
   visibility: 'private' | 'unlisted' | 'public'
   versions: BotVersion[]
@@ -263,6 +288,70 @@ const brokenNodes: BotNode[] = [
 
 const brokenEdges: BotEdge[] = [e('b1', 'b2'), e('b2', 'b3'), e('b3', 'b4')]
 
+const momentumNotes: CanvasNote[] = [
+  {
+    id: 'mn-1',
+    kind: 'note',
+    x: 420,
+    y: 120,
+    text: 'Scale position size by volatility forecast and enforce hard drawdown brake.',
+    color: 'amber',
+    createdAt: '2026-06-15T10:00:00.000Z',
+  },
+]
+
+const momentumFrames: CanvasFrame[] = [
+  {
+    id: 'mf-1',
+    x: 60,
+    y: 40,
+    w: 640,
+    h: 380,
+    label: 'Signal & Forecasting Engine',
+    hue: 'rgba(41, 151, 255, 0.08)',
+  },
+]
+
+export const momentumGraph: BotGraph = {
+  nodes: momentumNodes,
+  edges: momentumEdges,
+  notes: momentumNotes,
+  frames: momentumFrames,
+  schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+}
+
+export const sentimentGraph: BotGraph = {
+  nodes: sentimentNodes,
+  edges: sentimentEdges,
+  notes: [],
+  frames: [],
+  schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+}
+
+export const meanRevGraph: BotGraph = {
+  nodes: meanRevNodes,
+  edges: meanRevEdges,
+  notes: [],
+  frames: [],
+  schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+}
+
+export const optionsGraph: BotGraph = {
+  nodes: optionsNodes,
+  edges: optionsEdges,
+  notes: [],
+  frames: [],
+  schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+}
+
+export const brokenGraph: BotGraph = {
+  nodes: brokenNodes,
+  edges: brokenEdges,
+  notes: [],
+  frames: [],
+  schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+}
+
 export const BOTS: Bot[] = [
   {
     id: 'bot-nifty-momentum',
@@ -273,15 +362,14 @@ export const BOTS: Bot[] = [
     updatedAt: '2026-08-23T14:32:00.000Z',
     createdAt: '2026-02-11T10:00:00.000Z',
     tags: ['momentum', 'index', 'intraday'],
-    nodes: momentumNodes,
-    edges: momentumEdges,
+    graph: momentumGraph,
     headlineMetric: { label: 'Return, 90d', value: '+18.4%', positive: true },
     visibility: 'public',
     versions: [
-      { id: 'v-7', label: 'v7', createdAt: '2026-08-23T14:32:00.000Z', note: 'Tightened drawdown brake to 15%', nodeCount: 15 },
-      { id: 'v-6', label: 'v6', createdAt: '2026-08-14T09:10:00.000Z', note: 'Added volatility forecast into sizing', nodeCount: 15 },
-      { id: 'v-5', label: 'v5', createdAt: '2026-07-30T16:45:00.000Z', note: 'Swapped ensemble for single GBDT', nodeCount: 13 },
-      { id: 'v-4', label: 'v4', createdAt: '2026-06-21T11:20:00.000Z', note: 'Calibration layer added', nodeCount: 12 },
+      { id: 'v-7', label: 'v7', createdAt: '2026-08-23T14:32:00.000Z', note: 'Tightened drawdown brake to 15%', nodeCount: 15, graph: momentumGraph },
+      { id: 'v-6', label: 'v6', createdAt: '2026-08-14T09:10:00.000Z', note: 'Added volatility forecast into sizing', nodeCount: 15, graph: momentumGraph },
+      { id: 'v-5', label: 'v5', createdAt: '2026-07-30T16:45:00.000Z', note: 'Swapped ensemble for single GBDT', nodeCount: 13, graph: { ...momentumGraph, nodes: momentumNodes.slice(0, 13) } },
+      { id: 'v-4', label: 'v4', createdAt: '2026-06-21T11:20:00.000Z', note: 'Calibration layer added', nodeCount: 12, graph: { ...momentumGraph, nodes: momentumNodes.slice(0, 12) } },
     ],
     runIds: ['run-1041', 'run-1032', 'run-1019'],
   },
@@ -294,14 +382,13 @@ export const BOTS: Bot[] = [
     updatedAt: '2026-08-21T08:05:00.000Z',
     createdAt: '2026-04-02T13:30:00.000Z',
     tags: ['news', 'mean-reversion', 'equities'],
-    nodes: sentimentNodes,
-    edges: sentimentEdges,
+    graph: sentimentGraph,
     headlineMetric: { label: 'Sharpe', value: '1.42', positive: true },
     visibility: 'unlisted',
     versions: [
-      { id: 'v-3', label: 'v3', createdAt: '2026-08-21T08:05:00.000Z', note: 'Disabled social firehose  too noisy', nodeCount: 16 },
-      { id: 'v-2', label: 'v2', createdAt: '2026-07-11T15:00:00.000Z', note: 'Added event blackout windows', nodeCount: 16 },
-      { id: 'v-1', label: 'v1', createdAt: '2026-04-02T13:30:00.000Z', note: 'Initial build', nodeCount: 12 },
+      { id: 'v-3', label: 'v3', createdAt: '2026-08-21T08:05:00.000Z', note: 'Disabled social firehose  too noisy', nodeCount: 16, graph: sentimentGraph },
+      { id: 'v-2', label: 'v2', createdAt: '2026-07-11T15:00:00.000Z', note: 'Added event blackout windows', nodeCount: 16, graph: sentimentGraph },
+      { id: 'v-1', label: 'v1', createdAt: '2026-04-02T13:30:00.000Z', note: 'Initial build', nodeCount: 12, graph: { ...sentimentGraph, nodes: sentimentNodes.slice(0, 12) } },
     ],
     runIds: ['run-1038', 'run-1021'],
   },
@@ -313,13 +400,12 @@ export const BOTS: Bot[] = [
     updatedAt: '2026-08-19T17:44:00.000Z',
     createdAt: '2026-05-18T10:15:00.000Z',
     tags: ['mean-reversion', 'index'],
-    nodes: meanRevNodes,
-    edges: meanRevEdges,
+    graph: meanRevGraph,
     headlineMetric: { label: 'Return, 90d', value: '-2.1%', positive: false },
     visibility: 'private',
     versions: [
-      { id: 'v-2', label: 'v2', createdAt: '2026-08-19T17:44:00.000Z', note: 'Added meta labeler (needs config)', nodeCount: 10 },
-      { id: 'v-1', label: 'v1', createdAt: '2026-05-18T10:15:00.000Z', note: 'Initial build', nodeCount: 9 },
+      { id: 'v-2', label: 'v2', createdAt: '2026-08-19T17:44:00.000Z', note: 'Added meta labeler (needs config)', nodeCount: 10, graph: meanRevGraph },
+      { id: 'v-1', label: 'v1', createdAt: '2026-05-18T10:15:00.000Z', note: 'Initial build', nodeCount: 9, graph: { ...meanRevGraph, nodes: meanRevNodes.slice(0, 9) } },
     ],
     runIds: ['run-1029'],
   },
@@ -331,13 +417,12 @@ export const BOTS: Bot[] = [
     updatedAt: '2026-08-12T12:00:00.000Z',
     createdAt: '2026-03-07T09:00:00.000Z',
     tags: ['options', 'volatility', 'expiry'],
-    nodes: optionsNodes,
-    edges: optionsEdges,
+    graph: optionsGraph,
     headlineMetric: { label: 'Return, 90d', value: '+11.7%', positive: true },
     visibility: 'private',
     versions: [
-      { id: 'v-4', label: 'v4', createdAt: '2026-08-12T12:00:00.000Z', note: 'VWAP slicing on exits', nodeCount: 14 },
-      { id: 'v-3', label: 'v3', createdAt: '2026-06-28T14:20:00.000Z', note: 'Added VaR monitor', nodeCount: 13 },
+      { id: 'v-4', label: 'v4', createdAt: '2026-08-12T12:00:00.000Z', note: 'VWAP slicing on exits', nodeCount: 14, graph: optionsGraph },
+      { id: 'v-3', label: 'v3', createdAt: '2026-06-28T14:20:00.000Z', note: 'Added VaR monitor', nodeCount: 13, graph: { ...optionsGraph, nodes: optionsNodes.slice(0, 13) } },
     ],
     runIds: ['run-1035'],
   },
@@ -349,11 +434,10 @@ export const BOTS: Bot[] = [
     updatedAt: '2026-08-08T19:22:00.000Z',
     createdAt: '2026-08-08T19:00:00.000Z',
     tags: ['equities', 'wip'],
-    nodes: brokenNodes,
-    edges: brokenEdges,
+    graph: brokenGraph,
     headlineMetric: { label: 'Never run', value: '', positive: false },
     visibility: 'private',
-    versions: [{ id: 'v-1', label: 'v1', createdAt: '2026-08-08T19:22:00.000Z', note: 'Initial sketch', nodeCount: 4 }],
+    versions: [{ id: 'v-1', label: 'v1', createdAt: '2026-08-08T19:22:00.000Z', note: 'Initial sketch', nodeCount: 4, graph: brokenGraph }],
     runIds: [],
   },
 ]
@@ -750,12 +834,35 @@ export interface Preset {
   createdAt: string
   category: string
   tags: string[]
-  nodes: BotNode[]
-  edges: BotEdge[]
+  graph: BotGraph
   reviews: Review[]
   sampleRunId: string
   trending: boolean
 }
+
+export const trendStarterNotes: CanvasNote[] = [
+  {
+    id: 'pn-1',
+    kind: 'note',
+    x: 400,
+    y: 100,
+    text: 'Baseline 5-node setup. Paper execution only.',
+    color: 'blue',
+    createdAt: '2026-03-14T10:00:00.000Z',
+  },
+]
+
+export const trendStarterFrames: CanvasFrame[] = [
+  {
+    id: 'pf-1',
+    x: 60,
+    y: 40,
+    w: 520,
+    h: 560,
+    label: 'Core Pipeline',
+    hue: 'rgba(48, 209, 88, 0.08)',
+  },
+]
 
 export const MARKETPLACE_PRESETS: Preset[] = [
   {
@@ -778,15 +885,20 @@ export const MARKETPLACE_PRESETS: Preset[] = [
     createdAt: '2026-03-14T10:00:00.000Z',
     category: 'Starter',
     tags: ['beginner', 'trend', 'free'],
-    nodes: [
-      n('p1', 'ohlcv-feed', 80, 0),
-      n('p2', 'ta-indicators', 80, 1),
-      n('p3', 'technical-agent', 80, 2),
-      n('p4', 'confidence-gate', 80, 6),
-      n('p5', 'risk-gate', 80, 7),
-      n('p6', 'paper-executor', 80, 8),
-    ],
-    edges: [e('p1', 'p2'), e('p2', 'p3'), e('p3', 'p4'), e('p4', 'p5'), e('p5', 'p6')],
+    graph: {
+      nodes: [
+        n('p1', 'ohlcv-feed', 80, 0),
+        n('p2', 'ta-indicators', 80, 1),
+        n('p3', 'technical-agent', 80, 2),
+        n('p4', 'confidence-gate', 80, 6),
+        n('p5', 'risk-gate', 80, 7),
+        n('p6', 'paper-executor', 80, 8),
+      ],
+      edges: [e('p1', 'p2'), e('p2', 'p3'), e('p3', 'p4'), e('p4', 'p5'), e('p5', 'p6')],
+      notes: trendStarterNotes,
+      frames: trendStarterFrames,
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
     reviews: [
       {
         id: 'r1',
@@ -836,8 +948,13 @@ export const MARKETPLACE_PRESETS: Preset[] = [
     createdAt: '2026-05-02T14:00:00.000Z',
     category: 'Research',
     tags: ['debate', 'agents', 'paid'],
-    nodes: sentimentNodes.slice(0, 14),
-    edges: sentimentEdges.slice(0, 12),
+    graph: {
+      nodes: sentimentNodes.slice(0, 14),
+      edges: sentimentEdges.slice(0, 12),
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
     reviews: [
       {
         id: 'r4',
@@ -879,27 +996,32 @@ export const MARKETPLACE_PRESETS: Preset[] = [
     createdAt: '2026-04-08T09:00:00.000Z',
     category: 'Risk',
     tags: ['risk', 'template', 'paid'],
-    nodes: [
-      n('rf1', 'position-cap', 80, 7),
-      n('rf2', 'drawdown-brake', 420, 7),
-      n('rf3', 'correlation-guard', 760, 7),
-      n('rf4', 'daily-loss-limit', 1100, 7),
-      n('rf5', 'event-blackout', 80, 7),
-      n('rf6', 'risk-gate', 420, 7),
-      n('rf7', 'paper-executor', 80, 8),
-      n('rf8', 'pnl-tracker', 80, 9),
-      n('rf9', 'decision-log', 420, 9),
-    ],
-    edges: [
-      e('rf1', 'rf6'),
-      e('rf2', 'rf6'),
-      e('rf3', 'rf6'),
-      e('rf4', 'rf6'),
-      e('rf5', 'rf6'),
-      e('rf6', 'rf7'),
-      e('rf7', 'rf8'),
-      e('rf7', 'rf9'),
-    ],
+    graph: {
+      nodes: [
+        n('rf1', 'position-cap', 80, 7),
+        n('rf2', 'drawdown-brake', 420, 7),
+        n('rf3', 'correlation-guard', 760, 7),
+        n('rf4', 'daily-loss-limit', 1100, 7),
+        n('rf5', 'event-blackout', 80, 7),
+        n('rf6', 'risk-gate', 420, 7),
+        n('rf7', 'paper-executor', 80, 8),
+        n('rf8', 'pnl-tracker', 80, 9),
+        n('rf9', 'decision-log', 420, 9),
+      ],
+      edges: [
+        e('rf1', 'rf6'),
+        e('rf2', 'rf6'),
+        e('rf3', 'rf6'),
+        e('rf4', 'rf6'),
+        e('rf5', 'rf6'),
+        e('rf6', 'rf7'),
+        e('rf7', 'rf8'),
+        e('rf7', 'rf9'),
+      ],
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
     reviews: [
       {
         id: 'r6',
@@ -940,25 +1062,30 @@ export const MARKETPLACE_PRESETS: Preset[] = [
     createdAt: '2026-06-20T11:00:00.000Z',
     category: 'Learning',
     tags: ['self-learning', 'pro', 'paid'],
-    nodes: [
-      n('sl1', 'pnl-tracker', 80, 9),
-      n('sl2', 'decision-log', 420, 9),
-      n('sl3', 'attribution', 760, 9),
-      n('sl4', 'post-mortem', 80, 10),
-      n('sl5', 'rule-miner', 420, 10),
-      n('sl6', 'retrainer', 760, 10),
-      n('sl7', 'outcome-store', 80, 11),
-      n('sl8', 'lesson-bank', 420, 11),
-    ],
-    edges: [
-      e('sl1', 'sl4'),
-      e('sl2', 'sl4'),
-      e('sl3', 'sl5'),
-      e('sl4', 'sl5'),
-      e('sl5', 'sl6'),
-      e('sl4', 'sl7'),
-      e('sl7', 'sl8'),
-    ],
+    graph: {
+      nodes: [
+        n('sl1', 'pnl-tracker', 80, 9),
+        n('sl2', 'decision-log', 420, 9),
+        n('sl3', 'attribution', 760, 9),
+        n('sl4', 'post-mortem', 80, 10),
+        n('sl5', 'rule-miner', 420, 10),
+        n('sl6', 'retrainer', 760, 10),
+        n('sl7', 'outcome-store', 80, 11),
+        n('sl8', 'lesson-bank', 420, 11),
+      ],
+      edges: [
+        e('sl1', 'sl4'),
+        e('sl2', 'sl4'),
+        e('sl3', 'sl5'),
+        e('sl4', 'sl5'),
+        e('sl5', 'sl6'),
+        e('sl4', 'sl7'),
+        e('sl7', 'sl8'),
+      ],
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
     reviews: [
       {
         id: 'r8',
@@ -991,8 +1118,13 @@ export const MARKETPLACE_PRESETS: Preset[] = [
     createdAt: '2026-07-01T10:00:00.000Z',
     category: 'Options',
     tags: ['options', 'volatility', 'pro'],
-    nodes: optionsNodes,
-    edges: optionsEdges,
+    graph: {
+      nodes: optionsNodes,
+      edges: optionsEdges,
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
     reviews: [
       {
         id: 'r9',
@@ -1033,8 +1165,13 @@ export const MARKETPLACE_PRESETS: Preset[] = [
     createdAt: '2026-02-28T13:00:00.000Z',
     category: 'Events',
     tags: ['news', 'mean-reversion', 'free'],
-    nodes: sentimentNodes.slice(0, 11),
-    edges: sentimentEdges.slice(0, 9),
+    graph: {
+      nodes: sentimentNodes.slice(0, 11),
+      edges: sentimentEdges.slice(0, 9),
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
     reviews: [
       {
         id: 'r11',
@@ -1067,8 +1204,13 @@ export const MARKETPLACE_PRESETS: Preset[] = [
     createdAt: '2026-05-25T09:00:00.000Z',
     category: 'Adaptive',
     tags: ['regime', 'adaptive', 'paid'],
-    nodes: meanRevNodes,
-    edges: meanRevEdges,
+    graph: {
+      nodes: meanRevNodes,
+      edges: meanRevEdges,
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
     reviews: [
       {
         id: 'r12',
@@ -1101,16 +1243,21 @@ export const MARKETPLACE_PRESETS: Preset[] = [
     createdAt: '2026-07-18T16:00:00.000Z',
     category: 'Research',
     tags: ['memory', 'research', 'paid'],
-    nodes: [
-      n('mr1', 'ohlcv-feed', 80, 0),
-      n('mr2', 'ta-indicators', 80, 1),
-      n('mr3', 'embedding-index', 80, 11),
-      n('mr4', 'setup-recall', 420, 11),
-      n('mr5', 'working-memory', 760, 11),
-      n('mr6', 'bull-bear', 80, 5),
-      n('mr7', 'moderator', 420, 5),
-    ],
-    edges: [e('mr1', 'mr2'), e('mr2', 'mr3'), e('mr3', 'mr4'), e('mr4', 'mr6'), e('mr5', 'mr6'), e('mr6', 'mr7')],
+    graph: {
+      nodes: [
+        n('mr1', 'ohlcv-feed', 80, 0),
+        n('mr2', 'ta-indicators', 80, 1),
+        n('mr3', 'embedding-index', 80, 11),
+        n('mr4', 'setup-recall', 420, 11),
+        n('mr5', 'working-memory', 760, 11),
+        n('mr6', 'bull-bear', 80, 5),
+        n('mr7', 'moderator', 420, 5),
+      ],
+      edges: [e('mr1', 'mr2'), e('mr2', 'mr3'), e('mr3', 'mr4'), e('mr4', 'mr6'), e('mr5', 'mr6'), e('mr6', 'mr7')],
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
     reviews: [],
     sampleRunId: 'run-1019',
     trending: false,
@@ -1130,6 +1277,7 @@ export interface MyPreset {
   nodeCount: number
   layers: LayerId[]
   publishedId?: string
+  graph: BotGraph
   versions: { id: string; label: string; createdAt: string; note: string }[]
 }
 
@@ -1143,6 +1291,20 @@ export const MY_PRESETS: MyPreset[] = [
     nodeCount: 9,
     layers: ['data', 'features', 'ml', 'confidence', 'risk'],
     publishedId: 'preset-trend-starter',
+    graph: {
+      nodes: [
+        n('p1', 'ohlcv-feed', 80, 0),
+        n('p2', 'ta-indicators', 80, 1),
+        n('p3', 'technical-agent', 80, 2),
+        n('p4', 'confidence-gate', 80, 6),
+        n('p5', 'risk-gate', 80, 7),
+        n('p6', 'paper-executor', 80, 8),
+      ],
+      edges: [e('p1', 'p2'), e('p2', 'p3'), e('p3', 'p4'), e('p4', 'p5'), e('p5', 'p6')],
+      notes: trendStarterNotes,
+      frames: trendStarterFrames,
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
     versions: [
       { id: 'mpv-3', label: 'v3', createdAt: '2026-08-10T09:00:00.000Z', note: 'Added calibrator' },
       { id: 'mpv-2', label: 'v2', createdAt: '2026-07-04T14:00:00.000Z', note: 'Swapped normaliser method' },
@@ -1157,6 +1319,28 @@ export const MY_PRESETS: MyPreset[] = [
     visibility: 'unlisted',
     nodeCount: 7,
     layers: ['risk', 'monitoring'],
+    graph: {
+      nodes: [
+        n('rf1', 'position-cap', 80, 7),
+        n('rf2', 'drawdown-brake', 420, 7),
+        n('rf3', 'correlation-guard', 760, 7),
+        n('rf4', 'daily-loss-limit', 1100, 7),
+        n('rf5', 'event-blackout', 80, 7),
+        n('rf6', 'risk-gate', 420, 7),
+        n('rf7', 'paper-executor', 80, 8),
+      ],
+      edges: [
+        e('rf1', 'rf6'),
+        e('rf2', 'rf6'),
+        e('rf3', 'rf6'),
+        e('rf4', 'rf6'),
+        e('rf5', 'rf6'),
+        e('rf6', 'rf7'),
+      ],
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
     versions: [
       { id: 'mpv-5', label: 'v2', createdAt: '2026-08-16T10:00:00.000Z', note: 'Tighter daily loss limit' },
       { id: 'mpv-4', label: 'v1', createdAt: '2026-05-14T11:30:00.000Z', note: 'Initial save' },
@@ -1170,6 +1354,17 @@ export const MY_PRESETS: MyPreset[] = [
     visibility: 'private',
     nodeCount: 3,
     layers: ['data', 'features', 'agents'],
+    graph: {
+      nodes: [
+        n('s1', 'news-stream', 80, 0),
+        n('s4', 'nlp-embedder', 80, 1),
+        n('s6', 'sentiment-agent', 80, 2),
+      ],
+      edges: [e('s1', 's4'), e('s4', 's6')],
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
     versions: [{ id: 'mpv-6', label: 'v1', createdAt: '2026-04-21T08:45:00.000Z', note: 'Initial save' }],
   },
   {
@@ -1180,6 +1375,24 @@ export const MY_PRESETS: MyPreset[] = [
     visibility: 'private',
     nodeCount: 5,
     layers: ['monitoring', 'learning', 'memory'],
+    graph: {
+      nodes: [
+        n('sl4', 'post-mortem', 80, 10),
+        n('sl5', 'rule-miner', 420, 10),
+        n('sl6', 'retrainer', 760, 10),
+        n('sl7', 'outcome-store', 80, 11),
+        n('sl8', 'lesson-bank', 420, 11),
+      ],
+      edges: [
+        e('sl4', 'sl5'),
+        e('sl5', 'sl6'),
+        e('sl4', 'sl7'),
+        e('sl7', 'sl8'),
+      ],
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
     versions: [{ id: 'mpv-7', label: 'v1', createdAt: '2026-07-09T16:20:00.000Z', note: 'Initial save' }],
   },
 ]
@@ -1579,6 +1792,11 @@ export const CREDIT_BUNDLES = [
 /* Creator dashboard                                                   */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Published strategy preset on the creator dashboard.
+ * Note: Once a unified backend exists, PublishedPreset and Preset can collapse
+ * into a single unified StrategyPreset entity.
+ */
 export interface PublishedPreset {
   id: string
   name: string
@@ -1588,13 +1806,121 @@ export interface PublishedPreset {
   reviews: number
   publishedAt: string
   price: number
+  graph: BotGraph
 }
 
 export const PUBLISHED_PRESETS: PublishedPreset[] = [
-  { id: 'preset-trend-starter', name: 'Trend Starter', clones: 4820, revenue: 0, rating: 4.8, reviews: 214, publishedAt: '2026-03-14T10:00:00.000Z', price: 0 },
-  { id: 'preset-news-fade', name: 'News Fade', clones: 1980, revenue: 0, rating: 4.3, reviews: 97, publishedAt: '2026-02-28T13:00:00.000Z', price: 0 },
-  { id: 'preset-risk-chassis-pub', name: 'My Risk Chassis', clones: 742, revenue: 177_608, rating: 4.9, reviews: 61, publishedAt: '2026-05-20T09:00:00.000Z', price: 299 },
-  { id: 'preset-learning-tail-pub', name: 'Learning Tail', clones: 188, revenue: 120_112, rating: 4.4, reviews: 22, publishedAt: '2026-07-12T11:00:00.000Z', price: 799 },
+  {
+    id: 'preset-trend-starter',
+    name: 'Trend Starter',
+    clones: 4820,
+    revenue: 0,
+    rating: 4.8,
+    reviews: 214,
+    publishedAt: '2026-03-14T10:00:00.000Z',
+    price: 0,
+    graph: {
+      nodes: [
+        n('p1', 'ohlcv-feed', 80, 0),
+        n('p2', 'ta-indicators', 80, 1),
+        n('p3', 'technical-agent', 80, 2),
+        n('p4', 'confidence-gate', 80, 6),
+        n('p5', 'risk-gate', 80, 7),
+        n('p6', 'paper-executor', 80, 8),
+      ],
+      edges: [e('p1', 'p2'), e('p2', 'p3'), e('p3', 'p4'), e('p4', 'p5'), e('p5', 'p6')],
+      notes: trendStarterNotes,
+      frames: trendStarterFrames,
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
+  },
+  {
+    id: 'preset-news-fade',
+    name: 'News Fade',
+    clones: 1980,
+    revenue: 0,
+    rating: 4.3,
+    reviews: 97,
+    publishedAt: '2026-02-28T13:00:00.000Z',
+    price: 0,
+    graph: {
+      nodes: sentimentNodes.slice(0, 11),
+      edges: sentimentEdges.slice(0, 9),
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
+  },
+  {
+    id: 'preset-risk-chassis-pub',
+    name: 'My Risk Chassis',
+    clones: 742,
+    revenue: 177_608,
+    rating: 4.9,
+    reviews: 61,
+    publishedAt: '2026-05-20T09:00:00.000Z',
+    price: 299,
+    graph: {
+      nodes: [
+        n('rf1', 'position-cap', 80, 7),
+        n('rf2', 'drawdown-brake', 420, 7),
+        n('rf3', 'correlation-guard', 760, 7),
+        n('rf4', 'daily-loss-limit', 1100, 7),
+        n('rf5', 'event-blackout', 80, 7),
+        n('rf6', 'risk-gate', 420, 7),
+        n('rf7', 'paper-executor', 80, 8),
+        n('rf8', 'pnl-tracker', 80, 9),
+        n('rf9', 'decision-log', 420, 9),
+      ],
+      edges: [
+        e('rf1', 'rf6'),
+        e('rf2', 'rf6'),
+        e('rf3', 'rf6'),
+        e('rf4', 'rf6'),
+        e('rf5', 'rf6'),
+        e('rf6', 'rf7'),
+        e('rf7', 'rf8'),
+        e('rf7', 'rf9'),
+      ],
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
+  },
+  {
+    id: 'preset-learning-tail-pub',
+    name: 'Learning Tail',
+    clones: 188,
+    revenue: 120_112,
+    rating: 4.4,
+    reviews: 22,
+    publishedAt: '2026-07-12T11:00:00.000Z',
+    price: 799,
+    graph: {
+      nodes: [
+        n('sl1', 'pnl-tracker', 80, 9),
+        n('sl2', 'decision-log', 420, 9),
+        n('sl3', 'attribution', 760, 9),
+        n('sl4', 'post-mortem', 80, 10),
+        n('sl5', 'rule-miner', 420, 10),
+        n('sl6', 'retrainer', 760, 10),
+        n('sl7', 'outcome-store', 80, 11),
+        n('sl8', 'lesson-bank', 420, 11),
+      ],
+      edges: [
+        e('sl1', 'sl4'),
+        e('sl2', 'sl4'),
+        e('sl3', 'sl5'),
+        e('sl4', 'sl5'),
+        e('sl5', 'sl6'),
+        e('sl4', 'sl7'),
+        e('sl7', 'sl8'),
+      ],
+      notes: [],
+      frames: [],
+      schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+    },
+  },
 ]
 
 export const CREATOR_EARNINGS = {

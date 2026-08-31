@@ -16,6 +16,8 @@ import {
 } from 'lucide-react'
 import { useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { useSession, toast } from '@/lib/store'
+import type { PublishedPreset } from '@/mock/data'
+import { cloneGraph } from '@/lib/graph-utils'
 import { PillButton, PillLink } from '@/components/ui/pill-button'
 import { Input, Textarea, Field } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/tabs'
@@ -87,7 +89,7 @@ export default function PublishWizardPage() {
   const selectedRun = runs.find((r) => r.id === selectedRunId) || runs[0]
 
   const handlePublish = () => {
-    const publishedItem = {
+    const publishedItem: PublishedPreset = {
       id: slugId('preset'),
       name: name.trim() || bot.name,
       clones: 0,
@@ -96,6 +98,7 @@ export default function PublishWizardPage() {
       reviews: 0,
       publishedAt: new Date().toISOString(),
       price: pricingType === 'paid' ? parseInt(price) || 0 : 0,
+      graph: cloneGraph(bot.graph),
     }
 
     publishPreset(publishedItem)

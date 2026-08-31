@@ -24,8 +24,8 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import { useWorkspace, useHydrated, type StoredPreset } from '@/lib/workspace-store'
-import { BACKTEST_RUNS, MARKETPLACE_PRESETS, type Bot, type BacktestRun, type Preset } from '@/mock/data'
+import { useWorkspace, useHydrated } from '@/lib/workspace-store'
+import { BACKTEST_RUNS, MARKETPLACE_PRESETS, type Bot, type BacktestRun, type Preset, type MyPreset } from '@/mock/data'
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
 import { PillButton } from '@/components/ui/pill-button'
 import { Badge } from '@/components/ui/badge'
@@ -46,7 +46,7 @@ interface CompareSlot {
   subtitle: string
   bot?: Bot
   run?: BacktestRun
-  preset?: Preset | StoredPreset
+  preset?: Preset | MyPreset
 }
 
 const SLOT_COLORS = ['#2997ff', '#00b8c4', '#ff6ac1', '#ff9f0a']
@@ -412,10 +412,10 @@ function CompareContent() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="rounded-xl border border-border/80 bg-background/50 p-4 flex flex-col gap-2">
                   <span className="text-xs font-bold text-foreground">
-                    Nodes in {botSlots[0].title} ({botSlots[0].bot?.nodes.length})
+                    Nodes in {botSlots[0].title} ({(botSlots[0].bot?.graph?.nodes ?? (botSlots[0].bot as any)?.nodes ?? []).length})
                   </span>
                   <div className="flex flex-wrap gap-1.5">
-                    {botSlots[0].bot?.nodes.map((n) => (
+                    {(botSlots[0].bot?.graph?.nodes ?? (botSlots[0].bot as any)?.nodes ?? []).map((n: any) => (
                       <Badge key={n.id} variant="neutral" size="sm">
                         {n.componentId}
                       </Badge>
@@ -425,10 +425,10 @@ function CompareContent() {
 
                 <div className="rounded-xl border border-border/80 bg-background/50 p-4 flex flex-col gap-2">
                   <span className="text-xs font-bold text-foreground">
-                    Nodes in {botSlots[1].title} ({botSlots[1].bot?.nodes.length})
+                    Nodes in {botSlots[1].title} ({(botSlots[1].bot?.graph?.nodes ?? (botSlots[1].bot as any)?.nodes ?? []).length})
                   </span>
                   <div className="flex flex-wrap gap-1.5">
-                    {botSlots[1].bot?.nodes.map((n) => (
+                    {(botSlots[1].bot?.graph?.nodes ?? (botSlots[1].bot as any)?.nodes ?? []).map((n: any) => (
                       <Badge key={n.id} variant="neutral" size="sm">
                         {n.componentId}
                       </Badge>
@@ -473,7 +473,7 @@ function CompareContent() {
                           id: b.id,
                           kind: 'bot',
                           title: b.name,
-                          subtitle: `${b.status} · ${b.nodes.length} nodes`,
+                          subtitle: `${b.status} · ${b.graph?.nodes?.length ?? (b as any).nodes?.length ?? 0} nodes`,
                           bot: b,
                         })
                       }
@@ -481,7 +481,7 @@ function CompareContent() {
                     >
                       <div className="flex flex-col">
                         <span className="text-xs font-bold text-foreground">{b.name}</span>
-                        <span className="text-[11px] text-muted-foreground">{b.nodes.length} nodes · {b.status}</span>
+                        <span className="text-[11px] text-muted-foreground">{b.graph?.nodes?.length ?? (b as any).nodes?.length ?? 0} nodes · {b.status}</span>
                       </div>
                       <PillButton size="sm" variant="secondary">
                         Select

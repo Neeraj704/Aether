@@ -47,8 +47,7 @@ export function ResultsActions({ bot, run }: { bot: Bot; run: BacktestRun }) {
     savePreset({
       name: presetName.trim() || `${bot.name} preset`,
       description: bot.description,
-      nodes: bot.nodes,
-      edges: bot.edges,
+      graph: bot.graph,
     })
     toast.success('Preset saved', `"${presetName}" added to My Presets.`)
     setPresetDialogOpen(false)

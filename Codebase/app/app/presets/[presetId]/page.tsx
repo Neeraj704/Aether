@@ -16,7 +16,7 @@ import {
   Check,
   CheckCircle2,
 } from 'lucide-react'
-import { useWorkspace, useHydrated, type StoredPreset } from '@/lib/workspace-store'
+import { useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
 import { LAYER_MAP, COMPONENT_MAP } from '@/mock/layers'
 import { Badge } from '@/components/ui/badge'

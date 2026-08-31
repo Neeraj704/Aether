@@ -53,7 +53,7 @@ export function ConfigPanel({
   const [seed, setSeed] = useState(() => Math.floor(1000 + Math.random() * 9000))
   const [type, setType] = useState<BacktestRun['config']['type']>('historical')
 
-  const cost = creditCost(type, bot.nodes.length)
+  const cost = creditCost(type, bot.graph?.nodes?.length ?? (bot as any).nodes?.length ?? 0)
   const hasEnoughCredits = credits >= cost
 
   const handleRun = () => {
@@ -138,7 +138,7 @@ export function ConfigPanel({
 
         {/* Credit Breakdown */}
         <div className="rounded-lg border border-border bg-secondary/30 p-4 flex flex-col gap-1">
-          <DataRow label="Graph Complexity" value={`${bot.nodes.length} nodes`} />
+          <DataRow label="Graph Complexity" value={`${bot.graph?.nodes?.length ?? (bot as any).nodes?.length ?? 0} nodes`} />
           <DataRow label="Estimated Credit Cost" value={`${cost} credits`} />
           <DataRow
             label="Your Credit Balance"

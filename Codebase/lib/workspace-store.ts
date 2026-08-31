@@ -14,6 +14,7 @@ import {
   type Bot,
   type BotEdge,
   type BotNode,
+  type BotGraph,
   type BotStatus,
   type CanvasFrame,
   type CanvasNote,
@@ -22,8 +23,64 @@ import {
   type Notification,
   type Preset,
   type PublishedPreset,
+  emptyGraph,
 } from '@/mock/data'
 import { slugId } from '@/lib/utils'
+import { cloneGraph, migrateGraph } from '@/lib/graph-utils'
+
+/* ------------------------------------------------------------------ */
+/* Storage Normalization & Migration Helpers                           */
+/* ------------------------------------------------------------------ */
+
+/** Normalizes a bot loaded from storage, migrating legacy loose fields if graph is absent. */
+export function normalizeBot(bot: any): Bot {
+  if (!bot) return bot
+  if (bot.graph && bot.graph.nodes) {
+    const { graph } = migrateGraph(bot.graph)
+    return {
+      ...bot,
+      graph,
+      versions: (bot.versions || []).map((v: any) => ({
+        ...v,
+        graph: v.graph ? migrateGraph(v.graph).graph : cloneGraph(graph),
+      })),
+    }
+  }
+  const rawGraph: BotGraph = {
+    nodes: bot.nodes || [],
+    edges: bot.edges || [],
+    notes: bot.notes || [],
+    frames: bot.frames || [],
+    schemaVersion: 1,
+  }
+  const { graph } = migrateGraph(rawGraph)
+  return {
+    ...bot,
+    graph,
+    versions: (bot.versions || []).map((v: any) => ({
+      ...v,
+      graph: v.graph ? migrateGraph(v.graph).graph : cloneGraph(graph),
+    })),
+  }
+}
+
+/** Normalizes a preset loaded from storage, migrating legacy loose fields if graph is absent. */
+export function normalizePreset<T extends { graph?: BotGraph; nodes?: BotNode[]; edges?: BotEdge[] }>(preset: T): T {
+  if (!preset) return preset
+  if (preset.graph && preset.graph.nodes) {
+    const { graph } = migrateGraph(preset.graph)
+    return { ...preset, graph }
+  }
+  const rawGraph: BotGraph = {
+    nodes: (preset as any).nodes || [],
+    edges: (preset as any).edges || [],
+    notes: (preset as any).notes || [],
+    frames: (preset as any).frames || [],
+    schemaVersion: 1,
+  }
+  const { graph } = migrateGraph(rawGraph)
+  return { ...preset, graph }
+}
 
 /* ------------------------------------------------------------------ */
 /* Node helpers                                                        */
@@ -100,20 +157,11 @@ export function makeNode(componentId: string, x: number, y: number): BotNode {
 /* Workspace store — everything the user can actually change           */
 /* ------------------------------------------------------------------ */
 
-/**
- * Saved mini-presets carry their own graph so they can be re-instantiated on
- * the canvas. The seeded fixtures describe blocks only, hence the optionals.
- */
-export type StoredPreset = MyPreset & {
-  nodes?: BotNode[]
-  edges?: BotEdge[]
-}
-
 interface WorkspaceState {
   hydrated: boolean
   bots: Bot[]
   runs: BacktestRun[]
-  myPresets: StoredPreset[]
+  myPresets: MyPreset[]
   publishedPresets: PublishedPreset[]
   creatorEarnings: typeof CREATOR_EARNINGS
   notifications: Notification[]
@@ -123,16 +171,11 @@ interface WorkspaceState {
   likedPresets: string[]
 
   /* Bots */
-  createBot: (input?: { name?: string; description?: string; nodes?: BotNode[]; edges?: BotEdge[]; tags?: string[] }) => Bot
+  createBot: (input?: { name?: string; description?: string; graph?: BotGraph; tags?: string[] }) => Bot
   duplicateBot: (id: string) => Bot | null
   deleteBot: (id: string) => void
   updateBot: (id: string, patch: Partial<Omit<Bot, 'id'>>) => void
-  saveGraph: (
-    id: string,
-    nodes: BotNode[],
-    edges: BotEdge[],
-    annotations?: { notes: CanvasNote[]; frames: CanvasFrame[] },
-  ) => void
+  saveGraph: (id: string, graph: BotGraph) => void
   setBotStatus: (id: string, status: BotStatus) => void
   snapshotVersion: (id: string, note: string) => void
 
@@ -147,7 +190,7 @@ interface WorkspaceState {
   updatePresetVisibility: (id: string, visibility: 'private' | 'unlisted' | 'public') => void
   renamePreset: (id: string, name: string) => void
   toggleLikePreset: (id: string) => void
-  savePreset: (input: { name: string; description: string; nodes: BotNode[]; edges: BotEdge[] }) => void
+  savePreset: (input: { name: string; description: string; graph: BotGraph }) => void
   deletePreset: (id: string) => void
   publishPreset: (preset: PublishedPreset) => void
   requestCreatorPayout: () => void
@@ -164,7 +207,7 @@ interface WorkspaceState {
 const seed = () => ({
   bots: BOTS,
   runs: BACKTEST_RUNS,
-  myPresets: MY_PRESETS as StoredPreset[],
+  myPresets: MY_PRESETS,
   publishedPresets: PUBLISHED_PRESETS,
   creatorEarnings: CREATOR_EARNINGS,
   notifications: NOTIFICATIONS,
@@ -183,6 +226,7 @@ export const useWorkspace = create<WorkspaceState>()(
       /* ---------------- Bots ---------------- */
 
       createBot: (input = {}) => {
+        const graph = input.graph ? cloneGraph(input.graph) : emptyGraph()
         const bot: Bot = {
           id: slugId('bot'),
           name: input.name?.trim() || 'Untitled bot',
@@ -191,8 +235,7 @@ export const useWorkspace = create<WorkspaceState>()(
           createdAt: nowISO(),
           updatedAt: nowISO(),
           tags: input.tags ?? [],
-          nodes: input.nodes ?? [],
-          edges: input.edges ?? [],
+          graph,
           headlineMetric: { label: 'Not run yet', value: '—', positive: true },
           visibility: 'private',
           versions: [
@@ -201,7 +244,8 @@ export const useWorkspace = create<WorkspaceState>()(
               label: 'v1',
               createdAt: nowISO(),
               note: 'Created',
-              nodeCount: input.nodes?.length ?? 0,
+              nodeCount: graph.nodes.length,
+              graph: cloneGraph(graph),
             },
           ],
           runIds: [],
@@ -213,6 +257,7 @@ export const useWorkspace = create<WorkspaceState>()(
       duplicateBot: (id) => {
         const source = get().bots.find((b) => b.id === id)
         if (!source) return null
+        const graph = cloneGraph(source.graph)
         const copy: Bot = {
           ...source,
           id: slugId('bot'),
@@ -222,13 +267,15 @@ export const useWorkspace = create<WorkspaceState>()(
           updatedAt: nowISO(),
           visibility: 'private',
           runIds: [],
+          graph,
           versions: [
             {
               id: slugId('v'),
               label: 'v1',
               createdAt: nowISO(),
               note: `Duplicated from ${source.name}`,
-              nodeCount: source.nodes.length,
+              nodeCount: graph.nodes.length,
+              graph: cloneGraph(graph),
             },
           ],
         }
@@ -249,21 +296,18 @@ export const useWorkspace = create<WorkspaceState>()(
           ),
         }),
 
-    saveGraph: (id, nodes, edges, annotations) =>
-      set({
-        bots: get().bots.map((b) =>
-          b.id === id
-            ? {
-                ...b,
-                nodes,
-                edges,
-                notes: annotations?.notes ?? b.notes,
-                frames: annotations?.frames ?? b.frames,
-                updatedAt: nowISO(),
-              }
-            : b,
-        ),
-      }),
+      saveGraph: (id, graph) =>
+        set({
+          bots: get().bots.map((b) =>
+            b.id === id
+              ? {
+                  ...b,
+                  graph,
+                  updatedAt: nowISO(),
+                }
+              : b,
+          ),
+        }),
 
       setBotStatus: (id, status) =>
         set({
@@ -283,9 +327,8 @@ export const useWorkspace = create<WorkspaceState>()(
                       label: `v${b.versions.length + 1}`,
                       createdAt: nowISO(),
                       note,
-                      nodeCount: b.nodes.length,
-                      nodes: JSON.parse(JSON.stringify(b.nodes)),
-                      edges: JSON.parse(JSON.stringify(b.edges)),
+                      nodeCount: b.graph.nodes.length,
+                      graph: cloneGraph(b.graph),
                     },
                     ...b.versions,
                   ],
@@ -324,40 +367,37 @@ export const useWorkspace = create<WorkspaceState>()(
 
       /* ---------------- Presets ---------------- */
 
-      forkPreset: (preset) => {
+      forkPreset: (preset: Preset) => {
         const bot = get().createBot({
           name: preset.name,
           description: preset.description,
-          nodes: preset.nodes,
-          edges: preset.edges,
+          graph: preset.graph,
           tags: preset.tags,
         })
         set({ forkedPresets: Array.from(new Set([...get().forkedPresets, preset.id])) })
         return bot
       },
 
-      createBotFromPreset: (presetId) => {
+      createBotFromPreset: (presetId: string) => {
         const preset = get().myPresets.find((p) => p.id === presetId)
-        const nodes = preset && preset.nodes ? JSON.parse(JSON.stringify(preset.nodes)) : []
-        const edges = preset && preset.edges ? JSON.parse(JSON.stringify(preset.edges)) : []
         const bot = get().createBot({
           name: preset ? `${preset.name} (Instance)` : 'New Strategy Bot',
           description: preset?.description || 'Created from saved preset.',
-          nodes,
-          edges,
+          graph: preset?.graph,
           tags: ['preset', 'custom'],
         })
         return bot
       },
 
-      duplicatePreset: (id) => {
+      duplicatePreset: (id: string) => {
         const preset = get().myPresets.find((p) => p.id === id)
         if (!preset) return
-        const clone: StoredPreset = {
+        const clone: MyPreset = {
           ...preset,
           id: slugId('mp'),
           name: `Copy of ${preset.name}`,
           createdAt: nowISO(),
+          graph: cloneGraph(preset.graph),
         }
         set({ myPresets: [clone, ...get().myPresets] })
       },
@@ -381,17 +421,18 @@ export const useWorkspace = create<WorkspaceState>()(
         })
       },
 
-      savePreset: ({ name, description, nodes, edges }) => {
-        const preset: StoredPreset = {
+      savePreset: ({ name, description, graph }) => {
+        const clonedGraph = cloneGraph(graph)
+        const preset: MyPreset = {
           id: slugId('mp'),
           name,
           description,
           createdAt: nowISO(),
           visibility: 'private',
-          nodeCount: nodes.length,
+          nodeCount: clonedGraph.nodes.length,
           layers: Array.from(
             new Set(
-              nodes
+              clonedGraph.nodes
                 .map((n) => COMPONENT_MAP[n.componentId]?.layer)
                 .filter((l): l is NonNullable<typeof l> => Boolean(l)),
             ),
@@ -399,8 +440,7 @@ export const useWorkspace = create<WorkspaceState>()(
           versions: [
             { id: slugId('mpv'), label: 'v1', createdAt: nowISO(), note: 'Initial save' },
           ],
-          nodes,
-          edges,
+          graph: clonedGraph,
         }
         set({ myPresets: [preset, ...get().myPresets] })
       },
@@ -451,11 +491,25 @@ export const useWorkspace = create<WorkspaceState>()(
     {
       name: 'aether.workspace',
       storage: createJSONStorage(() => localStorage),
-      version: 1,
+      version: 2,
       partialize: ({ hydrated, ...rest }) => rest,
+      migrate: (persistedState: any) => {
+        if (!persistedState) return persistedState
+        return {
+          ...persistedState,
+          bots: (persistedState.bots || []).map(normalizeBot),
+          myPresets: (persistedState.myPresets || []).map(normalizePreset),
+          publishedPresets: (persistedState.publishedPresets || []).map(normalizePreset),
+        }
+      },
       onRehydrateStorage: () => (state) => {
         if (!state || !state.bots || state.bots.length === 0) {
           useWorkspace.setState(seed())
+        } else {
+          const bots = (state.bots || []).map(normalizeBot)
+          const myPresets = (state.myPresets || []).map(normalizePreset)
+          const publishedPresets = (state.publishedPresets || []).map(normalizePreset)
+          useWorkspace.setState({ bots, myPresets, publishedPresets })
         }
         useWorkspace.setState({ hydrated: true })
       },

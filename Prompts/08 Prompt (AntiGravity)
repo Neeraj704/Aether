@@ -1,0 +1,581 @@
+# PHASE 7 — Graph, Preset & Canvas Storage Normalization
+
+**Read `00 - START HERE` first for ground rules (stack, design language, "never do this" list) — they still apply in full.** This phase does not depend on Phase 5. It does depend on Phase 6 (the rich `FieldDef`/config shape) being in place, which it is.
+
+This phase touches **only** the files listed in §2 (Scope) plus the specific call sites named in §5. Do not restyle, refactor, or "improve" anything else you notice while you're in these files — if you spot something unrelated, note it in a "found but not fixed" list at the end of your session instead of fixing it inline.
+
+Still frontend-only. Still no backend. This phase does not add a database or an API route. What it does is make the **existing** `localStorage`/Zustand data shape internally consistent, so that (a) a strategy graph is byte-for-byte identical wherever it travels inside the app, and (b) that same shape can be handed to a Postgres/Prisma schema later with no redesign.
+
+---
+
+## 0. Why this phase exists — the exact bugs, with receipts
+
+This isn't a hypothetical cleanup. I read `lib/workspace-store.ts`, `lib/builder-store.ts`, `mock/data.ts`, and the publish/version-restore pages line by line. Here is what is **actually broken today**, so you understand exactly what you're fixing and why each fix matters:
+
+1. **`CanvasNote[]` and `CanvasFrame[]` (sticky notes and section frames) are optional fields (`notes?`, `frames?`) only on the `Bot` type.** They do not exist at all on `Preset`, `MyPreset`/`StoredPreset`, or `PublishedPreset`. Every other entity that carries a graph silently has no way to carry notes or frames.
+
+2. **`forkPreset(preset: Preset)` in `lib/workspace-store.ts`** copies `preset.nodes` and `preset.edges` into a new bot via `createBot(...)`, but `createBot`'s input type doesn't even accept `notes`/`frames` as parameters, and `Preset` doesn't have them to pass in the first place. **Result: forking a marketplace preset today always produces a bot with zero sticky notes and zero section frames**, even if the original creator carefully labeled and grouped their graph.
+
+3. **`savePreset` builds a `StoredPreset` object that does store `nodes`/`edges`** (because `StoredPreset = MyPreset & { nodes?: BotNode[]; edges?: BotEdge[] }`), **but never captures `notes`/`frames`** — the type doesn't declare them and the function signature doesn't accept them. Saving your own bot as a reusable preset silently drops every sticky note and every labeled section.
+
+4. **`duplicatePreset(id)`** spreads the existing `StoredPreset` object, so it only clones whatever that object already has — which per #3 is never notes/frames.
+
+5. **The marketplace publish flow is the worst of these.** In `app/app/marketplace/publish/[botId]/page.tsx`, `handlePublish()` builds a `publishedItem` object with fields `{ id, name, clones, revenue, rating, reviews, publishedAt, price }` — **it never reads `bot.nodes`, `bot.edges`, `bot.notes`, or `bot.frames` at all.** Publishing a bot to the marketplace today captures precisely zero graph content. The public `/marketplace/:presetId` pages that show a browsable, forkable graph must be reading from a separate hardcoded `Preset[]` fixture that has no real connection to what a real user published. This is the single biggest gap behind what you're worried about: **today, there is no code path where "clone another trader's published bot" actually reproduces their real graph** — it can't, because publishing never captured it.
+
+6. **`snapshotVersion(id, note)`** deep-clones `nodes` and `edges` into the new `BotVersion`, but not `notes`/`frames`. Version history has never preserved canvas annotations.
+
+7. **The version-restore page** (`app/app/builder/[botId]/version/[versionId]/page.tsx`) compounds #6: its `load()` preview call passes `bot.notes, bot.frames` — the **current, present-day** notes/frames — for what's supposed to be a preview of an **old** version. And `handleRestore()` calls `saveGraph(bot.id, nodes, edges)` with no third argument, so `saveGraph`'s fallback (`annotations?.notes ?? b.notes`) just keeps whatever notes/frames currently exist. Net effect: restoring an old version has never restored that version's annotations, because they were never captured, and the "preview" of an old version has always silently shown current-day sticky notes instead of period-accurate ones.
+
+8. **There is a real, already-encountered position-format inconsistency.** `lib/builder-store.ts` has a `migratePositions()` function that detects "legacy" fixtures where `y` was stored as a lane *index* (0–9) instead of a pixel offset, and promotes them. This proves the shape has already drifted once with no formal versioning to catch it. It will drift again with no schema version to gate migrations.
+
+Every fix below exists to close one of these eight numbered gaps. Keep the numbers in mind as you implement — you'll reference them in your own commit/session notes.
+
+---
+
+## 1. The target shape: one canonical `BotGraph`
+
+Add this to `mock/data.ts`, near the existing `BotNode`/`BotEdge`/`CanvasNote`/`CanvasFrame` definitions:
+
+```ts
+/**
+ * The single canonical shape for "a strategy graph as it exists on a canvas."
+ * Every entity that can be dragged onto, saved from, or restored onto the
+ * Builder canvas stores exactly this shape — not a partial or optional
+ * subset of it. Bot, BotVersion, Preset, StoredPreset (MyPreset), and
+ * PublishedPreset all embed one of these rather than duplicating
+ * nodes/edges/notes/frames as separate optional fields.
+ */
+export interface BotGraph {
+  nodes: BotNode[]
+  edges: BotEdge[]
+  notes: CanvasNote[]
+  frames: CanvasFrame[]
+  /**
+   * Bumped whenever the shape of BotNode/BotEdge/CanvasNote/CanvasFrame
+   * changes in a way that requires migration. Current value: 2.
+   * (1 = pre-Phase-7 shape with y-as-lane-index legacy fixtures and no
+   * notes/frames guarantee. 2 = this phase: pixel-space y, notes/frames
+   * always present as arrays, never undefined.)
+   */
+  schemaVersion: number
+}
+
+export const CURRENT_GRAPH_SCHEMA_VERSION = 2
+
+/** An empty, valid graph — use this instead of hand-rolling `{ nodes: [], edges: [], ... }` anywhere. */
+export function emptyGraph(): BotGraph {
+  return { nodes: [], edges: [], notes: [], frames: [], schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION }
+}
+```
+
+**Rule going forward: nothing in this codebase stores `nodes`/`edges`/`notes`/`frames` as four separate sibling fields again.** Every entity below embeds one `graph: BotGraph` field instead. This is the actual normalization — right now the same four-array-bundle is spelled out inconsistently in four different places (`Bot`, `BotVersion`, `Preset`, `StoredPreset`) with different subsets present in each. After this phase there is exactly one place its shape is declared.
+
+---
+
+## 2. Scope — files this phase touches
+
+- `mock/data.ts` — type changes (§3) and updates to every seed fixture (`BOTS`, `MY_PRESETS`, `PRESETS`/marketplace preset fixtures, `PUBLISHED_PRESETS`) to use the new `graph: BotGraph` shape instead of loose fields.
+- `lib/workspace-store.ts` — every function that reads or writes nodes/edges/notes/frames (§5).
+- `lib/builder-store.ts` — `load()`, `migratePositions()`, and the `Snapshot` type used for undo/redo, clipboard, and copy/paste (§6).
+- `app/app/marketplace/publish/[botId]/page.tsx` — `handlePublish()` (§5.5).
+- `app/app/builder/[botId]/version/[versionId]/page.tsx` — the preview `load()` call and `handleRestore()` (§5.7).
+- `app/app/bots/[botId]/page.tsx` and any other read site of `bot.versions[i].nodes`/`.edges` — update to the new `BotVersion.graph` shape (search the whole codebase for `.versions` and `version.nodes` / `version.edges` before you finish; every read site must be updated, not just the ones named here).
+- New file: `lib/graph-utils.ts` — the clone/remap utility (§4) and export/import helpers (§7).
+- New UI additions (small, described exactly in §7 and §8): an "Export" and "Import" action in the bot's overflow menu, and a schema-mismatch banner.
+
+Do not touch `mock/layers.ts` (the `FieldDef`/`ComponentDef` system from Phase 6) — that shape is correct as-is and out of scope here.
+
+---
+
+## 3. Exact type changes required in `mock/data.ts`
+
+```ts
+export interface BotVersion {
+  id: string
+  label: string
+  createdAt: string
+  note: string
+  nodeCount: number
+  graph: BotGraph   // was: nodes?: BotNode[]; edges?: BotEdge[]  — now always present, never optional
+}
+
+export interface Bot {
+  id: string
+  name: string
+  description: string
+  status: BotStatus
+  updatedAt: string
+  createdAt: string
+  tags: string[]
+  graph: BotGraph   // was: nodes: BotNode[]; edges: BotEdge[]; notes?: CanvasNote[]; frames?: CanvasFrame[]
+  headlineMetric: { label: string; value: string; positive: boolean }
+  visibility: 'private' | 'unlisted' | 'public'
+  versions: BotVersion[]
+  runIds: string[]
+}
+
+export interface Preset {
+  id: string
+  name: string
+  tagline: string
+  description: string
+  authorNotes: string
+  author: { name: string; initials: string; handle: string }
+  price: number
+  forks: number
+  rating: number
+  reviewCount: number
+  layers: LayerId[]
+  nodeCount: number
+  tier: PlanTier
+  headline: { label: string; value: string; positive: boolean }
+  createdAt: string
+  category: string
+  tags: string[]
+  graph: BotGraph   // was: nodes: BotNode[]; edges: BotEdge[]  — now also carries notes/frames
+  reviews: Review[]
+  sampleRunId: string
+  trending: boolean
+}
+
+export interface MyPreset {
+  id: string
+  name: string
+  description: string
+  createdAt: string
+  visibility: 'private' | 'unlisted' | 'public'
+  nodeCount: number
+  layers: LayerId[]
+  publishedId?: string
+  graph: BotGraph   // NEW — was entirely absent; this is bug #3 above
+  versions: { id: string; label: string; createdAt: string; note: string }[]
+}
+
+export interface PublishedPreset {
+  id: string
+  name: string
+  clones: number
+  revenue: number
+  rating: number
+  reviews: number
+  publishedAt: string
+  price: number
+  graph: BotGraph   // NEW — this is bug #5, the critical one
+}
+```
+
+Delete the `StoredPreset` type entirely (`MyPreset & { nodes?: BotNode[]; edges?: BotEdge[] }`) — `MyPreset` itself now always carries a full `graph`, so the "stored vs. seed" distinction that motivated `StoredPreset` no longer exists. Update every import/usage of `StoredPreset` in `lib/workspace-store.ts` to use `MyPreset` directly.
+
+**Update every seed fixture accordingly.** This is mechanical but must be done for every entry in `BOTS`, `MY_PRESETS`, the marketplace `PRESETS` array, and `PUBLISHED_PRESETS` in `mock/data.ts` — wrap each entry's existing `nodes`/`edges` (and `notes`/`frames` where present) into a `graph: { nodes, edges, notes: notes ?? [], frames: frames ?? [], schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION }`. Where a fixture currently has no `notes`/`frames` at all, default to empty arrays — don't invent fake sticky notes for seed data.
+
+**For `PUBLISHED_PRESETS` and `MY_PRESETS` specifically**, since these previously had zero graph content, synthesize a `graph` for each by reusing the graph from a plausible matching `Bot` or `Preset` fixture with the same or similar name (e.g. `preset-trend-starter` should reuse whatever graph exists under `MY_PRESETS`'s `mp-momentum-core`, since `MyPreset`'s `publishedId: 'preset-trend-starter'` already links them — that link exists today and is exactly the kind of connection that should carry a shared graph). Where no sensible match exists, build a small plausible graph (3–6 nodes across a couple of layers) consistent with that preset's `layers`/`nodeCount` field, using real `componentId`s from `mock/layers.ts`. Do not leave any seed fixture with an empty graph — the whole point of this phase is that these datasets stop being placeholders.
+
+---
+
+## 4. The clone/remap utility — `lib/graph-utils.ts`
+
+This is the actual core of the phase and the direct answer to your "100% identical, no differences" requirement. Every place in the app that turns one person's graph into a new, independent graph (fork, duplicate, instantiate-from-preset, paste) must go through this one function — never hand-rolled inline.
+
+```ts
+import type { BotGraph, BotNode, BotEdge, CanvasNote, CanvasFrame } from '@/mock/data'
+import { slugId } from '@/lib/utils'
+import { CURRENT_GRAPH_SCHEMA_VERSION } from '@/mock/data'
+
+/**
+ * Deep-clones a graph into a fully independent copy with new IDs, while
+ * preserving every visual and semantic property EXACTLY:
+ *  - x, y for every node, note — untouched, pixel-identical
+ *  - x, y, w, h for every frame — untouched, pixel-identical
+ *  - config, enabled, needsConfig for every node — deep-cloned, untouched values
+ *  - text, color, kind, resolved for every note — untouched
+ *  - label, hue for every frame — untouched
+ *  - edge topology — preserved exactly, remapped through the new node IDs
+ *
+ * Only IDs change (nodes, edges, notes, frames all get fresh slugIds), because
+ * IDs must be unique per-bot-instance to avoid collisions when the same
+ * preset is forked by many users or duplicated multiple times by one user.
+ * componentId on each node is NEVER changed — that's what makes the node
+ * "the same kind of node," and it must survive the clone unchanged so the
+ * cloned node still resolves to the right ComponentDef/FieldDef set.
+ */
+export function cloneGraph(source: BotGraph): BotGraph {
+  const nodeIdMap = new Map<string, string>()
+  for (const n of source.nodes) nodeIdMap.set(n.id, slugId('node'))
+
+  const nodes: BotNode[] = source.nodes.map((n) => ({
+    ...n,
+    id: nodeIdMap.get(n.id)!,
+    config: JSON.parse(JSON.stringify(n.config)),
+    // x, y, componentId, enabled, needsConfig all pass through unchanged via ...n
+  }))
+
+  const edges: BotEdge[] = source.edges
+    .filter((e) => nodeIdMap.has(e.source) && nodeIdMap.has(e.target))
+    .map((e) => ({
+      id: slugId('edge'),
+      source: nodeIdMap.get(e.source)!,
+      target: nodeIdMap.get(e.target)!,
+    }))
+
+  const notes: CanvasNote[] = source.notes.map((note) => ({
+    ...note,
+    id: slugId('note'),
+    // x, y, text, color, kind, resolved, createdAt all pass through unchanged
+  }))
+
+  const frames: CanvasFrame[] = source.frames.map((frame) => ({
+    ...frame,
+    id: slugId('frame'),
+    // x, y, w, h, label, hue all pass through unchanged
+  }))
+
+  return { nodes, edges, notes, frames, schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION }
+}
+```
+
+**The `edges.filter(...)` line matters and must not be dropped.** It's a defensive guard against a malformed source graph (e.g. an edge pointing at a node ID that doesn't exist in `source.nodes`, which can currently happen with hand-edited fixtures) — silently drop orphaned edges rather than crash or produce an edge to `undefined`. Log a `console.warn` if this filter actually removes anything, so it's visible during testing.
+
+Also add, in the same file:
+
+```ts
+/** Structural sanity check — every edge must reference nodes that exist. Used by import and by dev-time assertions. */
+export function validateGraphIntegrity(graph: BotGraph): string[] {
+  const problems: string[] = []
+  const ids = new Set(graph.nodes.map((n) => n.id))
+  for (const e of graph.edges) {
+    if (!ids.has(e.source)) problems.push(`Edge ${e.id} references missing source node ${e.source}`)
+    if (!ids.has(e.target)) problems.push(`Edge ${e.id} references missing target node ${e.target}`)
+  }
+  return problems
+}
+```
+
+---
+
+## 5. Fix every call site — exact before/after
+
+### 5.1 `createBot` in `lib/workspace-store.ts`
+
+Change the input type to accept a full or partial graph, and always run it through `cloneGraph` so a caller can never accidentally hand over live-referenced arrays that get mutated later:
+
+```ts
+createBot: (input?: { name?: string; description?: string; graph?: BotGraph; tags?: string[] }) => Bot
+```
+
+```ts
+createBot: (input = {}) => {
+  const graph = input.graph ? cloneGraph(input.graph) : emptyGraph()
+  const bot: Bot = {
+    id: slugId('bot'),
+    name: input.name || 'Untitled Bot',
+    description: input.description || '',
+    status: 'draft',
+    createdAt: nowISO(),
+    updatedAt: nowISO(),
+    tags: input.tags || [],
+    graph,
+    headlineMetric: { label: 'Total return', value: '—', positive: true },
+    visibility: 'private',
+    versions: [{ id: slugId('v'), label: 'v1', createdAt: nowISO(), note: 'Initial save', nodeCount: graph.nodes.length, graph: cloneGraph(graph) }],
+    runIds: [],
+  }
+  set({ bots: [bot, ...get().bots] })
+  return bot
+}
+```
+
+(Adjust field names to match whatever the real current implementation names things — the point is: single `graph` field, always cloned, version 1 captures the same graph.)
+
+### 5.2 `duplicateBot`
+
+Already spreads the whole `source` object today, which — once `Bot.graph` replaces the four loose fields — still isn't quite right, because a plain spread shares array references with the original bot. Fix it to explicitly clone:
+
+```ts
+duplicateBot: (id) => {
+  const source = get().bots.find((b) => b.id === id)
+  if (!source) return null
+  const graph = cloneGraph(source.graph)
+  const copy: Bot = {
+    ...source,
+    id: slugId('bot'),
+    name: `${source.name} copy`,
+    status: 'draft',
+    createdAt: nowISO(),
+    updatedAt: nowISO(),
+    visibility: 'private',
+    runIds: [],
+    graph,
+    versions: [{ id: slugId('v'), label: 'v1', createdAt: nowISO(), note: `Duplicated from ${source.name}`, nodeCount: graph.nodes.length, graph: cloneGraph(graph) }],
+  }
+  set({ bots: [copy, ...get().bots] })
+  return copy
+}
+```
+
+### 5.3 `saveGraph`
+
+Simplify to always take a full `BotGraph` rather than separate `nodes`/`edges`/optional `annotations`:
+
+```ts
+saveGraph: (id, graph) =>
+  set({
+    bots: get().bots.map((b) => (b.id === id ? { ...b, graph, updatedAt: nowISO() } : b)),
+  }),
+```
+
+Every existing call site of `saveGraph(id, nodes, edges, annotations)` must be updated to pass a single `{ nodes, edges, notes, frames, schemaVersion }` object instead. Grep the whole codebase for `saveGraph(` and fix every call, not just the ones named elsewhere in this document.
+
+### 5.4 `snapshotVersion` — closes bug #6
+
+```ts
+snapshotVersion: (id, note) =>
+  set({
+    bots: get().bots.map((b) =>
+      b.id === id
+        ? {
+            ...b,
+            updatedAt: nowISO(),
+            versions: [
+              { id: slugId('v'), label: `v${b.versions.length + 1}`, createdAt: nowISO(), note, nodeCount: b.graph.nodes.length, graph: cloneGraph(b.graph) },
+              ...b.versions,
+            ],
+          }
+        : b,
+    ),
+  }),
+```
+
+Note `cloneGraph`, not `JSON.parse(JSON.stringify(...))` — cloning gives every note/frame/node/edge in the snapshot its own fresh IDs, which matters once notes/frames actually get captured (previously this used raw deep-copy since it only handled nodes/edges; now that notes/frames are included, use the same clone utility as everywhere else for consistency, since a version snapshot is conceptually "fork this moment in time," even though it's not user-facing as a fork).
+
+### 5.5 Marketplace publish flow — closes bug #5, the critical one
+
+In `app/app/marketplace/publish/[botId]/page.tsx`, `handlePublish()` currently builds `publishedItem` with no graph at all. Fix:
+
+```ts
+const handlePublish = () => {
+  const publishedItem: PublishedPreset = {
+    id: slugId('preset'),
+    name: name.trim() || bot.name,
+    clones: 0,
+    revenue: 0,
+    rating: 5.0,
+    reviews: 0,
+    publishedAt: new Date().toISOString(),
+    price: pricingType === 'paid' ? parseInt(price) || 0 : 0,
+    graph: cloneGraph(bot.graph),   // <-- the fix: actually carry the graph
+  }
+
+  publishPreset(publishedItem)
+  toast.success('Strategy Published!', `"${publishedItem.name}" is now live on the community marketplace.`)
+  router.push('/app/creator/dashboard')
+}
+```
+
+This alone is necessary but not sufficient — `PublishedPreset` (creator-dashboard-facing) and `Preset` (public marketplace browsing/forking-facing) are still two different types today. Decide and implement one of these two approaches, and document your choice in a code comment at both type definitions:
+
+- **Approach A (recommended, simpler):** make `Preset` the single public-facing type, and have `publishPreset` actually push into the same list the public `/marketplace` pages read from (today likely a separate `PRESETS`/`MARKETPLACE_PRESETS` fixture array) — i.e. `PublishedPreset` becomes redundant and creator-dashboard views just filter `Preset[]` down to ones authored by the current user. This is the more correct long-term shape (a published bot *is* a marketplace preset, not two separate records that happen to share a name) and sets up cleanly for a future backend where this is obviously one table.
+- **Approach B (if A is too large a refactor for this phase):** keep both types, but require every place that constructs a `PublishedPreset` to also push a matching `Preset` (same `id`) into the marketplace-browsing dataset, with `graph: cloneGraph(bot.graph)` on both. Add a code comment on `PublishedPreset` noting this duplication is temporary and should collapse to Approach A once there's a real backend.
+
+Pick Approach A unless you find a concrete reason it breaks something else in the creator dashboard or marketplace detail page — check both before deciding.
+
+### 5.6 `forkPreset`, `createBotFromPreset`, `duplicatePreset`, `savePreset` — close bugs #2, #3, #4
+
+```ts
+forkPreset: (preset: Preset) => {
+  const bot = get().createBot({ name: preset.name, description: preset.description, graph: preset.graph, tags: preset.tags })
+  set({ forkedPresets: Array.from(new Set([...get().forkedPresets, preset.id])) })
+  return bot
+}
+
+createBotFromPreset: (presetId: string) => {
+  const preset = get().myPresets.find((p) => p.id === presetId)
+  const bot = get().createBot({
+    name: preset ? `${preset.name} (Instance)` : 'New Strategy Bot',
+    description: preset?.description || 'Created from saved preset.',
+    graph: preset?.graph,
+    tags: ['preset', 'custom'],
+  })
+  return bot
+}
+
+duplicatePreset: (id: string) => {
+  const preset = get().myPresets.find((p) => p.id === id)
+  if (!preset) return
+  const clone: MyPreset = { ...preset, id: slugId('mp'), name: `Copy of ${preset.name}`, createdAt: nowISO(), graph: cloneGraph(preset.graph) }
+  set({ myPresets: [clone, ...get().myPresets] })
+}
+
+savePreset: (input: { name: string; description: string; graph: BotGraph }) => {
+  const graph = cloneGraph(input.graph)
+  const preset: MyPreset = {
+    id: slugId('mp'),
+    name: input.name,
+    description: input.description,
+    createdAt: nowISO(),
+    visibility: 'private',
+    nodeCount: graph.nodes.length,
+    layers: Array.from(new Set(graph.nodes.map((n) => COMPONENT_MAP[n.componentId]?.layer).filter((l): l is NonNullable<typeof l> => Boolean(l)))),
+    versions: [{ id: slugId('mpv'), label: 'v1', createdAt: nowISO(), note: 'Initial save' }],
+    graph,
+  }
+  set({ myPresets: [preset, ...get().myPresets] })
+}
+```
+
+Update every call site of `savePreset(...)` in the Builder (wherever "Save as Preset" is wired up) to pass `graph: { nodes, edges, notes, frames, schemaVersion }` instead of separate `nodes`/`edges` arguments.
+
+### 5.7 Version restore page — closes bugs #6 and #7
+
+In `app/app/builder/[botId]/version/[versionId]/page.tsx`:
+
+```ts
+useEffect(() => {
+  if (version && bot) {
+    const graph = version.graph  // no more `|| bot.nodes` fallback — version.graph is now always present
+    load(bot.id, graph.nodes, graph.edges, graph.notes, graph.frames)
+  }
+}, [version, bot, load])
+```
+
+```ts
+const handleRestore = () => {
+  const graph = cloneGraph(version.graph)
+  saveGraph(bot.id, graph)
+  snapshotVersion(bot.id, `Restored from ${version.label}`)
+  toast.success('Version Restored', `Loaded graph state from ${version.label}, including its notes and section frames.`)
+  router.push(`/app/builder/${bot.id}`)
+}
+```
+
+Now the preview genuinely shows what that version's canvas looked like — sticky notes, frames, and all — and restoring genuinely brings all of it back, not just node positions.
+
+### 5.8 Every remaining read site
+
+Search the whole codebase (not just the files named above) for these patterns and fix each:
+- `.nodes` / `.edges` accessed directly off a `Bot`, `Preset`, `MyPreset`, or `BotVersion` (should become `.graph.nodes` / `.graph.edges`)
+- `bot.notes` / `bot.frames` (should become `bot.graph.notes` / `bot.graph.frames`)
+- `version.nodes || bot.nodes` or similar fallback patterns (no longer needed — `graph` is always present, never optional, after this phase)
+- Any place passing `nodes`/`edges` as separate function arguments to a workspace-store action that now takes a single `graph` (`createBot`, `saveGraph`, `savePreset`, `forkPreset` already covered above — also check `components/builder/*` and any onboarding flow code that calls these).
+
+This is the step most likely to get half-finished — a TypeScript build with `strict` mode should catch most of these once the types change, since old call sites will fail to compile. **Run the build and fix every resulting type error before considering this phase done. Do not silence errors with `any` or `@ts-ignore`.**
+
+---
+
+## 6. `lib/builder-store.ts` changes
+
+- Change `Snapshot` (used for undo/redo history, clipboard, and copy/paste) to just be `BotGraph` — it already has the same four fields plus now `schemaVersion`, so this is a rename/type-alias, not a new shape: `type Snapshot = BotGraph`.
+- `load(botId, nodes, edges, notes?, frames?)` — keep this signature as-is (it's called from multiple places with a graph broken into pieces, which is fine for a function signature — the point of this phase is the *stored* shape, not every function argument list). Internally, have it construct one `BotGraph` object immediately and work from that.
+- Fix `migratePositions()` to be schema-version-aware instead of shape-sniffing:
+
+```ts
+/**
+ * Migrates a graph to the current schema version. Currently handles the
+ * single known legacy case (schemaVersion missing/1: y stored as a lane
+ * index 0–9 instead of a pixel offset). Extend this function, not the
+ * shape-sniffing heuristic, the next time the schema changes.
+ */
+function migrateGraph(graph: BotGraph): BotGraph {
+  if (graph.schemaVersion >= CURRENT_GRAPH_SCHEMA_VERSION) return graph
+  const legacyPositions =
+    graph.nodes.length > 0 && graph.nodes.every((n) => Number.isInteger(n.y) && n.y >= 0 && n.y < LAYERS.length)
+  const nodes = legacyPositions ? graph.nodes.map((n) => ({ ...n, y: laneCenterY(n.y) })) : graph.nodes
+  return { ...graph, nodes, notes: graph.notes ?? [], frames: graph.frames ?? [], schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION }
+}
+```
+
+Call `migrateGraph` once, at the single point where a graph enters the builder (`load()`), not scattered across multiple read sites. This is the actual fix for bug #8 — instead of every consumer independently guessing whether a shape looks legacy, there's one gate, and it's driven by an explicit version number that future changes will also bump.
+
+---
+
+## 7. New capability: Export / Import as JSON
+
+Your core ask — "if anyone copies the bot of another trader it has everything in there... 100% same, no differences" — is fully solved *inside the app* by §4–§6 (fork/publish/clone/restore all now carry the complete graph byte-for-byte). But there's no backend yet, so there's no way for two different browsers/devices/users to actually exchange a bot except through the in-app marketplace flow. Add explicit export/import so a bot can be handed off as a file — this also happens to be exactly the shape you'll POST to a real API in Phase 9, so it's not wasted work.
+
+Add to `lib/graph-utils.ts`:
+
+```ts
+export interface BotExport {
+  exportVersion: 1
+  exportedAt: string
+  bot: {
+    name: string
+    description: string
+    tags: string[]
+  }
+  graph: BotGraph
+}
+
+export function exportBot(bot: Bot): BotExport {
+  return {
+    exportVersion: 1,
+    exportedAt: new Date().toISOString(),
+    bot: { name: bot.name, description: bot.description, tags: bot.tags },
+    graph: cloneGraph(bot.graph),
+  }
+}
+
+export function downloadBotExport(bot: Bot) {
+  const data = exportBot(bot)
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${bot.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.aether.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/** Throws a descriptive error if the file isn't a valid Aether bot export. */
+export function parseBotImport(raw: string): BotExport {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('That file isn\'t valid JSON.')
+  }
+  const data = parsed as Partial<BotExport>
+  if (data.exportVersion !== 1 || !data.graph || !Array.isArray(data.graph.nodes)) {
+    throw new Error('That file doesn\'t look like an Aether bot export.')
+  }
+  const problems = validateGraphIntegrity(data.graph)
+  if (problems.length > 0) {
+    throw new Error(`This export has structural problems: ${problems.join('; ')}`)
+  }
+  return data as BotExport
+}
+```
+
+**UI wiring:**
+- In the bot overview page's overflow menu (`components/bot/overview-tab.tsx` or wherever the existing "Duplicate" / "Delete" actions live — check `bot-header.tsx` too), add an **"Export"** action that calls `downloadBotExport(bot)`.
+- On `/app/bots` (the bot list page), add an **"Import Bot"** button near the existing "New Bot" action. Clicking it opens a file picker (`<input type="file" accept=".json">`), reads the file as text, calls `parseBotImport`, and on success calls `createBot({ name: data.bot.name, description: data.bot.description, tags: data.bot.tags, graph: data.graph })` then navigates to that bot. On failure, show a `toast.error` with the thrown message — don't let a bad file silently no-op.
+- Reuse the existing `Dialog`/`toast` patterns already established elsewhere — don't hand-roll a new modal.
+
+---
+
+## 8. Schema-mismatch safety net
+
+Because `schemaVersion` now exists, add one small piece of defensive UI: if `useHydrated()` loads a `Bot` whose `graph.schemaVersion` is less than `CURRENT_GRAPH_SCHEMA_VERSION` and `migrateGraph` had to actually change something (not just pass through), show a one-time `toast.info` on that bot's page: *"This bot's canvas layout was upgraded to the current format."* This isn't scope creep — it's the honest UX consequence of introducing versioning, and it's the pattern you'll want later when a real backend migration touches user data.
+
+---
+
+## 9. Acceptance checklist — run every one of these manually before calling the phase done
+
+1. **Fork fidelity**: Open a marketplace preset with at least one sticky note and one labeled frame (seed one if none currently qualifies — see §3's note on synthesizing `PublishedPreset`/`Preset` graphs). Fork it. Open the resulting bot in the Builder. Every node is in the exact same x/y position, every note has the exact same text/color/position, every frame has the exact same label/position/size. Only IDs differ (verify via React DevTools or a console log, not visually).
+2. **Save-as-preset fidelity**: In the Builder, add a sticky note and a frame to any bot, then "Save as Preset." Instantiate a new bot from that saved preset. The note and frame are present and identically placed.
+3. **Publish fidelity**: Publish a bot with notes/frames to the marketplace. View it on the public `/marketplace/:presetId` page (or `/app/creator/dashboard` depending on which approach you took in §5.5) — confirm the graph shown/available for cloning matches the source bot exactly, not a disconnected fixture.
+4. **Version restore fidelity**: In the Builder, add a note, snapshot a version, then delete the note and add a different one, then open the version history and preview the earlier version — the *old* note should appear, not the current one. Restore it — the old note should now be back on the live canvas, and the current one gone.
+5. **Duplicate-bot fidelity**: Duplicate a bot with notes/frames from `/app/bots`. Edit a node's position in the duplicate. Confirm the original bot's corresponding node did not move (proves arrays were actually cloned, not shared by reference).
+6. **Export/Import round-trip**: Export a bot, delete it, import the exported file back. Confirm nodes, edges, notes, frames, config values, and enabled/disabled states are all identical to before deletion.
+7. **Malformed import handling**: Try importing a random unrelated JSON file and a hand-edited export with an edge pointing at a nonexistent node ID. Both should fail with a clear toast error, not a crash or a silently broken bot.
+8. **TypeScript build is clean**: `npm run build` (or your package manager's equivalent) completes with zero type errors and no `any`/`@ts-ignore` introduced to paper over a type mismatch from this phase's changes.
+9. **Legacy migration still works**: If any seed `Bot` fixture still uses lane-index-style `y` values, confirm it still renders in the correct lane after `migrateGraph` runs (this proves §6's rewrite of `migratePositions` preserves the original behavior, just gated by version instead of shape-sniffing).
+
+---
+
+## 10. Explicit non-goals for this phase
+
+- No backend, no API routes, no database. Everything above still runs through Zustand `persist` + `localStorage`.
+- No changes to `mock/layers.ts` or the `FieldDef` system.
+- No new canvas features (no per-bot viewport/zoom/pan persistence — the canvas is lane-based via `LAYERS`, and there's no evidence today's product needs camera position remembered; if you want that later, it's a one-field addition to `BotGraph`, not something to add speculatively now).
+- Do not touch `Iteration 101/` or attempt any part of the Quantum Edge backend blueprint — still explicitly out of scope, same as every prior phase.
+- Do not start Phase 8 (real auth) or any backend work in this session, even if it feels like a natural next step once export/import exists. Finish this phase, verify the checklist, stop.

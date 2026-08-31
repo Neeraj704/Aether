@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { COMPONENT_MAP, type ComponentDef } from '@/mock/layers'
+import { CURRENT_GRAPH_SCHEMA_VERSION } from '@/mock/data'
 import { useBuilder } from '@/lib/builder-store'
 import { useBot, useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { issueCounts, validateGraph, type Issue } from '@/lib/validate'
@@ -63,13 +64,29 @@ export default function BuilderPage() {
   useEffect(() => {
     if (!bot || loadedFor.current === bot.id) return
     loadedFor.current = bot.id
-    load(bot.id, bot.nodes, bot.edges, bot.notes, bot.frames)
+    if ((bot.graph?.schemaVersion ?? 1) < CURRENT_GRAPH_SCHEMA_VERSION) {
+      toast.info("Canvas Upgraded", "This bot's canvas layout was upgraded to the current format.")
+    }
+    const g = bot.graph || {
+      nodes: (bot as any).nodes || [],
+      edges: (bot as any).edges || [],
+      notes: (bot as any).notes || [],
+      frames: (bot as any).frames || [],
+      schemaVersion: 1,
+    }
+    load(bot.id, g.nodes, g.edges, g.notes, g.frames)
   }, [bot, load])
 
   const save = useCallback(
     (silent = false) => {
       if (!bot) return
-      saveGraph(bot.id, nodes, edges, { notes, frames })
+      saveGraph(bot.id, {
+        nodes,
+        edges,
+        notes,
+        frames,
+        schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+      })
       markSaved()
       if (!silent) {
         pushLog('info', 'Graph saved.')
@@ -83,7 +100,13 @@ export default function BuilderPage() {
   useEffect(() => {
     if (!dirty || !bot) return
     const timer = setTimeout(() => {
-      saveGraph(bot.id, nodes, edges, { notes, frames })
+      saveGraph(bot.id, {
+        nodes,
+        edges,
+        notes,
+        frames,
+        schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+      })
       markSaved()
       pushLog('info', 'Autosaved.')
     }, 2500)
@@ -155,8 +178,13 @@ export default function BuilderPage() {
     savePreset({
       name: blockName.trim() || 'Untitled block',
       description: blockDesc.trim(),
-      nodes: picked,
-      edges: edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
+      graph: {
+        nodes: picked,
+        edges: edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
+        notes: [],
+        frames: [],
+        schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+      },
     })
     setBlockOpen(false)
     toast.success('Block saved', 'Find it at the top of your node library.')

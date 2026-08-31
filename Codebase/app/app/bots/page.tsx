@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -10,9 +10,12 @@ import {
   Copy,
   Trash2,
   ExternalLink,
+  Upload,
+  Download,
 } from 'lucide-react'
 import { useWorkspace } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
+import { downloadBotExport, parseBotImport } from '@/lib/graph-utils'
 import { StatusBadge, Badge } from '@/components/ui/badge'
 import { PillButton } from '@/components/ui/pill-button'
 import { Input } from '@/components/ui/input'
@@ -21,6 +24,7 @@ import type { BotStatus } from '@/mock/data'
 
 export default function MyBotsPage() {
   const router = useRouter()
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const bots = useWorkspace((s) => s.bots)
   const createBot = useWorkspace((s) => s.createBot)
   const duplicateBot = useWorkspace((s) => s.duplicateBot)
@@ -57,6 +61,31 @@ export default function MyBotsPage() {
     setBotToDelete({ id, name })
   }
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      try {
+        const text = ev.target?.result as string
+        const imported = parseBotImport(text)
+        const newBot = createBot({
+          name: imported.bot.name,
+          description: imported.bot.description,
+          tags: imported.bot.tags,
+          graph: imported.graph,
+        })
+        toast.success('Bot Imported', `"${newBot.name}" imported successfully.`)
+        router.push(`/app/builder/${newBot.id}`)
+      } catch (err: any) {
+        toast.error('Import Failed', err?.message || 'Invalid strategy file.')
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = ''
+      }
+    }
+    reader.readAsText(file)
+  }
+
   return (
     <div className="flex flex-col gap-6 p-6 lg:p-8 max-w-[1400px] mx-auto w-full">
       {/* Top Header */}
@@ -67,9 +96,21 @@ export default function MyBotsPage() {
             Manage, configure, and monitor your algorithmic trading graphs
           </p>
         </div>
-        <PillButton onClick={handleCreateBot} className="gap-2 shrink-0">
-          <Plus className="size-4" /> Create New Bot
-        </PillButton>
+        <div className="flex items-center gap-2 shrink-0">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            accept=".json"
+            className="hidden"
+          />
+          <PillButton variant="secondary" onClick={() => fileInputRef.current?.click()} className="gap-2">
+            <Upload className="size-4" /> Import Bot
+          </PillButton>
+          <PillButton onClick={handleCreateBot} className="gap-2">
+            <Plus className="size-4" /> Create New Bot
+          </PillButton>
+        </div>
       </div>
 
       {/* Filters & Search */}
@@ -143,7 +184,7 @@ export default function MyBotsPage() {
 
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   <Badge variant="outline" size="sm">
-                    {bot.nodes.length} nodes
+                    {bot.graph?.nodes?.length ?? (bot as any).nodes?.length ?? 0} nodes
                   </Badge>
                   <Badge variant="outline" size="sm">
                     v{bot.versions.length}
@@ -171,6 +212,16 @@ export default function MyBotsPage() {
                 </div>
 
                 <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => {
+                      downloadBotExport(bot)
+                      toast.success('Bot Exported', `Saved ${bot.name}.aether.json`)
+                    }}
+                    title="Export Bot as JSON"
+                    className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                  >
+                    <Download className="size-3.5" />
+                  </button>
                   <button
                     onClick={() => handleDuplicate(bot.id)}
                     title="Duplicate Bot"

@@ -19,6 +19,7 @@ import { COMPONENT_MAP, LAYER_MAP, PORT_COLORS, type PortType } from '@/mock/lay
 import { hasComponent, requiredPlan } from '@/lib/entitlements'
 import { useSession, toast } from '@/lib/store'
 import { useWorkspace, makeNode } from '@/lib/workspace-store'
+import { CURRENT_GRAPH_SCHEMA_VERSION } from '@/mock/data'
 import { TierBadge } from '@/components/ui/badge'
 import { PillButton, PillLink } from '@/components/ui/pill-button'
 import { UnlockDialog } from '@/components/builder/unlock-dialog'
@@ -37,8 +38,7 @@ const PORT_DESCRIPTIONS: Record<PortType, string> = {
 export default function ComponentDetailPage() {
   const { componentId } = useParams<{ componentId: string }>()
   const router = useRouter()
-  const plan = useSession((s) => s.plan)
-  const unlocked = useSession((s) => s.unlocked)
+  const { plan, unlocked } = useSession()
   const createBot = useWorkspace((s) => s.createBot)
 
   const comp = COMPONENT_MAP[componentId]
@@ -60,8 +60,13 @@ export default function ComponentDetailPage() {
     const newBot = createBot({
       name: `${comp.name} Bot`,
       description: `Strategy initialized with ${comp.name} from Layer ${layer?.roman || 'I'}.`,
-      nodes: [newNode],
-      edges: [],
+      graph: {
+        nodes: [newNode],
+        edges: [],
+        notes: [],
+        frames: [],
+        schemaVersion: CURRENT_GRAPH_SCHEMA_VERSION,
+      },
       tags: [comp.layer, 'custom'],
     })
 

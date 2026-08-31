@@ -87,7 +87,7 @@ export default function OnboardingDonePage() {
           <span className="text-sm font-bold text-foreground truncate">{bot ? bot.name : 'My First Strategy'}</span>
         </div>
         <span className="text-xs font-semibold text-brand bg-brand/10 px-2.5 py-1 rounded-full border border-brand/20">
-          {bot ? `${bot.nodes.length} Nodes Wired` : 'Ready'}
+          {bot ? `${bot.graph.nodes.length} Nodes Wired` : 'Ready'}
         </span>
       </div>
 

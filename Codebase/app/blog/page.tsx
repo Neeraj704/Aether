@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { SiteNav } from '@/components/marketing/site-nav'
 import { SiteFooter } from '@/components/marketing/site-footer'
 import { BLOG_POSTS } from '@/mock/data'
-import { BookOpen, Clock, ChevronRight, Sparkles, User } from 'lucide-react'
+import { BookOpen } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { formatDate } from '@/lib/utils'
 

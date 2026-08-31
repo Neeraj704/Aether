@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'motion/react'
 import {
@@ -8,14 +8,11 @@ import {
   Pause,
   Play,
   AlertTriangle,
-  Activity,
   ArrowUpRight,
-  ArrowDownRight,
   ShieldAlert,
   Zap,
   RefreshCw,
   Plus,
-  X,
   Filter,
   Volume2,
   VolumeX,
@@ -23,7 +20,6 @@ import {
 import { useWorkspace } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
 import { StatusBadge, Badge } from '@/components/ui/badge'
-import { PillButton } from '@/components/ui/pill-button'
 
 interface Position {
   id: string

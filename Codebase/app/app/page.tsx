@@ -4,10 +4,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Plus,
-  TrendingUp,
   Activity as ActivityIcon,
   Zap,
-  Sparkles,
   ArrowUpRight,
   Radio,
   LineChart,
@@ -15,16 +13,18 @@ import {
   Lock,
   Globe,
   CreditCard,
+  TrendingUp,
+  Sparkles,
 } from 'lucide-react'
 import { useWorkspace } from '@/lib/workspace-store'
 import { useSession, toast } from '@/lib/store'
-import { ACTIVITY, type ActivityItem } from '@/mock/data'
+import type { ActivityItem } from '@/mock/data'
 import { MONTHLY_BACKTEST_LIMIT } from '@/lib/entitlements'
 import { StatusBadge, Badge } from '@/components/ui/badge'
 import { PillButton, PillLink } from '@/components/ui/pill-button'
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
 import { UpgradeNudge } from '@/components/ui/empty-state'
-import { relativeTime, cn } from '@/lib/utils'
+import { relativeTime } from '@/lib/utils'
 
 const ACTIVITY_ICONS: Record<ActivityItem['kind'], typeof LineChart> = {
   backtest: LineChart,
@@ -39,6 +39,7 @@ export default function WorkspaceDashboard() {
   const router = useRouter()
   const bots = useWorkspace((s) => s.bots)
   const runs = useWorkspace((s) => s.runs)
+  const activity = useWorkspace((s) => s.activity)
   const createBot = useWorkspace((s) => s.createBot)
   const setBotStatus = useWorkspace((s) => s.setBotStatus)
   const credits = useSession((s) => s.credits)
@@ -238,7 +239,7 @@ export default function WorkspaceDashboard() {
         </div>
 
         <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
-          {ACTIVITY.map((act) => {
+          {activity.map((act) => {
             const Icon = ACTIVITY_ICONS[act.kind] || ActivityIcon
             return (
               <Link

@@ -4,10 +4,8 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   Bell,
-  Check,
   CreditCard,
   LogOut,
-  Menu as MenuIcon,
   Moon,
   Plus,
   Search,
@@ -31,7 +29,6 @@ import {
   MenuLabel,
   MenuLinkItem,
   MenuSeparator,
-  MenuShortcut,
   MenuTrigger,
 } from '@/components/ui/menu'
 import { usePalette } from '@/components/app/command-palette'

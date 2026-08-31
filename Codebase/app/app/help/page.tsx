@@ -5,11 +5,8 @@ import {
   HelpCircle,
   Search,
   Mail,
-  CheckCircle2,
   ChevronDown,
-  Activity,
   Send,
-  Sparkles,
   BookOpen,
 } from 'lucide-react'
 import { FAQS } from '@/mock/data'
@@ -25,7 +22,6 @@ export default function HelpPage() {
 
   const [subject, setSubject] = useState('')
   const [message, setMessage] = useState('')
-  const [priority, setPriority] = useState<'normal' | 'urgent'>('normal')
 
   const filteredFaqs = FAQS.filter(
     (faq) =>

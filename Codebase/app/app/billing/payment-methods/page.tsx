@@ -5,10 +5,8 @@ import {
   CreditCard,
   Plus,
   Trash2,
-  CheckCircle2,
-  ShieldCheck,
-  Building,
   Smartphone,
+  CheckCircle2,
 } from 'lucide-react'
 import { PAYMENT_METHODS, type PaymentMethod } from '@/mock/data'
 import { toast } from '@/lib/store'
@@ -22,7 +20,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogBody,
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Segmented } from '@/components/ui/tabs'

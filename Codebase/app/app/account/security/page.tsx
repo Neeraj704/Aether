@@ -1,13 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { Shield, Key, Smartphone, Laptop, Trash2, CheckCircle2, Lock } from 'lucide-react'
+import { Shield, Laptop, Key, Smartphone } from 'lucide-react'
 import { SESSIONS } from '@/mock/data'
 import { toast } from '@/lib/store'
 import { AccountNav } from '@/components/account/account-nav'
 import { PillButton } from '@/components/ui/pill-button'
 import { Input, Field } from '@/components/ui/input'
-import { CheckboxRow } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { formatDate } from '@/lib/utils'
 

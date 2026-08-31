@@ -1,14 +1,14 @@
 'use client'
 
 import { useState } from 'react'
-import { KeyRound, Plus, Trash2, Copy, Check, Lock, AlertTriangle, ShieldCheck } from 'lucide-react'
+import { Plus, Trash2, Copy, Check } from 'lucide-react'
 import { API_KEYS } from '@/mock/data'
 import { useSession, toast } from '@/lib/store'
 import { AccountNav } from '@/components/account/account-nav'
 import { PillButton } from '@/components/ui/pill-button'
 import { Badge } from '@/components/ui/badge'
-import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
 import { UpgradeNudge } from '@/components/ui/empty-state'
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   Dialog,
@@ -16,7 +16,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogBody,
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Input, Field } from '@/components/ui/input'

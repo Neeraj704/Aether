@@ -17,9 +17,11 @@ import {
   GitCompareArrows,
   BookMarked,
   BookOpen,
+  Wallet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSession } from '@/lib/store'
+import { useWorkspace } from '@/lib/workspace-store'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Logo, LogoMark } from '@/components/brand/logo'
 
@@ -32,13 +34,6 @@ const NAV = [
   { href: '/app/compare', label: 'Compare', icon: GitCompareArrows },
   { href: '/app/library', label: 'Library', icon: BookMarked },
   { href: '/app/live', label: 'Live', icon: Radio },
-]
-
-const FOOTER_NAV = [
-  { href: '/app/billing', label: 'Billing', icon: CreditCard },
-  { href: '/app/account/profile', label: 'Settings', icon: Settings },
-  { href: '/app/help', label: 'Help', icon: LifeBuoy },
-  { href: '/docs', label: 'Docs', icon: BookOpen },
 ]
 
 const MOBILE_NAV = [
@@ -97,9 +92,20 @@ export function AppSidebar() {
   const pathname = usePathname()
   const collapsed = useSession((s) => s.sidebarCollapsed)
   const toggle = useSession((s) => s.toggleSidebar)
+  const publishedPresets = useWorkspace((s) => s.publishedPresets)
 
   const isActive = (href: string, exact?: boolean) =>
     exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`)
+
+  const footerItems = [
+    { href: '/app/billing', label: 'Billing', icon: CreditCard },
+    ...(publishedPresets.length > 0
+      ? [{ href: '/app/creator/dashboard', label: 'Creator', icon: Wallet }]
+      : []),
+    { href: '/app/account/profile', label: 'Settings', icon: Settings },
+    { href: '/app/help', label: 'Help', icon: LifeBuoy },
+    { href: '/docs', label: 'Docs', icon: BookOpen },
+  ]
 
   return (
     <aside
@@ -131,7 +137,7 @@ export function AppSidebar() {
       </nav>
 
       <div className="flex flex-col gap-0.5 border-t border-sidebar-border px-2.5 py-2.5">
-        {FOOTER_NAV.map((item) => (
+        {footerItems.map((item) => (
           <NavItem key={item.href} {...item} collapsed={collapsed} active={isActive(item.href)} />
         ))}
 

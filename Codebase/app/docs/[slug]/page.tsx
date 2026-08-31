@@ -5,8 +5,7 @@ import Link from 'next/link'
 import { SiteNav } from '@/components/marketing/site-nav'
 import { SiteFooter } from '@/components/marketing/site-footer'
 import { DOC_SECTIONS } from '@/mock/data'
-import { ArrowLeft, BookOpen, Clock, ChevronRight } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { ArrowLeft, BookOpen, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export default function DocDetailPage() {

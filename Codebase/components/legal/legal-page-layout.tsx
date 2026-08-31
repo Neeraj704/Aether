@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation'
 import { SiteNav } from '@/components/marketing/site-nav'
 import { SiteFooter } from '@/components/marketing/site-footer'
 import { ArrowLeft, ArrowUpRight, ShieldCheck, Scale, AlertTriangle, RefreshCw } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 const LEGAL_PAGES = [
   {

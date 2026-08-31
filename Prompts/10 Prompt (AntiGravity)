@@ -1,0 +1,179 @@
+# PHASE 8 — Polish Pass: Punch List, Creator Dashboard Discoverability, Live Activity Feed
+
+**Read `00 - START HERE` first for ground rules (stack, design language, "never do this" list) — they still apply in full.** This phase does not depend on anything except Phase 7 being done, which it is. It touches only the files listed per section below. No new routes. No new dependencies except where explicitly noted as optional.
+
+This phase closes out a punch list found during a full read-through + actual `tsc`/`build`/link/dependency audit of the codebase after Phase 7.1. Nothing here is a new feature except §8 and §9, which were flagged separately as real product gaps, not polish. Work through the sections in order; they're independent of each other so you can also split them across sessions if useful.
+
+---
+
+## 1. The last leftover native `confirm()`
+
+**File:** `components/bot/backtests-tab.tsx`, the delete-run handler (around line 52).
+
+Phase 4 replaced native `confirm()` with the styled `ConfirmDialog` component in two places (`app/app/bots/page.tsx`, `components/bot/settings-tab.tsx`) but missed this third call site: deleting a backtest run from a bot's Backtests tab still pops the browser's unstyled `confirm("Are you sure you want to delete the backtest run from ${dateStr}?")`.
+
+Fix using the exact same pattern as the other two sites: hold `{ id, dateStr } | null` in local state, render one `ConfirmDialog` at the bottom of the tab, title `` `Delete backtest run from ${dateStr}?` ``, description `"This permanently removes the run and its results. This can't be undone."`, `destructive` (default true). Wire the row's delete button to open the dialog instead of calling `confirm()` directly; move the actual delete call into `onConfirm`.
+
+---
+
+## 2. Ghost imports — zero them out
+
+Run this and fix every result:
+
+```
+npx tsc --noEmit --noUnusedLocals --noUnusedParameters
+```
+
+At last count this returned 174 errors across 49 files — entirely unused icon imports and unused local variables left over from iterative edits across Phases 4–7 (e.g. `KeyRound`, `Lock`, `AlertTriangle` imported in `app/app/account/api-keys/page.tsx` and never rendered; `router` declared but unused in `app/app/builder/[botId]/page.tsx`; etc.). None of these are logic bugs — just delete the unused import or variable in each case. Don't touch anything else in these files while you're in there; this is a mechanical cleanup pass, not a refactor. Confirm the command returns clean before moving on.
+
+While you're doing this pass, add ESLint so it doesn't silently regress again — `npx next lint` will scaffold `eslint-config-next` if it isn't already present (check first: it's absent today, there's no `.eslintrc*` anywhere in the repo). If installing it requires network access you don't have in this session, skip it and just leave a note in your summary — the manual `tsc --noUnusedLocals` pass above is the one that must be done regardless.
+
+---
+
+## 3. Pricing drift risk in `components/billing/plan-comparison.tsx`
+
+The table header hardcodes plan prices as literal strings:
+
+```tsx
+<TH className="text-center w-36">Starter (₹799)</TH>
+<TH className="text-center w-36">Pro (₹1,999)</TH>
+```
+
+These happen to match `PLANS` in `mock/data.ts` today, but they're not derived from it — this is the exact "three surfaces, hand-typed numbers, silently drift apart" bug Phase 4 §3 fixed everywhere else. Fix it the same way: look up `PLANS.find(p => p.id === 'starter')` / `'pro'` and interpolate `formatINR(plan.monthly)` into the header instead of a literal string, so a future price change in `mock/data.ts` propagates here automatically like it now does everywhere else.
+
+---
+
+## 4. Remove the typecheck safety-off switch
+
+**File:** `next.config.mjs`
+
+```js
+typescript: {
+  ignoreBuildErrors: true,
+},
+```
+
+This flag means a real type error would ship silently instead of failing the build. Now that §2 above gets the codebase to a genuinely clean `tsc --noEmit`, remove this flag entirely so `next build` actually enforces types going forward — that's the whole point of using TypeScript. If removing it causes the build to fail, that means there's a real type error hiding behind this flag right now; fix it, don't re-add the flag.
+
+---
+
+## 5. Dev Panel: make its production exposure a decision, not an accident
+
+**File:** `app/layout.tsx` (renders `<DevPanel />` unconditionally) and `components/dev/dev-panel.tsx`.
+
+Right now `Ctrl+Shift+D` opens a panel that can flip plan tier, credits, auth state, and onboarding status — on any deployed build, including production. That's fine for a hackathon demo where judges might want to see different states quickly, so **don't just delete it** — but gate it deliberately instead of leaving it wide open by default:
+
+```tsx
+const DEV_PANEL_ENABLED =
+  process.env.NEXT_PUBLIC_ENABLE_DEV_PANEL === 'true' || process.env.NODE_ENV !== 'production'
+
+// in the render:
+{DEV_PANEL_ENABLED && <DevPanel />}
+```
+
+This keeps it on in local dev automatically, off by default in a production deploy, and gives you an explicit opt-back-in via an env var for a live demo where you *want* judges (or you, presenting) to be able to flip state on the deployed build. Document this env var in a one-line comment where it's read.
+
+---
+
+## 6. Builder: add the missing small-screen fallback
+
+The original build spec required this and it was never built in any phase: *"The Builder canvas is desktop-primary — on small screens show a clean 'Best experienced on a larger screen' state rather than a broken cramped canvas."*
+
+**File:** `app/app/builder/[botId]/page.tsx` (and `app/app/builder/page.tsx`, the bot-picker/new-bot entry, if it has the same problem — check).
+
+Add a simple viewport check — a `useEffect` + `useState` reading `window.innerWidth < 1024` (Tailwind's `lg` breakpoint, matching the rest of the app's convention) is sufficient, no new dependency needed. Below that width, instead of rendering the full canvas/library/inspector layout, render a centered message: an icon (`Monitor` or `LayoutGrid` from `lucide-react`), "Best experienced on a larger screen", one line explaining the Builder needs room for the canvas and side panels, and a `PillLink` back to `/app/bots`. Match the visual pattern of your existing `EmptyState` component rather than hand-rolling new markup. Resize-responsive is not required — checking on mount is enough; don't over-engineer this with a resize listener unless it's trivial to add.
+
+---
+
+## 7. (Optional, lower priority) Self-host the font
+
+`app/layout.tsx` uses `next/font/google` for Inter, which fetches from `fonts.googleapis.com` at build time. This works fine with normal internet access, but the original build spec's intent was explicitly to self-host: *"Inter self-hosted as the actual web font."* If you have the font files available or can generate them (`next font` local setup, `.woff2` files under `/public/fonts` or similar), switch to `next/font/local` so builds don't depend on Google's servers being reachable — useful for CI environments or offline builds. If this is friction, skip it — it's the lowest-priority item in this phase and not worth blocking on.
+
+---
+
+## 8. Make the Creator Dashboard actually reachable
+
+**This is a real gap, not polish.** Today the *only* way to ever land on `/app/creator/dashboard` is the one-time redirect at the end of the publish wizard (`app/app/marketplace/publish/[botId]/page.tsx` → `router.push('/app/creator/dashboard')`). It's not in the sidebar, not on the Dashboard, not on `/app/presets`, not on a bot's Overview tab — a user who publishes a preset, then navigates away, has no path back to see their earnings short of typing the URL from memory or using Cmd+K (it is in `lib/search-index.ts`, but that's not discovery, that's only useful if you already know the page exists).
+
+Fix in two places:
+
+### 8.1 Sidebar
+**File:** `components/app/app-sidebar.tsx`
+
+Add a conditional nav entry. Import `useWorkspace` and read `s.publishedPresets`. Add to `FOOTER_NAV` (it belongs with Billing conceptually — it's a monetization/earnings page):
+
+```tsx
+const publishedPresets = useWorkspace((s) => s.publishedPresets)
+// ...
+{publishedPresets.length > 0 && (
+  <SidebarLink href="/app/creator/dashboard" label="Creator" icon={Wallet} />
+)}
+```
+
+(Use whichever exact rendering pattern the existing `FOOTER_NAV.map(...)` loop uses — don't hand-roll a separate render path for one conditional item; either add it as a genuine fifth entry in the `FOOTER_NAV` array with a `visible` predicate the map checks, or render it as one extra explicit element right after the mapped list — pick whichever is the smaller diff against the existing component.) Use the `Wallet` icon from `lucide-react` (not yet imported in this file) to visually distinguish it from `CreditCard` (Billing). This does not need to be added to `MOBILE_NAV` — five items on mobile is already full and this is a secondary, infrequent-use page; reachable via the full sidebar on larger screens and via search on mobile.
+
+**Note on why this will show up immediately in your local testing:** `publishedPresets` is seeded from the `PUBLISHED_PRESETS` mock fixture by default (not empty), so this condition will read `true` out of the box for the demo account — that's expected and correct, it mirrors how the rest of the app is pre-seeded with mock bots/runs. A genuinely fresh account (if you ever clear `localStorage`) would correctly hide this until they publish something.
+
+### 8.2 Presets page cross-link
+**File:** `app/app/presets/page.tsx`
+
+Near wherever this page already explains the publish flow (its empty-state copy or header area — check what's there today), add a small secondary link when `publishedPresets.length > 0`: a `PillLink` or text link "View creator earnings →" to `/app/creator/dashboard`, so someone who arrives at Presets looking for "where did my published thing go" has a direct path, not just the sidebar.
+
+Do not add an unconditional empty-state to the Creator Dashboard page itself in this phase — it currently has no zero-state handling for `publishedPresets.length === 0` (it just renders an empty table), but since the mock data always seeds at least one entry, this is unlikely to actually surface in practice right now. Note it as a "found but not fixed" item in your summary rather than fixing it — it's a real gap but outside this phase's scope, and building a good empty state for a page nobody with zero presets can currently reach organically (since the nav entry itself is conditional on having presets) is low value right now.
+
+---
+
+## 9. Make the "Recent Activity" feed actually live
+
+**This is also a real gap, not polish — flagged separately because it's slightly more involved than a five-minute fix, but it's a well-defined, bounded change, not a big one.**
+
+Today, `app/app/page.tsx`'s Recent Activity Feed section renders the static `ACTIVITY` array imported directly from `mock/data.ts` — it never changes no matter what the user actually does in a session. Separately (same root cause, found while investigating this), `lib/store.ts` already defines a `pushNotification` action that has **zero call sites anywhere in the app** — the plumbing to push a live notification on a real action exists and was never wired up either. Fix both together since they're the same pattern applied to two lists.
+
+### 9.1 Add live activity storage
+**File:** `lib/workspace-store.ts`
+
+Add to the store, following the exact shape `ActivityItem` already has in `mock/data.ts` (kind/title/detail/createdAt/href):
+
+```ts
+activity: ActivityItem[]
+pushActivity: (item: Omit<ActivityItem, 'id' | 'createdAt'>) => void
+```
+
+Seed `activity: ACTIVITY` in initial state (same seeding pattern every other list already uses — `bots: BOTS`, `runs: BACKTEST_RUNS`, etc.). Implement `pushActivity` by prepending a new entry with a generated `id` (`slugId('act')` from `lib/utils.ts`, matching the ID convention used everywhere else) and `createdAt: nowISO()` — check `lib/workspace-store.ts` for the exact `nowISO()`-equivalent helper already in use elsewhere in this file (it's used in `addRun`, `setBotStatus`, etc. — reuse it, don't hand-roll a new `new Date().toISOString()` call).
+
+### 9.2 Wire it into real actions — five call sites, all straightforward
+
+Call **both** `pushActivity` and the already-existing-but-unused `pushNotification` at each of these points (they serve different surfaces — the dashboard feed and the notification bell/center — and both are meant to fire on the same real events per the original product spec):
+
+1. **Backtest completes** — `addRun` in `lib/workspace-store.ts` (~line 346). After a run is added: `kind: 'backtest'`, title referencing `run.botName`, detail with the headline metric, `href: /app/bots/${run.botId}/backtest/${run.id}`.
+2. **Node unlocked** — `components/builder/unlock-dialog.tsx`, both the credit-spend and the direct-purchase success paths (~lines 64 and 71, right next to the existing `toast.unlock(...)` calls). `kind: 'unlock'`, title naming the component.
+3. **Preset published** — `publishPreset` in `lib/workspace-store.ts` (~line 454). `kind: 'publish'`, title naming the preset, `href: /app/marketplace/${preset.id}`.
+4. **Bot promoted to live** — every `setBotStatus(bot.id, 'live')` call site (`components/backtest/results-actions.tsx`, `app/app/page.tsx`, `app/app/live/page.tsx` — three sites, all doing the same state transition). `kind: 'live'`, title naming the bot.
+5. **Credits purchased / plan changed** — wherever `addCredits`/`setPlan` are called from the billing pages (`app/app/billing/topup/page.tsx`, `app/app/billing/page.tsx`, `app/app/billing/plans/page.tsx`). `kind: 'payment'`.
+
+For each, write a title/detail string in the same voice as the existing seeded `ACTIVITY` entries in `mock/data.ts` — read a few of those first so the newly-generated ones don't read differently from the seeded history sitting above them in the same feed.
+
+### 9.3 Read from the store, not the static import
+**File:** `app/app/page.tsx`
+
+Replace `import { ACTIVITY } from '@/mock/data'` + the direct `.map()` over it with `const activity = useWorkspace((s) => s.activity)` and map over that instead. The seeded mock history stays visible (it's still in the array, just now it's the store's initial state instead of a hardcoded import), and new real actions will appear above it, newest first, without a refresh.
+
+### 9.4 Scope discipline for this section
+Don't wire every possible action — the five above cover the meaningful, already-spec'd `ActivityItem['kind']` values (`backtest`, `edit`, `unlock`, `publish`, `live`, `payment` — six kinds exist in the type; `edit` is deliberately left out here, since firing an activity entry on every single node/config edit would flood the feed with noise no real product would want; leave `edit`-kind entries as seed-only, static history, not a live trigger).
+
+---
+
+## Acceptance checklist for Phase 8
+
+- [ ] No native `confirm()`/`alert()` calls remain anywhere in the codebase (grep for `confirm(` and `alert(` — the only place `confirm` should still appear is inside `ConfirmDialog`-related prop/variable names, not a call).
+- [ ] `npx tsc --noEmit --noUnusedLocals --noUnusedParameters` returns clean.
+- [ ] `/pricing`, `/app/billing/plans`, and the plan-comparison table on both now agree with `PLANS` with zero hardcoded numbers anywhere among them.
+- [ ] `next.config.mjs` no longer sets `ignoreBuildErrors: true`, and `npm run build` still passes.
+- [ ] Dev Panel does not open via `Ctrl+Shift+D` on a production build unless `NEXT_PUBLIC_ENABLE_DEV_PANEL=true` is explicitly set.
+- [ ] Opening `/app/builder/:botId` on a narrow viewport shows the new fallback state instead of a cramped canvas.
+- [ ] A brand-new bot with zero published presets does not show a Creator Dashboard link in the sidebar; a demo account with seeded published presets does, and clicking it works.
+- [ ] Running a fresh backtest, unlocking a node, publishing a preset, promoting a bot to live, and buying credits each immediately add a new, correctly-worded entry to the top of the Dashboard's Recent Activity feed within the same session — verify at least three of the five manually.
+- [ ] The same five actions also each produce a real entry in the notification bell/`/app/notifications`, not just the activity feed (confirms `pushNotification` is now actually being called somewhere).
+- [ ] Nothing outside the files named in each section above was modified.
+
+When done, summarize: every file created/modified, and explicitly call out the one known-but-deferred gap noted in §8 (Creator Dashboard's own empty state) so it isn't lost track of.

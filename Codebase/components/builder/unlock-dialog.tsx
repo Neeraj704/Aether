@@ -6,6 +6,7 @@ import { ArrowRight, Check, Coins, CreditCard, Loader2, Lock, ShieldCheck } from
 import type { ComponentDef } from '@/mock/layers'
 import { LAYER_MAP } from '@/mock/layers'
 import { toast, useSession } from '@/lib/store'
+import { useWorkspace } from '@/lib/workspace-store'
 import { TIER_RANK } from '@/lib/entitlements'
 import {
   Dialog,
@@ -37,6 +38,8 @@ export function UnlockDialog({
   onUnlocked?: (comp: ComponentDef) => void
 }) {
   const { credits, plan, spendCredits, unlock } = useSession()
+  const pushActivity = useWorkspace((s) => s.pushActivity)
+  const pushNotification = useWorkspace((s) => s.pushNotification)
   const [phase, setPhase] = useState<Phase>('choose')
 
   useEffect(() => {
@@ -61,6 +64,18 @@ export function UnlockDialog({
       toast.error('Not enough credits', `You need ${creditCost - credits} more to unlock this.`)
       return
     }
+    pushActivity({
+      kind: 'unlock',
+      title: `Unlocked ${comp.name}`,
+      detail: `${creditCost} credits · ${layer.name} layer`,
+      href: `/app/library/${comp.id}`,
+    })
+    pushNotification({
+      kind: 'system',
+      title: `Unlocked ${comp.name}`,
+      body: `${creditCost} credits spent. Ready to use on any canvas.`,
+      href: `/app/library/${comp.id}`,
+    })
     toast.unlock(`${comp.name} unlocked`, `${creditCost} credits spent.`)
     finish()
   }
@@ -68,6 +83,18 @@ export function UnlockDialog({
   const payWithCard = async () => {
     setPhase('paying')
     await delay(1600)
+    pushActivity({
+      kind: 'unlock',
+      title: `Unlocked ${comp.name}`,
+      detail: `${formatINR(comp.price)} · ${layer.name} layer`,
+      href: `/app/library/${comp.id}`,
+    })
+    pushNotification({
+      kind: 'payment',
+      title: `Unlocked ${comp.name}`,
+      body: `${formatINR(comp.price)} paid — added to your node library.`,
+      href: `/app/library/${comp.id}`,
+    })
     toast.unlock(`${comp.name} unlocked`, `${formatINR(comp.price)} paid — added to your library.`)
     finish()
   }

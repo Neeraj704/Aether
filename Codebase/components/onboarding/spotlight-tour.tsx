@@ -1,9 +1,8 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
-import { Sparkles, ArrowRight, X, ChevronRight } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Sparkles, X, ChevronRight } from 'lucide-react'
 import { PillButton } from '@/components/ui/pill-button'
-import { cn } from '@/lib/utils'
 
 export interface TourStep {
   target: string

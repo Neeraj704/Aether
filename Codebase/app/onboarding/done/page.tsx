@@ -1,9 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'motion/react'
-import { Check, Sparkles, LineChart, ArrowRight, PartyPopper } from 'lucide-react'
+import { LineChart, PartyPopper } from 'lucide-react'
 import { useSession } from '@/lib/store'
 import { useWorkspace } from '@/lib/workspace-store'
 import { PillButton } from '@/components/ui/pill-button'

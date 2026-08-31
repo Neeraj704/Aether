@@ -1,10 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, Sparkles, Zap, ArrowRight, ShieldCheck } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { useSession, toast } from '@/lib/store'
+import { useWorkspace } from '@/lib/workspace-store'
 import { TierBadge } from '@/components/ui/badge'
-import { PillButton, PillLink } from '@/components/ui/pill-button'
+import { PillButton } from '@/components/ui/pill-button'
 import { PLANS } from '@/mock/data'
 import type { PlanTier } from '@/mock/layers'
 import { BillingNav } from '@/components/billing/billing-nav'
@@ -14,12 +15,25 @@ import { cn, formatINR } from '@/lib/utils'
 export default function BillingPlansPage() {
   const plan = useSession((s) => s.plan)
   const setPlan = useSession((s) => s.setPlan)
-  const credits = useSession((s) => s.credits)
+  const pushActivity = useWorkspace((s) => s.pushActivity)
+  const pushNotification = useWorkspace((s) => s.pushNotification)
 
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly')
 
   const handlePlanChange = (targetPlan: PlanTier) => {
     setPlan(targetPlan)
+    pushActivity({
+      kind: 'payment',
+      title: `Switched plan to ${targetPlan.toUpperCase()}`,
+      detail: `Workspace subscription updated to ${targetPlan} tier`,
+      href: '/app/billing',
+    })
+    pushNotification({
+      kind: 'payment',
+      title: `Plan upgraded · ${targetPlan.toUpperCase()}`,
+      body: `Your workspace subscription has been updated to ${targetPlan.toUpperCase()}.`,
+      href: '/app/billing',
+    })
     toast.success('Plan Updated', `Your workspace is now on the ${targetPlan.toUpperCase()} plan.`)
   }
 

@@ -6,12 +6,9 @@ import {
   Wallet,
   TrendingUp,
   ArrowUpRight,
-  Sparkles,
   DollarSign,
   Calendar,
-  Layers,
   Store,
-  CheckCircle2,
 } from 'lucide-react'
 import { useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'

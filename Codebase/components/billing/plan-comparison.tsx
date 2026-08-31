@@ -1,9 +1,9 @@
 'use client'
 
 import { Check, Minus } from 'lucide-react'
-import { PLAN_COMPARISON, type ComparisonRow } from '@/mock/data'
+import { PLAN_COMPARISON, PLANS } from '@/mock/data'
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
-import { cn } from '@/lib/utils'
+import { cn, formatINR } from '@/lib/utils'
 
 function CellValue({ value }: { value: string | boolean }) {
   if (typeof value === 'boolean') {
@@ -21,6 +21,9 @@ export function PlanComparisonMatrix({
 }: {
   className?: string
 }) {
+  const starterPlan = PLANS.find((p) => p.id === 'starter')
+  const proPlan = PLANS.find((p) => p.id === 'pro')
+
   return (
     <div className={cn('flex flex-col gap-6 rounded-2xl border border-border bg-card p-6', className)}>
       <div>
@@ -36,8 +39,8 @@ export function PlanComparisonMatrix({
             <TR>
               <TH className="w-64 pl-4 text-left">Feature / Capability</TH>
               <TH className="text-center w-36">Free</TH>
-              <TH className="text-center w-36">Starter (₹799)</TH>
-              <TH className="text-center w-36">Pro (₹1,999)</TH>
+              <TH className="text-center w-36">Starter ({starterPlan ? formatINR(starterPlan.monthly) : '₹799'})</TH>
+              <TH className="text-center w-36">Pro ({proPlan ? formatINR(proPlan.monthly) : '₹1,999'})</TH>
               <TH className="text-center w-36 pr-4">Credits (PAYG)</TH>
             </TR>
           </THead>

@@ -7,10 +7,6 @@ import {
   Search,
   GitFork,
   Star,
-  ArrowRight,
-  TrendingUp,
-  ShieldCheck,
-  Zap,
 } from 'lucide-react'
 import { useMarketplacePresets } from '@/lib/workspace-store'
 import { Logo } from '@/components/brand/logo'

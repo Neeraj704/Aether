@@ -7,7 +7,6 @@ import { useWorkspace } from '@/lib/workspace-store'
 import { relativeTime, cn } from '@/lib/utils'
 import { PillButton } from '@/components/ui/pill-button'
 import { Segmented } from '@/components/ui/tabs'
-import type { NotificationKind } from '@/mock/data'
 
 const KINDS: { label: string; value: string }[] = [
   { label: 'All types', value: 'all' },

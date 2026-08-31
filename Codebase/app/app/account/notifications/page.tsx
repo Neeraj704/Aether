@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Bell, Webhook, Mail, Check, Save } from 'lucide-react'
+import { Bell, Webhook, Save } from 'lucide-react'
 import { NOTIFICATION_EVENTS } from '@/mock/data'
 import { toast } from '@/lib/store'
 import { AccountNav } from '@/components/account/account-nav'

@@ -56,6 +56,10 @@ export const viewport: Viewport = {
   initialScale: 1,
 }
 
+// Dev panel is enabled in local dev, or when NEXT_PUBLIC_ENABLE_DEV_PANEL=true is explicitly set in production
+const DEV_PANEL_ENABLED =
+  process.env.NEXT_PUBLIC_ENABLE_DEV_PANEL === 'true' || process.env.NODE_ENV !== 'production'
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -70,7 +74,7 @@ export default function RootLayout({
         <ThemeProvider>
           {children}
           <ToastViewport />
-          <DevPanel />
+          {DEV_PANEL_ENABLED && <DevPanel />}
         </ThemeProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>

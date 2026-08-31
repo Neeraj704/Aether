@@ -1,8 +1,7 @@
 'use client'
 
-import Link from 'next/link'
 import { SearchX, Search } from 'lucide-react'
-import { PillButton, PillLink } from '@/components/ui/pill-button'
+import { PillLink } from '@/components/ui/pill-button'
 import { usePalette } from '@/components/app/command-palette'
 import { useSession } from '@/lib/store'
 import { Logo } from '@/components/brand/logo'

@@ -9,21 +9,18 @@ import {
   Layers,
   Sparkles,
   Lock,
-  Plus,
   Wrench,
   CheckCircle2,
-  HelpCircle,
   Code2,
 } from 'lucide-react'
 import { COMPONENT_MAP, LAYER_MAP, PORT_COLORS, type PortType } from '@/mock/layers'
-import { hasComponent, requiredPlan } from '@/lib/entitlements'
+import { hasComponent } from '@/lib/entitlements'
 import { useSession, toast } from '@/lib/store'
 import { useWorkspace, makeNode } from '@/lib/workspace-store'
 import { CURRENT_GRAPH_SCHEMA_VERSION } from '@/mock/data'
 import { TierBadge } from '@/components/ui/badge'
 import { PillButton, PillLink } from '@/components/ui/pill-button'
 import { UnlockDialog } from '@/components/builder/unlock-dialog'
-import { cn } from '@/lib/utils'
 
 const PORT_DESCRIPTIONS: Record<PortType, string> = {
   MarketData: 'Real-time or historical OHLCV bars, order book ticks, or trades.',

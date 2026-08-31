@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from '@/lib/store'
 import { useWorkspace, useHydrated } from '@/lib/workspace-store'

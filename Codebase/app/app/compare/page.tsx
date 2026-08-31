@@ -1,19 +1,11 @@
 'use client'
 
 import { Suspense, useState, useEffect, useMemo } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import {
   GitCompareArrows,
   Plus,
   X,
-  Bot as BotIcon,
-  Bookmark,
-  Activity,
-  TrendingUp,
-  ArrowRight,
-  Sparkles,
-  Layers,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -24,7 +16,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import { useWorkspace, useHydrated, useMarketplacePresets } from '@/lib/workspace-store'
+import { useWorkspace, useMarketplacePresets } from '@/lib/workspace-store'
 import { BACKTEST_RUNS, type Bot, type BacktestRun, type Preset, type MyPreset } from '@/mock/data'
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
 import { PillButton } from '@/components/ui/pill-button'
@@ -37,7 +29,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Segmented } from '@/components/ui/tabs'
-import { cn, formatINR, formatPct } from '@/lib/utils'
+import { cn, formatINR } from '@/lib/utils'
 
 interface CompareSlot {
   id: string
@@ -53,7 +45,6 @@ const SLOT_COLORS = ['#2997ff', '#00b8c4', '#ff6ac1', '#ff9f0a']
 
 function CompareContent() {
   const searchParams = useSearchParams()
-  const hydrated = useHydrated()
   const bots = useWorkspace((s) => s.bots)
   const runs = useWorkspace((s) => s.runs)
   const myPresets = useWorkspace((s) => s.myPresets)

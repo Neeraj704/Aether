@@ -11,17 +11,14 @@ import {
   Copy,
   Trash2,
   Share2,
-  Globe,
-  Lock,
-  Eye,
   Check,
-  ArrowUpRight,
-  Sparkles,
+  Wallet,
+  Pencil,
 } from 'lucide-react'
 import { useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
 import type { MyPreset } from '@/mock/data'
-import { LAYER_MAP, type LayerId } from '@/mock/layers'
+import { LAYER_MAP } from '@/mock/layers'
 import { Badge } from '@/components/ui/badge'
 import { PillButton, PillLink } from '@/components/ui/pill-button'
 import { Input } from '@/components/ui/input'
@@ -37,12 +34,13 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Segmented } from '@/components/ui/tabs'
-import { formatDate, cn } from '@/lib/utils'
+import { formatDate } from '@/lib/utils'
 
 export default function MyPresetsPage() {
   const router = useRouter()
   const hydrated = useHydrated()
   const myPresets = useWorkspace((s) => s.myPresets)
+  const publishedPresets = useWorkspace((s) => s.publishedPresets)
   const createBotFromPreset = useWorkspace((s) => s.createBotFromPreset)
   const duplicatePreset = useWorkspace((s) => s.duplicatePreset)
   const deletePreset = useWorkspace((s) => s.deletePreset)
@@ -119,7 +117,12 @@ export default function MyPresetsPage() {
             Save sub-graphs, modular multi-agent clusters, and full strategy templates to drop instantly onto any builder canvas.
           </p>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
+          {publishedPresets.length > 0 && (
+            <PillLink href="/app/creator/dashboard" variant="secondary" className="gap-1.5 text-xs">
+              <Wallet className="size-3.5" /> View creator earnings &rarr;
+            </PillLink>
+          )}
           <PillLink href="/app/builder" className="gap-2 shadow-lg shadow-brand/20">
             <Plus className="size-4" /> Save New Block
           </PillLink>
@@ -265,6 +268,15 @@ export default function MyPresetsPage() {
                     className="p-1.5 rounded-lg border border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
                   >
                     <Share2 className="size-3.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    title="Rename preset"
+                    onClick={() => handleStartRename(preset)}
+                    className="p-1.5 rounded-lg border border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+                  >
+                    <Pencil className="size-3.5" />
                   </button>
 
                   <button

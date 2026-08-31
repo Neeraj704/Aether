@@ -6,13 +6,8 @@ import Link from 'next/link'
 import {
   ArrowLeft,
   Globe,
-  CheckCircle2,
   AlertTriangle,
   LineChart,
-  DollarSign,
-  Tag,
-  ShieldCheck,
-  Sparkles,
 } from 'lucide-react'
 import { useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { useSession, toast } from '@/lib/store'
@@ -23,7 +18,7 @@ import { PillButton, PillLink } from '@/components/ui/pill-button'
 import { Input, Textarea, Field } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
-import { slugId, formatINR } from '@/lib/utils'
+import { slugId } from '@/lib/utils'
 
 export default function PublishWizardPage() {
   const { botId } = useParams<{ botId: string }>()

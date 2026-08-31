@@ -2,22 +2,16 @@
 
 import { Suspense, useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import {
   BookMarked,
   Search,
-  Layers,
-  Sparkles,
   Lock,
-  ArrowRight,
-  Filter,
 } from 'lucide-react'
 import {
   COMPONENTS,
   LAYERS,
-  LAYER_MAP,
   PORT_COLORS,
-  type ComponentDef,
   type LayerId,
   type PlanTier,
 } from '@/mock/layers'
@@ -30,7 +24,6 @@ import { fuzzyScore, cn } from '@/lib/utils'
 
 function LibraryContent() {
   const searchParams = useSearchParams()
-  const router = useRouter()
   const plan = useSession((s) => s.plan)
   const unlocked = useSession((s) => s.unlocked)
 

@@ -18,7 +18,6 @@ import {
   Plus,
   Trash2,
   Key,
-  Database,
   Code,
   Braces,
   Sparkles,

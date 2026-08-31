@@ -5,7 +5,7 @@ import { ArrowLeft, ExternalLink } from 'lucide-react'
 import type { Bot } from '@/mock/data'
 import { StatusBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { PillButton, PillLink } from '@/components/ui/pill-button'
+import { PillLink } from '@/components/ui/pill-button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { relativeTime } from '@/lib/utils'
 

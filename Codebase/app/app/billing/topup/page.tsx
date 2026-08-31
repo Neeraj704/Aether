@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { Sparkles, Check, Zap, ArrowRight, ShieldCheck, Loader2 } from 'lucide-react'
+import { Sparkles, Check, Loader2 } from 'lucide-react'
 import { useSession, toast } from '@/lib/store'
+import { useWorkspace } from '@/lib/workspace-store'
 import { CREDIT_BUNDLES } from '@/mock/data'
 import { PillButton } from '@/components/ui/pill-button'
 import { Input, Field } from '@/components/ui/input'
@@ -20,6 +21,8 @@ import { cn, formatINR } from '@/lib/utils'
 export default function TopupCreditsPage() {
   const credits = useSession((s) => s.credits)
   const addCredits = useSession((s) => s.addCredits)
+  const pushActivity = useWorkspace((s) => s.pushActivity)
+  const pushNotification = useWorkspace((s) => s.pushNotification)
 
   const [customCredits, setCustomCredits] = useState('250')
   const [checkoutTarget, setCheckoutTarget] = useState<{ amount: number; price: number } | null>(null)
@@ -37,6 +40,18 @@ export default function TopupCreditsPage() {
     setProcessing(true)
     setTimeout(() => {
       addCredits(checkoutTarget.amount)
+      pushActivity({
+        kind: 'payment',
+        title: `Purchased ${checkoutTarget.amount} simulation credits`,
+        detail: `${formatINR(checkoutTarget.price)} · Instant workspace top-up`,
+        href: '/app/billing/topup',
+      })
+      pushNotification({
+        kind: 'payment',
+        title: `Payment receipt · ${formatINR(checkoutTarget.price)}`,
+        body: `Successfully added ${checkoutTarget.amount} credits to your balance.`,
+        href: '/app/billing/history',
+      })
       toast.success('Credits Added!', `Successfully added ${checkoutTarget.amount} credits for ${formatINR(checkoutTarget.price)}.`)
       setProcessing(false)
       setCheckoutTarget(null)

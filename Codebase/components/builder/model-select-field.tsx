@@ -1,14 +1,14 @@
 'use client'
 
 import { useState } from 'react'
-import { PROVIDERS, type Provider, type ModelOption } from '@/mock/models'
+import { PROVIDERS, type Provider } from '@/mock/models'
 import type { ModelSelection } from '@/mock/layers'
 import { Select } from '@/components/ui/select'
 import { SliderWithValue } from '@/components/ui/slider'
 import { Input, Field } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { PillButton } from '@/components/ui/pill-button'
-import { Check, X, Loader2, Sparkles, Server, Zap, Cpu, Key, Eye, EyeOff, ShieldCheck } from 'lucide-react'
+import { Check, X, Loader2, Server, Cpu, Key, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/store'
 

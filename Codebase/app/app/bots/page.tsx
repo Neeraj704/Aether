@@ -20,7 +20,6 @@ import { StatusBadge, Badge } from '@/components/ui/badge'
 import { PillButton } from '@/components/ui/pill-button'
 import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import type { BotStatus } from '@/mock/data'
 
 export default function MyBotsPage() {
   const router = useRouter()
@@ -29,7 +28,6 @@ export default function MyBotsPage() {
   const createBot = useWorkspace((s) => s.createBot)
   const duplicateBot = useWorkspace((s) => s.duplicateBot)
   const deleteBot = useWorkspace((s) => s.deleteBot)
-  const setBotStatus = useWorkspace((s) => s.setBotStatus)
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')

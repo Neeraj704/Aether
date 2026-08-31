@@ -10,15 +10,13 @@ import {
   Copy,
   Trash2,
   Share2,
-  Clock,
   Layers,
   History,
   Check,
-  CheckCircle2,
 } from 'lucide-react'
 import { useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
-import { LAYER_MAP, COMPONENT_MAP } from '@/mock/layers'
+import { LAYER_MAP } from '@/mock/layers'
 import { Badge } from '@/components/ui/badge'
 import { PillButton } from '@/components/ui/pill-button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -199,7 +197,7 @@ export default function PresetDetailPage() {
 
             <div className="flex flex-col gap-3">
               {preset.versions && preset.versions.length > 0 ? (
-                preset.versions.map((ver, idx) => (
+                preset.versions.map((ver) => (
                   <div
                     key={ver.id}
                     className="flex flex-col gap-1 rounded-xl border border-border/80 bg-background/50 p-3.5"

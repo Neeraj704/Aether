@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { History, Download, FileText, Filter, CheckCircle2, Clock, XCircle, RefreshCw } from 'lucide-react'
+import { Download } from 'lucide-react'
 import { INVOICES, type Invoice } from '@/mock/data'
 import { toast } from '@/lib/store'
 import { BillingNav } from '@/components/billing/billing-nav'

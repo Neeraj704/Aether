@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { COMPONENT_MAP, type ComponentDef, type FieldDef } from '@/mock/layers'
+import { COMPONENT_MAP, type ComponentDef } from '@/mock/layers'
 import {
   BACKTEST_RUNS,
   BOTS,
@@ -12,21 +12,21 @@ import {
   PUBLISHED_PRESETS,
   MARKETPLACE_PRESETS,
   CREATOR_EARNINGS,
+  ACTIVITY,
   type Bot,
   type BotEdge,
   type BotNode,
   type BotGraph,
   type BotStatus,
-  type CanvasFrame,
-  type CanvasNote,
   type BacktestRun,
   type MyPreset,
   type Notification,
   type Preset,
   type PublishedPreset,
+  type ActivityItem,
   emptyGraph,
 } from '@/mock/data'
-import { slugId } from '@/lib/utils'
+import { slugId, formatINR } from '@/lib/utils'
 import { cloneGraph, migrateGraph } from '@/lib/graph-utils'
 
 /* ------------------------------------------------------------------ */
@@ -167,6 +167,7 @@ interface WorkspaceState {
   marketplacePresets: Preset[]
   creatorEarnings: typeof CREATOR_EARNINGS
   notifications: Notification[]
+  activity: ActivityItem[]
   /** Preset ids the user has forked, so the marketplace can show "Forked". */
   forkedPresets: string[]
   /** Preset ids the user has liked. */
@@ -198,11 +199,12 @@ interface WorkspaceState {
   deletePublishedPreset: (id: string) => void
   requestCreatorPayout: () => void
 
-  /* Notifications */
+  /* Notifications & Activity */
   markRead: (id: string) => void
   markAllRead: () => void
   dismissNotification: (id: string) => void
   pushNotification: (n: Omit<Notification, 'id' | 'createdAt' | 'read'>) => void
+  pushActivity: (item: Omit<ActivityItem, 'id' | 'createdAt'>) => void
 
   resetWorkspace: () => void
 }
@@ -215,6 +217,7 @@ const seed = () => ({
   marketplacePresets: [] as Preset[],
   creatorEarnings: CREATOR_EARNINGS,
   notifications: NOTIFICATIONS,
+  activity: ACTIVITY,
   forkedPresets: [] as string[],
   likedPresets: [] as string[],
 })
@@ -313,10 +316,40 @@ export const useWorkspace = create<WorkspaceState>()(
           ),
         }),
 
-      setBotStatus: (id, status) =>
+      setBotStatus: (id, status) => {
+        const bot = get().bots.find((b) => b.id === id)
+        const isPromotingLive = bot && status === 'live' && bot.status !== 'live'
+        const newAct: ActivityItem[] = isPromotingLive
+          ? [
+              {
+                id: slugId('act'),
+                kind: 'live',
+                title: `Started paper trading ${bot.name}`,
+                detail: 'Running live paper execution in real-time engine',
+                createdAt: nowISO(),
+                href: `/app/bots/${bot.id}/live`,
+              },
+            ]
+          : []
+        const newNotif: Notification[] = isPromotingLive
+          ? [
+              {
+                id: slugId('nt'),
+                kind: 'trade',
+                title: `Bot set to Live · ${bot.name}`,
+                body: `${bot.name} is now actively running in paper trading mode.`,
+                createdAt: nowISO(),
+                read: false,
+                href: `/app/bots/${bot.id}/live`,
+              },
+            ]
+          : []
         set({
           bots: get().bots.map((b) => (b.id === id ? { ...b, status, updatedAt: nowISO() } : b)),
-        }),
+          activity: [...newAct, ...get().activity],
+          notifications: [...newNotif, ...get().notifications],
+        })
+      },
 
       snapshotVersion: (id, note) =>
         set({
@@ -343,9 +376,28 @@ export const useWorkspace = create<WorkspaceState>()(
 
       /* ---------------- Runs ---------------- */
 
-      addRun: (run) =>
+      addRun: (run) => {
+        const newAct: ActivityItem = {
+          id: slugId('act'),
+          kind: 'backtest',
+          title: `Ran a backtest on ${run.botName}`,
+          detail: `${run.metrics.totalReturn >= 0 ? '+' : ''}${run.metrics.totalReturn.toFixed(1)}% return · ${run.metrics.sharpe.toFixed(2)} Sharpe · ${run.metrics.trades} trades`,
+          createdAt: nowISO(),
+          href: `/app/bots/${run.botId}/backtest/${run.id}`,
+        }
+        const newNotif: Notification = {
+          id: slugId('nt'),
+          kind: 'backtest',
+          title: `Backtest complete · ${run.botName}`,
+          body: `${run.metrics.totalReturn >= 0 ? '+' : ''}${run.metrics.totalReturn.toFixed(1)}% return · ${run.metrics.sharpe.toFixed(2)} Sharpe across ${run.metrics.trades} trades.`,
+          createdAt: nowISO(),
+          read: false,
+          href: `/app/bots/${run.botId}/backtest/${run.id}`,
+        }
         set({
           runs: [run, ...get().runs],
+          activity: [newAct, ...get().activity],
+          notifications: [newNotif, ...get().notifications],
           bots: get().bots.map((b) =>
             b.id === run.botId
               ? {
@@ -361,7 +413,8 @@ export const useWorkspace = create<WorkspaceState>()(
                 }
               : b,
           ),
-        }),
+        })
+      },
 
       deleteRun: (id) =>
         set({
@@ -451,13 +504,33 @@ export const useWorkspace = create<WorkspaceState>()(
 
       deletePreset: (id) => set({ myPresets: get().myPresets.filter((p) => p.id !== id) }),
 
-      publishPreset: (preset, marketplacePreset) =>
+      publishPreset: (preset, marketplacePreset) => {
+        const newAct: ActivityItem = {
+          id: slugId('act'),
+          kind: 'publish',
+          title: `Published "${preset.name}" to Marketplace`,
+          detail: `Listed at ${formatINR(preset.price || 0)} · Strategy Preset`,
+          createdAt: nowISO(),
+          href: `/app/marketplace/${preset.id}`,
+        }
+        const newNotif: Notification = {
+          id: slugId('nt'),
+          kind: 'fork',
+          title: `Preset published · ${preset.name}`,
+          body: `"${preset.name}" is now live on the marketplace.`,
+          createdAt: nowISO(),
+          read: false,
+          href: `/app/marketplace/${preset.id}`,
+        }
         set({
           publishedPresets: [preset, ...get().publishedPresets],
+          activity: [newAct, ...get().activity],
+          notifications: [newNotif, ...get().notifications],
           marketplacePresets: marketplacePreset
             ? [marketplacePreset, ...(get().marketplacePresets || []).filter((p) => p.id !== marketplacePreset.id)]
             : get().marketplacePresets || [],
-        }),
+        })
+      },
 
       deletePublishedPreset: (id) =>
         set({
@@ -478,7 +551,7 @@ export const useWorkspace = create<WorkspaceState>()(
           },
         }),
 
-      /* ---------------- Notifications ---------------- */
+      /* ---------------- Notifications & Activity ---------------- */
 
       markRead: (id) =>
         set({
@@ -496,6 +569,14 @@ export const useWorkspace = create<WorkspaceState>()(
           notifications: [
             { ...n, id: slugId('nt'), createdAt: nowISO(), read: false } as Notification,
             ...get().notifications,
+          ],
+        }),
+
+      pushActivity: (item) =>
+        set({
+          activity: [
+            { ...item, id: slugId('act'), createdAt: nowISO() } as ActivityItem,
+            ...get().activity,
           ],
         }),
 

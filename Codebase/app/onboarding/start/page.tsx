@@ -3,11 +3,10 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Layers, Plus, Star, GitFork, CheckCircle2 } from 'lucide-react'
-import { MARKETPLACE_PRESETS, type Preset } from '@/mock/data'
+import { MARKETPLACE_PRESETS } from '@/mock/data'
 import { useWorkspace } from '@/lib/workspace-store'
 import { useSession } from '@/lib/store'
 import { PillButton } from '@/components/ui/pill-button'
-import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
 export default function OnboardingStartPage() {

@@ -10,13 +10,11 @@ export function Tooltip({
   children,
   side = 'top',
   className,
-  delay = 350,
 }: {
   content: React.ReactNode
   children: React.ReactNode
   side?: 'top' | 'bottom' | 'left' | 'right'
   className?: string
-  delay?: number
 }) {
   if (!content) return <>{children}</>
 

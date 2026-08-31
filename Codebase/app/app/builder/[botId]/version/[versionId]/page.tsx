@@ -7,9 +7,6 @@ import {
   ArrowLeft,
   History,
   RotateCcw,
-  Clock,
-  Layers,
-  Sparkles,
   Lock,
 } from 'lucide-react'
 import { useBot, useWorkspace, useHydrated } from '@/lib/workspace-store'

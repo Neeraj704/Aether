@@ -8,9 +8,10 @@ import { useWorkspace } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
-import { PillButton, PillLink } from '@/components/ui/pill-button'
+import { PillLink } from '@/components/ui/pill-button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Table, THead, TBody, TR, TH, TD, SortHeader } from '@/components/ui/table'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { formatDate, formatPct } from '@/lib/utils'
 
 export function BacktestsTab({ bot }: { bot: Bot }) {
@@ -19,6 +20,7 @@ export function BacktestsTab({ bot }: { bot: Bot }) {
 
   const [sortKey, setSortKey] = useState<'createdAt' | 'totalReturn' | 'sharpe' | 'trades'>('createdAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [runToDelete, setRunToDelete] = useState<{ id: string; dateStr: string } | null>(null)
 
   const toggleSort = (key: typeof sortKey) => {
     if (sortKey === key) {
@@ -49,10 +51,7 @@ export function BacktestsTab({ bot }: { bot: Bot }) {
   }, [runs, sortKey, sortDir])
 
   const handleDeleteRun = (id: string, dateStr: string) => {
-    if (confirm(`Are you sure you want to delete the backtest run from ${dateStr}?`)) {
-      deleteRun(id)
-      toast.info('Backtest deleted', 'Run record removed.')
-    }
+    setRunToDelete({ id, dateStr })
   }
 
   return (
@@ -161,6 +160,24 @@ export function BacktestsTab({ bot }: { bot: Bot }) {
           </Table>
         )}
       </CardContent>
+
+      <ConfirmDialog
+        open={runToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setRunToDelete(null)
+        }}
+        title={`Delete backtest run from ${runToDelete?.dateStr}?`}
+        description="This permanently removes the run and its results. This can't be undone."
+        confirmLabel="Delete run"
+        destructive
+        onConfirm={() => {
+          if (runToDelete) {
+            deleteRun(runToDelete.id)
+            toast.info('Backtest deleted', 'Run record removed.')
+            setRunToDelete(null)
+          }
+        }}
+      />
     </Card>
   )
 }

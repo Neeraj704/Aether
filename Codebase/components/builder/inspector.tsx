@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import {
   AlignCenterHorizontal,
@@ -13,14 +13,12 @@ import {
   Rows3,
   Trash2,
   SlidersHorizontal,
-  Sparkles,
 } from 'lucide-react'
 import {
   COMPONENT_MAP,
   LAYER_MAP,
   PORT_COLORS,
   type ComponentDef,
-  type FieldDef,
 } from '@/mock/layers'
 import type { BotNode } from '@/mock/data'
 import { useBuilder } from '@/lib/builder-store'

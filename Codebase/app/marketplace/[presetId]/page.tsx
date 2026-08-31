@@ -8,9 +8,6 @@ import {
   GitFork,
   CheckCircle2,
   Layers,
-  TrendingUp,
-  ShieldCheck,
-  Zap,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -21,11 +18,11 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import { BACKTEST_RUNS, type Preset } from '@/mock/data'
-import { LAYER_MAP, COMPONENT_MAP } from '@/mock/layers'
+import { BACKTEST_RUNS } from '@/mock/data'
+import { LAYER_MAP } from '@/mock/layers'
 import { useMarketplacePresets } from '@/lib/workspace-store'
 import { Logo } from '@/components/brand/logo'
-import { TierBadge, Badge } from '@/components/ui/badge'
+import { TierBadge } from '@/components/ui/badge'
 import { PillLink } from '@/components/ui/pill-button'
 import { formatINR } from '@/lib/utils'
 

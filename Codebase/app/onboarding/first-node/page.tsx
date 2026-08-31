@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Sparkles, MousePointerClick, ChevronRight } from 'lucide-react'
+import { Sparkles, ChevronRight } from 'lucide-react'
 import { useSession } from '@/lib/store'
 import { useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { useBuilder } from '@/lib/builder-store'

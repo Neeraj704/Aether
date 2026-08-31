@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, useState, useEffect, useMemo } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   Search as SearchIcon,
@@ -14,11 +14,9 @@ import {
   ArrowRight,
   Sparkles,
 } from 'lucide-react'
-import { useWorkspace, useHydrated, useMarketplacePresets } from '@/lib/workspace-store'
+import { useWorkspace, useMarketplacePresets } from '@/lib/workspace-store'
 import { buildIndex, searchIndex, KIND_LABEL, type ResultKind, type SearchResult } from '@/lib/search-index'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { PillButton } from '@/components/ui/pill-button'
 import { cn } from '@/lib/utils'
 
 const KIND_ICONS: Record<ResultKind, typeof Bot> = {
@@ -34,8 +32,6 @@ const KIND_ICONS: Record<ResultKind, typeof Bot> = {
 
 function SearchPageContent() {
   const searchParams = useSearchParams()
-  const router = useRouter()
-  const hydrated = useHydrated()
   const bots = useWorkspace((s) => s.bots)
   const marketplacePresets = useMarketplacePresets()
 

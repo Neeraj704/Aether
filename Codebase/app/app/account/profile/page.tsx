@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { User, Check, Sparkles, Shield, Save } from 'lucide-react'
+import { Shield, Check, Save } from 'lucide-react'
 import { useSession, toast } from '@/lib/store'
 import { AccountNav } from '@/components/account/account-nav'
 import { PillButton } from '@/components/ui/pill-button'

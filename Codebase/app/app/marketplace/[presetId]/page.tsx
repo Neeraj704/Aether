@@ -11,9 +11,7 @@ import {
   Layers,
   Flag,
   Share2,
-  Copy,
   Check,
-  TrendingUp,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -24,11 +22,11 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import { BACKTEST_RUNS, type Preset } from '@/mock/data'
+import { BACKTEST_RUNS } from '@/mock/data'
 import { LAYER_MAP } from '@/mock/layers'
 import { useWorkspace, useMarketplacePresets } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
-import { TierBadge, Badge } from '@/components/ui/badge'
+import { TierBadge } from '@/components/ui/badge'
 import { PillButton } from '@/components/ui/pill-button'
 import {
   Dialog,
@@ -39,7 +37,7 @@ import {
   DialogBody,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Input, Textarea } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/input'
 import { formatINR } from '@/lib/utils'
 
 export default function AppMarketplaceDetailPage() {

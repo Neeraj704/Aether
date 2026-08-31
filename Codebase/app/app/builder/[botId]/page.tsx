@@ -1,12 +1,13 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
+import { Monitor } from 'lucide-react'
 import { COMPONENT_MAP, type ComponentDef } from '@/mock/layers'
 import { CURRENT_GRAPH_SCHEMA_VERSION } from '@/mock/data'
 import { useBuilder } from '@/lib/builder-store'
 import { useBot, useWorkspace, useHydrated } from '@/lib/workspace-store'
-import { issueCounts, validateGraph, type Issue } from '@/lib/validate'
+import { validateGraph, issueCounts, type Issue } from '@/lib/validate'
 import { toast, useSession } from '@/lib/store'
 import { BuilderToolbar } from '@/components/builder/builder-toolbar'
 import { LibraryPanel } from '@/components/builder/library-panel'
@@ -29,11 +30,11 @@ import { EmptyState } from '@/components/ui/empty-state'
 
 export default function BuilderPage() {
   const { botId } = useParams<{ botId: string }>()
-  const router = useRouter()
   const bot = useBot(botId)
   const hydrated = useHydrated()
   const { saveGraph, updateBot, savePreset, snapshotVersion } = useWorkspace()
   const { plan, unlocked } = useSession()
+  const [isSmallScreen, setIsSmallScreen] = useState(false)
 
   const {
     load,
@@ -190,10 +191,30 @@ export default function BuilderPage() {
     toast.success('Block saved', 'Find it at the top of your node library.')
   }
 
+  useEffect(() => {
+    const checkViewport = () => setIsSmallScreen(window.innerWidth < 1024)
+    checkViewport()
+    window.addEventListener('resize', checkViewport)
+    return () => window.removeEventListener('resize', checkViewport)
+  }, [])
+
   if (!hydrated) {
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-xs text-muted-foreground animate-pulse font-mono">
         Loading strategy canvas...
+      </div>
+    )
+  }
+
+  if (isSmallScreen) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-8">
+        <EmptyState
+          icon={Monitor}
+          title="Best experienced on a larger screen"
+          description="The Builder needs room for the canvas, node library, and inspector side panels. Switch to a desktop or larger display for full editing capabilities."
+          action={{ label: 'Back to bots', href: '/app/bots' }}
+        />
       </div>
     )
   }

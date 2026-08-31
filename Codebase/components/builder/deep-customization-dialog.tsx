@@ -1,45 +1,31 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import {
   COMPONENT_MAP,
   LAYER_MAP,
-  type ComponentDef,
-  type FieldDef,
 } from '@/mock/layers'
-import type { BotNode, BotEdge } from '@/mock/data'
 import { useBuilder } from '@/lib/builder-store'
 import { defaultConfig } from '@/lib/workspace-store'
 import { FieldRenderer } from '@/components/builder/field-renderer'
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogBody,
-  DialogFooter,
 } from '@/components/ui/dialog'
 import { Segmented } from '@/components/ui/tabs'
 import { PillButton } from '@/components/ui/pill-button'
 import { Badge } from '@/components/ui/badge'
-import { Input, Textarea, Field } from '@/components/ui/input'
+import { Input, Textarea } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   SlidersHorizontal,
-  Sparkles,
-  BookOpen,
   RotateCcw,
   Copy,
-  Download,
   Upload,
-  Check,
   Variable,
-  Layers,
-  ArrowRight,
-  ShieldAlert,
-  AlertTriangle,
 } from 'lucide-react'
 import { toast } from '@/lib/store'
 

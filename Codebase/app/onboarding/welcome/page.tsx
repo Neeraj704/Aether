@@ -20,7 +20,7 @@ const LEVELS: Array<{
     id: 'beginner',
     title: 'Beginner Trader',
     tagline: 'Streamlined & Guided',
-    description: 'We will simplify complex nodes and keep advanced mathematical configs tucked away until you need them.',
+    description: "We'll highlight the settings that matter most for your level with clean, intuitive defaults.",
     icon: Sparkles,
   },
   {

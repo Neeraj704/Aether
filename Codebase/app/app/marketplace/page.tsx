@@ -107,7 +107,6 @@ export default function MarketplacePage() {
                       By {preset.author.name}
                     </span>
                     <h3 className="font-bold text-base tracking-tight hover:text-brand transition-colors truncate">
-                      {/* TODO(phase5): detail page at /app/marketplace/:id */}
                       <Link href={`/app/marketplace/${preset.id}`} className="hover:underline">
                         {preset.name}
                       </Link>

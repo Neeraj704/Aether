@@ -121,7 +121,7 @@ export function LibraryPanel({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search 100+ nodes"
+            placeholder="Search 60+ components"
             aria-label="Search component library"
             className="h-8 pr-7 pl-8 text-[13px]"
           />

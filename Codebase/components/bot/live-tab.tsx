@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { Radio, Terminal, Play, Pause, Zap } from 'lucide-react'
+import { Radio, Terminal, Play, Pause, Zap, AlertTriangle } from 'lucide-react'
 import type { Bot } from '@/mock/data'
 import { OPEN_POSITIONS, LIVE_LOG_TEMPLATES } from '@/mock/data'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -165,6 +165,14 @@ export function LiveTab({ bot, onSwitchTab }: { bot: Bot; onSwitchTab?: (tab: st
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
+        {/* Paper Trading Compliance Banner */}
+        <div className="flex items-center gap-2.5 rounded-xl border border-warn/30 bg-warn/10 px-3.5 py-2.5 text-xs text-warn">
+          <AlertTriangle className="size-4 shrink-0" />
+          <span>
+            <strong>Paper trading only</strong> &mdash; Simulated execution environment. No real funds are being used.
+          </span>
+        </div>
+
         {/* Open Positions Table */}
         <div className="flex flex-col gap-2.5">
           <div className="flex items-center justify-between">

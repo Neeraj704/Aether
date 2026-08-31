@@ -269,6 +269,19 @@ export default function LiveMonitoringPage() {
 
   return (
     <div className="flex flex-col gap-6 p-6 lg:p-8 max-w-[1400px] mx-auto w-full">
+      {/* Paper Trading Compliance Banner */}
+      <div className="flex items-center gap-3 rounded-xl border border-warn/30 bg-warn/10 px-4 py-3 text-xs text-warn">
+        <AlertTriangle className="size-4 shrink-0" />
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 w-full">
+          <span>
+            <strong>Paper trading only</strong> &mdash; Simulated execution environment. No real funds are being used.
+          </span>
+          <Link href="/legal/risk-disclosure" className="underline font-medium hover:text-warn/80 shrink-0">
+            Risk Disclosure &rarr;
+          </Link>
+        </div>
+      </div>
+
       {/* Top Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">

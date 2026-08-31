@@ -1,0 +1,81 @@
+# PHASE 9 — Final Frontend Punch List + What Comes After Frontend
+
+This was written after a full read of `01–04`, all of `Prompts/00–10`, and a line-by-line audit of every file in `Codebase/` — not from assumptions. It has two parts: **Part A** is a short, bounded punch list you can feed to your coding agent exactly like Phases 4–8 (it closes out the last real gaps). **Part B** is the roadmap for everything after the frontend is frozen.
+
+**Read `00 - START HERE` first for ground rules — they still apply in full.**
+
+---
+
+## Headline verdict
+
+The frontend is in unusually good shape for where you are in the process. I independently verified — not just trusted the prompt text — that Phase 8's entire acceptance checklist actually landed in the code:
+
+- Zero native `confirm()`/`alert()` calls anywhere.
+- Zero unused imports across the whole codebase (full scan, not a sample).
+- Zero unused hook-derived locals or plain `const` bindings (same scan method).
+- Zero broken internal links — every `href`/`router.push` in the app resolves to a route that actually exists (cross-checked programmatically against your route tree).
+- `next.config.mjs` no longer sets `ignoreBuildErrors: true`.
+- Dev Panel is properly gated behind `NODE_ENV`/`NEXT_PUBLIC_ENABLE_DEV_PANEL`.
+- Builder has the small-screen fallback state.
+- `plan-comparison.tsx` derives prices from `PLANS`, not hardcoded strings.
+- Creator Dashboard is reachable (sidebar entry + Presets cross-link, correctly conditional on `publishedPresets.length > 0`).
+- The live Activity feed and notification bell are both genuinely wired to real actions — I traced all 5 required call sites (backtest complete, node unlocked, preset published, bot promoted to live, credits/plan changed) through `lib/workspace-store.ts` and the billing pages.
+- Phase 7.1's marketplace bridge is real end-to-end: `useMarketplacePresets()` is consumed consistently by `/marketplace`, `/app/marketplace`, both detail pages, Compare, Search, and the Command Palette — not just the two pages the patch explicitly named.
+
+So: **you do not need another bug-bash phase.** What's left is a short, well-defined list — one of these six items is a genuine product/compliance gap worth fixing before you call the frontend frozen; the rest are small polish.
+
+---
+
+## Part A — Punch list (feed this to your agent as-is)
+
+### 1. Missing persistent "paper trading" banner on the Live Execution monitor — do this first
+
+**Files:** `app/app/live/page.tsx`, `components/bot/live-tab.tsx`
+
+Your own spec (`03 - Page by page features` §12, and the Risk Disclosure requirement in §23) is explicit: the live monitor needs *"Clear, persistent banner: 'Paper trading — no real funds are being used' (unless/until the account has an explicitly verified real-fund tier active, in which case the banner instead clearly states real capital is at risk)."*
+
+Today, `app/app/bots/[botId]/backtest/[runId]/page.tsx` correctly shows an inline disclaimer ("Backtest results describe the past. They do not forecast or guarantee future performance."), but the live monitor has no equivalent. It has an "Emergency Stop" kill switch (good, satisfies that requirement) and a small "Live Paper Execution Feed" label in the empty state of `live-tab.tsx`, but no persistent banner stating no real funds are at risk.
+
+Add a persistent, non-dismissable banner at the top of `app/app/live/page.tsx` (above or alongside the "Top Header Bar") and the equivalent spot in `components/bot/live-tab.tsx`'s active (non-empty) state. Since there is no real-fund tier implemented anywhere in this codebase yet, the banner is unconditional for now: something like an amber/informational strip reading "Paper trading only — no real funds are being used." Match the visual pattern of an existing inline alert/banner elsewhere in the app rather than hand-rolling new markup (check if `components/ui/misc.tsx` or the legal-page layout already has an `Alert`/banner primitive you can reuse).
+
+### 2. Component-count copy overstates what's actually built
+
+**File:** `components/builder/library-panel.tsx` (search placeholder, currently `"Search 100+ nodes"`)
+
+`mock/layers.ts` currently defines exactly **68** components across **12** layers. `components/landing/hero.tsx` already gets this right — it says "12 layers · 60+ components," which is accurate. The library panel's placeholder is the one place still saying "100+," which was flagged as "ahead of schedule" as far back as `00 - START HERE` and never corrected. Change it to match the honest copy already used on the landing page (`"Search 60+ components"` or a neutral `"Search components"` that won't need editing every time you add one).
+
+### 3. Stale leftover comment
+
+**File:** `app/app/marketplace/page.tsx`, around the preset name `<Link>`
+
+A `{/* TODO(phase5): detail page at /app/marketplace/:id */}` comment sits directly above a link that already correctly points at `/app/marketplace/${preset.id}` — the page it complains about not existing has existed since Phase 5. Delete the comment. Purely cosmetic, but it will confuse you or an agent later into thinking there's a real gap here.
+
+### 4. Onboarding "Beginner" promise vs. actual behavior
+
+**Files:** `app/onboarding/welcome/page.tsx`, `components/builder/inspector.tsx`
+
+The welcome screen tells a Beginner-tier user: *"We will simplify complex nodes and keep advanced mathematical configs tucked away until you need them."* The selection is correctly saved (`setOnboardingAnswer({ experience: lvl })` → `useSession`'s `onboarding.experience`), but the only place that value is read anywhere in the app is `components/builder/inspector.tsx`, where it changes the "Deep Customization" button's visual variant (outline vs. secondary) — it does not actually hide or simplify anything. This isn't a broken button, it's copy making a promise the product doesn't keep.
+
+Pick one:
+- **(a) Cheap fix:** soften the onboarding copy to not promise hiding — e.g. "We'll highlight the settings that matter most for your level" — and leave the subtle variant change as the only effect.
+- **(b) Real fix:** in `inspector.tsx`, when `onboarding.experience === 'beginner'`, actually collapse or visually de-emphasize non-essential `FieldDef`s in the "Core Parameters" list (you already have a `Deep Customization` modal that holds the advanced fields separately per Phase 6 — this may already be most of the way there structurally; check `field-renderer.tsx`/`deep-customization-dialog.tsx` for whether fields are already tagged with something like a `tier`/`advanced` flag you could gate on).
+
+(a) is a five-minute fix; (b) is a real feature and can wait — but do one of them, don't leave the promise and the behavior mismatched.
+
+### 5. (Optional, low priority) Creator Dashboard empty state
+
+Already flagged and deliberately deferred in Phase 8 — `app/app/creator/dashboard/page.tsx` has no zero-state for `publishedPresets.length === 0`. Low urgency since the nav entry that leads here is itself conditional on having ≥1 published preset, so a user can't organically land here empty-handed today. Worth a real empty state once you're doing a UI polish pass, not before.
+
+### 6. (Optional, low priority) ESLint
+
+Still absent, as Phase 8 explicitly allowed skipping if you don't have network access in your agent session. Worth adding once you do — `npx next lint` will scaffold `eslint-config-next`.
+
+### Acceptance checklist for Phase 9
+
+- [ ] A persistent "paper trading, no real funds" banner is visible on `/app/live` and on a bot's Live tab whenever it's not in its empty state.
+- [ ] Library search placeholder no longer says "100+."
+- [ ] The stale `TODO(phase5)` comment in `app/app/marketplace/page.tsx` is gone.
+- [ ] Onboarding copy and actual beginner-mode behavior agree with each other (either softened copy, or the inspector genuinely simplifies for beginners).
+- [ ] Nothing outside the files named above was modified.
+
+---

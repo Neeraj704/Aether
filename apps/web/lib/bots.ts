@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/client'
 import type { Bot, BotGraph, BotStatus, BotVersion } from '@/mock/data'
 import { CURRENT_GRAPH_SCHEMA_VERSION, emptyGraph } from '@/mock/data'
+import { cloneGraph } from '@/lib/graph-utils'
 
 export interface CreateBotInput {
   name?: string
@@ -18,6 +19,7 @@ export interface UpdateBotMetaInput {
   visibility?: 'private' | 'unlisted' | 'public'
   tags?: string[]
   headline_metric?: { label: string; value: string; positive: boolean }
+  archived?: boolean
 }
 
 function mapBotRow(row: any, versions: BotVersion[] = []): Bot {
@@ -32,17 +34,24 @@ function mapBotRow(row: any, versions: BotVersion[] = []): Bot {
     graph: row.graph || emptyGraph(),
     headlineMetric: row.headline_metric || { label: 'Return, 90d', value: '0.0%', positive: true },
     visibility: row.visibility || 'private',
+    archived: row.archived ?? false,
     versions: versions,
     runIds: [],
   }
 }
 
-export async function listBots(): Promise<Bot[]> {
+export async function listBots(includeArchived = false): Promise<Bot[]> {
   const supabase = createClient()
-  const { data, error } = await supabase
+  let query = supabase
     .from('bots')
     .select('*')
     .order('updated_at', { ascending: false })
+
+  if (!includeArchived) {
+    query = query.eq('archived', false)
+  }
+
+  const { data, error } = await query
 
   if (error || !data) {
     console.error('Error fetching bots:', error)
@@ -143,6 +152,7 @@ export async function updateBotMeta(id: string, meta: UpdateBotMetaInput): Promi
   if (meta.visibility !== undefined) payload.visibility = meta.visibility
   if (meta.tags !== undefined) payload.tags = meta.tags
   if (meta.headline_metric !== undefined) payload.headline_metric = meta.headline_metric
+  if (meta.archived !== undefined) payload.archived = meta.archived
 
   const { error } = await supabase
     .from('bots')
@@ -161,6 +171,37 @@ export async function deleteBot(id: string): Promise<void> {
   if (error) {
     throw new Error(error.message)
   }
+}
+
+/**
+ * Option A (preferred, minimal schema change):
+ * Uses the dedicated `archived` boolean column on `public.bots`
+ * via migration 0005_bot_archive.sql.
+ */
+export async function archiveBot(id: string): Promise<void> {
+  await updateBotMeta(id, { archived: true })
+}
+
+export async function unarchiveBot(id: string): Promise<void> {
+  await updateBotMeta(id, { archived: false })
+}
+
+export async function duplicateBotRemote(id: string): Promise<Bot> {
+  const source = await getBot(id)
+  if (!source) {
+    throw new Error(`Bot ${id} not found`)
+  }
+
+  const clonedGraph = cloneGraph(source.graph)
+  const newBot = await createBot({
+    name: `${source.name} copy`,
+    description: source.description,
+    graph: clonedGraph,
+    tags: [...source.tags],
+    visibility: source.visibility,
+  })
+
+  return newBot
 }
 
 export async function saveBotVersion(id: string, label: string, note = ''): Promise<BotVersion> {
@@ -196,4 +237,23 @@ export async function saveBotVersion(id: string, label: string, note = ''): Prom
     nodeCount: data.node_count,
     graph: data.graph,
   }
+}
+
+export async function restoreBotVersion(botId: string, versionId: string): Promise<void> {
+  const bot = await getBot(botId)
+  if (!bot) {
+    throw new Error(`Bot ${botId} not found`)
+  }
+
+  const version = bot.versions.find((v) => v.id === versionId)
+  if (!version) {
+    throw new Error(`Version ${versionId} not found on bot ${botId}`)
+  }
+
+  // Deep clone graph to never restore by reference
+  const clonedGraph = cloneGraph(version.graph)
+  await updateBotGraph(botId, clonedGraph)
+
+  // Save new version snapshot recording the restoration
+  await saveBotVersion(botId, 'Restored', `Restored from ${version.label}`)
 }

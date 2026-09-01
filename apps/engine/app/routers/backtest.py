@@ -179,3 +179,84 @@ async def get_backtest(
         "equity": equity_list,
         "config": run.config,
     }
+
+@router.get("/bots/{bot_id}/backtests")
+async def list_bot_backtests(
+    bot_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user_id UUID")
+
+    bot_uuid = None
+    try:
+        bot_uuid = uuid.UUID(bot_id)
+    except Exception:
+        result = await db.execute(
+            select(BotModel).where(BotModel.user_id == user_uuid).order_by(BotModel.updated_at.desc())
+        )
+        found_bot = result.scalars().first()
+        if found_bot:
+            bot_uuid = found_bot.id
+
+    if not bot_uuid:
+        return []
+
+    stmt = select(BacktestRunModel).where(
+        BacktestRunModel.bot_id == bot_uuid,
+        BacktestRunModel.user_id == user_uuid,
+    ).order_by(BacktestRunModel.created_at.desc())
+
+    res = await db.execute(stmt)
+    runs = res.scalars().all()
+
+    return [
+        {
+            "id": str(r.id),
+            "botId": str(r.bot_id),
+            "status": r.status,
+            "config": r.config or {},
+            "metrics": r.metrics or {
+                "totalReturn": 0.0,
+                "sharpe": 0.0,
+                "maxDrawdown": 0.0,
+                "winRate": 0.0,
+                "trades": 0,
+                "profitFactor": 0.0,
+            },
+            "errorMessage": r.error_message,
+            "createdAt": r.created_at.isoformat() if hasattr(r.created_at, "isoformat") else str(r.created_at),
+            "completedAt": r.completed_at.isoformat() if hasattr(r.completed_at, "isoformat") and r.completed_at else None,
+        }
+        for r in runs
+    ]
+
+@router.delete("/backtest/{run_id}")
+async def delete_backtest(
+    run_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        run_uuid = uuid.UUID(run_id)
+        user_uuid = uuid.UUID(user_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid run_id or user_id UUID")
+
+    result = await db.execute(
+        select(BacktestRunModel).where(
+            BacktestRunModel.id == run_uuid,
+            BacktestRunModel.user_id == user_uuid,
+        )
+    )
+    run = result.scalars().first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Backtest run not found")
+
+    await db.delete(run)
+    await db.commit()
+    return {"status": "deleted", "id": run_id}
+

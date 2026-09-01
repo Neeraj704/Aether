@@ -1,10 +1,12 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { LineChart, Globe, Download } from 'lucide-react'
-import type { Bot } from '@/mock/data'
+import type { Bot, BacktestRun } from '@/mock/data'
 import { useWorkspace } from '@/lib/workspace-store'
+import { listBacktestRuns } from '@/lib/engine'
 import { toast } from '@/lib/store'
 import { downloadBotExport } from '@/lib/graph-utils'
 import { Stat } from '@/components/ui/stat'
@@ -17,7 +19,26 @@ import { GraphThumbnail } from './graph-thumbnail'
 
 export function OverviewTab({ bot }: { bot: Bot }) {
   const router = useRouter()
-  const runs = useWorkspace((s) => s.runs).filter((r) => r.botId === bot.id)
+  const localRuns = useWorkspace((s) => s.runs).filter((r) => r.botId === bot.id)
+  const [runs, setRuns] = useState<BacktestRun[]>(localRuns)
+
+  useEffect(() => {
+    let active = true
+    listBacktestRuns(bot.id)
+      .then((remoteRuns) => {
+        if (!active) return
+        if (remoteRuns && remoteRuns.length > 0) {
+          setRuns(remoteRuns)
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load remote backtests:', err)
+      })
+    return () => {
+      active = false
+    }
+  }, [bot.id])
+
   const recentRuns = runs.slice(0, 3)
 
   const handlePublish = () => {
@@ -38,9 +59,9 @@ export function OverviewTab({ bot }: { bot: Bot }) {
         </div>
 
         <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-4 p-5 rounded-xl border border-border bg-card">
-          <Stat label="Nodes" value={bot.graph?.nodes?.length ?? (bot as any).nodes?.length ?? 0} hint="Total component nodes in graph" />
+          <Stat label="Nodes" value={bot.graph?.nodes?.length ?? (bot as any).nodes ?? 0} hint="Total component nodes in graph" />
           <Stat label="Versions" value={bot.versions.length} hint="Saved strategy revisions" />
-          <Stat label="Total Backtests" value={bot.runIds.length} hint="Historical simulation runs" />
+          <Stat label="Total Backtests" value={runs.length || bot.runIds.length} hint="Historical simulation runs" />
           <Stat
             label={bot.headlineMetric.label || 'Headline Metric'}
             value={bot.headlineMetric.value || '—'}
@@ -109,19 +130,19 @@ export function OverviewTab({ bot }: { bot: Bot }) {
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold">{formatDate(run.createdAt, { withTime: true })}</span>
                       <Badge variant="outline" size="sm" className="capitalize">
-                        {run.config.type}
+                        {run.config?.type || 'historical'}
                       </Badge>
                     </div>
                     <span className="text-xs text-tertiary">
-                      Symbols: {run.config.symbols} &bull; Capital: ₹{run.config.capital.toLocaleString('en-IN')}
+                      Symbols: {run.config?.symbols || 'BTC/USDT'} &bull; Capital: ₹{(run.config?.capital || 100000).toLocaleString('en-IN')}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-6">
                     <div className="flex flex-col items-end">
                       <span className="text-xs text-tertiary">Total Return</span>
-                      <span className={`text-sm font-bold tabular ${run.metrics.totalReturn >= 0 ? 'text-profit' : 'text-loss'}`}>
-                        {formatPct(run.metrics.totalReturn)}
+                      <span className={`text-sm font-bold tabular ${(run.metrics?.totalReturn ?? 0) >= 0 ? 'text-profit' : 'text-loss'}`}>
+                        {formatPct(run.metrics?.totalReturn ?? 0)}
                       </span>
                     </div>
 

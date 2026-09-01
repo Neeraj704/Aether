@@ -1,0 +1,233 @@
+# AETHER — Phase 10: Real Authentication & Bot Lifecycle Persistence
+
+> **Read this entire document before writing any code.** This is a bounded, single-phase prompt in the same style as Prompts 00–11 in `docs/Prompts/`. Do not expand scope beyond what is listed here. Do not touch presets, marketplace, billing, live trading, or any node/agent logic — those are separate, later phases and are explicitly out of scope.
+
+---
+
+## 0. Context you must internalize first
+
+AETHER is a no-code visual builder for algorithmic trading agents. The frontend (Next.js 16 / React 19 / TypeScript / Zustand / `@xyflow/react`) was built and frozen across Phases 0–9 as a fully mocked, `localStorage`-only client app. Backend work has since started:
+
+- A FastAPI engine (`apps/engine/`) exists with: a node registry (`app/nodes/registry.py`), a DAG compiler (`app/graph/compiler.py`), a structural validator (`app/graph/validate.py`), and a backtest simulator (`app/engine/backtest_runner.py`) supporting `historical`, `paper`, `walk-forward`, and `monte-carlo` runs against real Binance OHLCV data cached in Postgres (`apps/engine/app/data/binance_ingest.py`).
+- Supabase Postgres holds `profiles`, `bots`, `bot_versions`, `candles`, `backtest_runs`, `trades`, `equity_points` (see `supabase/migrations/*.sql`), all with RLS policies keyed on `auth.uid()`.
+- The frontend has **already started** bridging to this real backend in two places:
+  - `apps/web/lib/bots.ts` — real Supabase CRUD for bots (`listBots`, `getBot`, `createBot`, `updateBotGraph`, `updateBotMeta`, `deleteBot`, `saveBotVersion`), using `supabase.auth.getUser()`.
+  - `apps/web/lib/engine.ts` — calls the FastAPI engine's `/backtest` and `/backtest/{run_id}` with a Supabase session's `access_token` as a Bearer token.
+  - The Builder page (`apps/web/app/app/builder/[botId]/page.tsx`) already fetches the bot from Postgres via `getBot()`, autosaves the graph via `updateBotGraph()`, and saves version snapshots via `saveBotVersion()`. It falls back to the old mock `useWorkspace` store (`useBot(botId)`) only if the Postgres fetch fails.
+  - The Backtest config and report pages already call `getBot()` and `getBacktest()` for real data, with the mock `useWorkspace` store used only as a fallback / local cache.
+
+**This is a hybrid state, and it is fragile.** The rest of the app — `/app/bots` (bot list), the Bot Overview hub and its Settings tab, bot duplication, bot deletion, and JSON import — still read and write **exclusively** through the mock `useWorkspace` Zustand store (`apps/web/lib/workspace-store.ts`), which is pure `localStorage`, has nothing to do with Postgres, and will silently diverge from what the Builder and Backtest pages show. On top of that, it is **not yet confirmed** whether login/signup/logout in this codebase perform real Supabase Authentication or still just flip the old mock `useSession.authed` boolean from Phase 4 — if it's the latter, every Supabase call in `bots.ts`/`engine.ts` will fail with "User must be authenticated" the moment a real user without a fake session hits the app, because `supabase.auth.getUser()` will return `null`.
+
+**Your job in this phase is to close both gaps**: make authentication real end-to-end, and make the entire bot lifecycle (list, view, create, rename, describe, tag, archive/delete, duplicate, import, version-restore) consistently backed by Postgres, with the local Zustand store demoted to a pure optimistic-UI cache that is always written to *after* a successful Supabase call — never treated as a source of truth for a real logged-in user.
+
+Do **not** touch: presets (`myPresets`), the marketplace (`marketplacePresets`, `publishedPresets`), billing/credits, notifications/activity feeds, the live trading tab, or any node/agent execution logic. Those stay exactly as they are — still local mock data — until later phases. If a file you are editing also contains code for one of those out-of-scope areas, leave that code untouched and only modify the bot-lifecycle-related parts.
+
+---
+
+## 1. Mandatory Step Zero: Audit before you touch anything
+
+Before writing a single line of code, **read and summarize, in your own words, in a short report at the top of your working notes**, the current real behavior of these files (do not assume — verify by reading):
+
+1. `apps/web/middleware.ts`
+2. `apps/web/lib/supabase/client.ts`
+3. `apps/web/lib/supabase/server.ts`
+4. `apps/web/lib/supabase/middleware.ts`
+5. `apps/web/app/login/page.tsx`
+6. `apps/web/app/signup/page.tsx`
+7. `apps/web/app/forgot-password/page.tsx`
+8. `apps/web/app/reset-password/page.tsx`
+9. `apps/web/app/verify-email/page.tsx`
+10. `apps/web/app/auth/callback/route.ts`
+11. `apps/web/components/app/app-shell.tsx`
+12. `apps/web/lib/store.ts` (specifically `useSession` — `authed`, `logout`, `setAuthed`)
+13. `apps/web/app/app/bots/page.tsx`
+14. `apps/web/app/app/bots/[botId]/page.tsx`
+15. `apps/web/components/bot/settings-tab.tsx`, `overview-tab.tsx`, `bot-header.tsx`
+16. `apps/web/.env.example` and confirm what env vars are actually read at runtime for `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+For each file, note explicitly: **"real Supabase call"** or **"mock/local only — needs wiring"**. This report is required output before any edits — it prevents you from re-wiring something that's already correct, or missing something that looks wired but isn't (e.g., a login form that calls `useSession.setAuthed(true)` on submit without ever calling `supabase.auth.signInWithPassword`).
+
+---
+
+## 2. Task 1 — Real Supabase Authentication (only if the audit shows it's missing/fake)
+
+Implement using `@supabase/ssr` conventions (cookie-based session, refreshed on every request via middleware). If any of this is already correctly implemented per your audit, skip that sub-task and note why.
+
+### 2.1 `apps/web/lib/supabase/client.ts` (browser client)
+```ts
+import { createBrowserClient } from '@supabase/ssr'
+
+export function createClient() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  )
+}
+```
+
+### 2.2 `apps/web/lib/supabase/server.ts` (server component / server action client)
+Use `createServerClient` from `@supabase/ssr`, wired to `next/headers` cookies, following the standard Next.js App Router recipe (get/set/remove cookie handlers). This is required by `apps/web/lib/profile.ts`, which already imports `createClient` from here — confirm it matches this contract.
+
+### 2.3 `apps/web/lib/supabase/middleware.ts` + `apps/web/middleware.ts`
+Implement the standard `updateSession(request)` pattern: create a server client bound to the request/response cookies, call `supabase.auth.getUser()` to force a token refresh, and return the response with refreshed cookies attached. Wire `apps/web/middleware.ts` to call this on every request matching `/app/:path*` (and any other authenticated route), and **server-side redirect to `/login` if there is no user** — this is the real guard; the client-side check in `AppShell` becomes a secondary UX nicety, not the security boundary.
+
+Matcher config should exclude static assets, `_next`, and public marketing/auth routes.
+
+### 2.4 `apps/web/app/login/page.tsx`
+Replace any mock auth flip with:
+```ts
+const supabase = createClient()
+const { error } = await supabase.auth.signInWithPassword({ email, password })
+if (error) { /* show inline error, do not redirect */ }
+else { router.push('/app') } // or /onboarding/welcome — see 2.7
+```
+Keep the existing form/validation UI exactly as designed (Aether Glass primitives, inline error states) — only replace the submit handler's internals. OAuth buttons (Google/GitHub): if Supabase project OAuth providers aren't configured, wire them to `supabase.auth.signInWithOAuth({ provider: 'google' | 'github', options: { redirectTo: `${origin}/auth/callback` } })` but wrap in a try/catch that shows a graceful "OAuth not configured" toast rather than crashing, since we cannot assume provider credentials exist in every environment.
+
+### 2.5 `apps/web/app/signup/page.tsx`
+```ts
+const { data, error } = await supabase.auth.signUp({
+  email, password,
+  options: { data: { full_name: name } },
+})
+```
+The `full_name` in `options.data` is read by the `handle_new_user()` Postgres trigger (see `supabase/migrations/0001_profiles.sql`) to seed `profiles.display_name` — do not skip passing it. After signup:
+- If `data.session` is present (email confirmation disabled in this Supabase project), redirect straight to `/onboarding/welcome`.
+- If `data.session` is `null` (confirmation required), redirect to a "check your email" state (reuse/adapt the existing `/verify-email` UI) instead of assuming the user is logged in.
+
+### 2.6 `apps/web/app/forgot-password/page.tsx` and `apps/web/app/reset-password/page.tsx`
+- Forgot password: `supabase.auth.resetPasswordForEmail(email, { redirectTo: `${origin}/reset-password` })`.
+- Reset password: read the recovery session Supabase establishes via the URL fragment/callback, then `supabase.auth.updateUser({ password: newPassword })`. Keep existing token-aware `<Suspense>` wrapping from Phase 3 (do not remove it — Prompt 03 added it specifically to fix a build error).
+
+### 2.7 `apps/web/app/auth/callback/route.ts`
+Confirm/implement the standard code-exchange handler: read `code` from the query string, call `supabase.auth.exchangeCodeForSession(code)`, then redirect to `/app` (new OAuth/email-confirmation logins) or `/onboarding/welcome` if `profiles` for this user has no bots yet (first-time signal) — reuse whatever onboarding-completion check already exists in `useSession.onboardingComplete`, but source the "is this a first login" signal from the database (e.g., zero rows in `bots` for this `user_id`) rather than trusting a client-only flag, since a fresh signup on a new device would otherwise re-trigger onboarding incorrectly if you rely on `localStorage` alone.
+
+### 2.8 `components/app/app-shell.tsx` and `lib/store.ts`
+- Add a `supabase.auth.onAuthStateChange((event, session) => {...})` listener inside `AppShell` (or a small provider it mounts) that keeps `useSession.authed` and `useSession.profile` in sync with the *real* session — this preserves all the existing UI code that reads `useSession.authed`/`.profile` without a large refactor, but makes those values a mirror of reality instead of an independent fake.
+- `logout` in `useSession` must call `supabase.auth.signOut()` in addition to resetting the local store, and must await it before navigating away.
+- Do not remove the existing redirect-to-`/login` behavior in `AppShell` — keep it as defense-in-depth alongside the new middleware guard.
+
+### 2.9 Env vars
+Confirm `apps/web/.env.example` documents `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Add them if missing. Do not add server-only Supabase keys to any `NEXT_PUBLIC_*` variable.
+
+---
+
+## 3. Task 2 — Extend `apps/web/lib/bots.ts` with the missing operations
+
+The file already has `listBots`, `getBot`, `createBot`, `updateBotGraph`, `updateBotMeta`, `deleteBot`, `saveBotVersion`. Add:
+
+### 3.1 `duplicateBotRemote(id: string): Promise<Bot>`
+Fetch the source bot with `getBot(id)`, deep-clone its graph with the existing `cloneGraph()` util from `apps/web/lib/graph-utils.ts` (already used for exactly this purpose in the mock `duplicateBot` in `workspace-store.ts` — mirror that logic), then call the existing `createBot()` with `{ name: `${source.name} copy`, description: source.description, graph: clonedGraph, tags: source.tags }`. Return the new `Bot`.
+
+### 3.2 `restoreBotVersion(botId: string, versionId: string): Promise<void>`
+Fetch the bot (for its `versions`, already returned by `getBot`), find the matching `BotVersion`, deep-clone its `graph` via `cloneGraph()` (never restore a version's graph object by reference — see the exact bug class Prompt 08 fixed for cloning), and call `updateBotGraph(botId, clonedGraph)`. Also call `saveBotVersion(botId, 'Restored', `Restored from ${version.label}`)` afterward so the restore itself becomes a new version snapshot — never silently overwrite history.
+
+### 3.3 `archiveBot` — decide and implement one of two approaches, and document your choice in a code comment:
+- **Option A (preferred, minimal schema change):** add an `archived` boolean column via a new migration `supabase/migrations/0005_bot_archive.sql` (`alter table public.bots add column archived boolean not null default false;`), and add `archiveBot(id)` / `unarchiveBot(id)` thin wrappers around `updateBotMeta`-style updates.
+- **Option B:** reuse the existing `status` enum by treating a specific value as "archived" — **do not do this**, because `status` (`draft | backtested | live | paused | error`) is semantically about execution state, not visibility, and overloading it will corrupt the Bot Overview's status badge logic. Use Option A.
+
+Apply the new migration file to the same Supabase project the engine already targets (see `apps/engine/apply_migrations.py` for the existing pattern — you may need to run an equivalent one-off script, or apply via the Supabase SQL editor / CLI, whichever this environment supports; note in your output which method you used).
+
+---
+
+## 4. Task 3 — Rewire the Bots list page (`apps/web/app/app/bots/page.tsx`)
+
+Currently (per the docs) this page reads from `useWorkspace.bots` (mock) and calls `deleteBot` from the mock store. Change it to follow **the exact pattern already established in the Builder and Backtest pages**: fetch real data on mount with a loading state, fall back to the mock store's cached copy only while loading or on fetch failure, and never let stale mock data silently override a successful real fetch.
+
+```ts
+const localBots = useWorkspace((s) => s.bots)
+const [bots, setBots] = useState<Bot[]>(localBots)
+const [loading, setLoading] = useState(true)
+
+useEffect(() => {
+  let active = true
+  listBots().then((remote) => {
+    if (!active) return
+    setBots(remote)
+  }).catch((err) => {
+    console.error('Failed to load bots:', err)
+    // keep local fallback
+  }).finally(() => active && setLoading(false))
+  return () => { active = false }
+}, [])
+```
+
+Wire the page's existing UI actions to the new real functions:
+- **Delete** (single or bulk): call `deleteBot(id)` from `lib/bots.ts` for each selected id, then optimistically remove from local `bots` state and also call the mock store's `deleteBot` so the cache stays consistent for any other page still reading it this phase.
+- **Duplicate**: call the new `duplicateBotRemote(id)`, prepend the result to local state.
+- **Archive** (bulk action bar): call the new `archiveBot(id)` and either remove archived bots from the default list view or add an "Archived" filter tab — match whatever the existing filter bar UI in this page already supports; do not redesign the page's layout, only its data plumbing.
+- **New bot** button: call `createBot()` from `lib/bots.ts` (not the mock store's `createBot`), then `router.push('/app/builder/${newBot.id}')`.
+- **JSON Import**: after `parseBotImport(raw)` succeeds, call `createBot({ name, description, graph, tags })` from `lib/bots.ts` instead of the mock store, so imported bots persist.
+
+Keep every existing visual element (grid/list toggle, status badges, filter bar, sort dropdown, bulk selection, empty state) exactly as-is — this task is data plumbing only, not a redesign.
+
+---
+
+## 5. Task 4 — Rewire the Bot Overview hub (`apps/web/app/app/bots/[botId]/page.tsx`)
+
+Apply the same fetch-with-fallback pattern used in the Builder page (`getBot(botId)` on mount, fallback to `useBot(botId)` from the mock store only if the fetch fails). This page's four tabs need the following:
+
+- **Overview tab** (`components/bot/overview-tab.tsx`): reads bot summary/graph thumbnail — no write actions, should just receive the real `bot` object as a prop; no other change needed beyond the parent page passing real data.
+- **Backtests tab** (`components/bot/backtests-tab.tsx`): lists past runs. Per the docs, Prompt 08's bug bash already removed a native `confirm()` here for deleting a run — confirm that delete-run flow still calls into `apps/web/lib/workspace-store.ts`'s `deleteRun`, which is correct to leave as-is **only if backtest runs still live in the mock store**. Check whether `getBacktest`/`startBacktest` results are now the actual source of truth (per `lib/engine.ts`, they are, backed by `backtest_runs`/`trades`/`equity_points` tables) — if so, this tab's list of past runs should be sourced from a new `listBacktestRuns(botId)` addition to `lib/engine.ts` (add a corresponding `GET /bots/{bot_id}/backtests` list endpoint to `apps/engine/app/routers/backtest.py` if one doesn't exist — check first) rather than the mock store's `runs` array, so users see their real run history. If implementing this list endpoint, follow the exact auth/ownership pattern already used in `get_backtest` (`get_current_user_id` dependency, filter by `user_id`).
+- **Live tab** (`components/bot/live-tab.tsx`): **out of scope** — leave untouched, still mock, per Prompt 03's bot-scoped deterministic mock data. Do not wire this to anything real in this phase.
+- **Settings tab** (`components/bot/settings-tab.tsx`): wire Rename, Description, Visibility (`private`/`unlisted`/`public`), and Tags fields to `updateBotMeta(botId, {...})` from `lib/bots.ts`. Wire the Danger Zone's Archive and Delete actions to the new `archiveBot`/`deleteBot`. Every mutation must still route through the existing `ConfirmDialog` primitive for destructive actions (Prompt 05's rule — never a native `confirm()`).
+
+`components/bot/bot-header.tsx` should receive whatever real `bot` object the parent page loaded; no internal change expected unless it currently reads from `useWorkspace` directly instead of via props (check and fix if so).
+
+---
+
+## 6. Task 5 — Demote `workspace-store.ts`'s bot-related state to a cache, not a source of truth
+
+In `apps/web/lib/workspace-store.ts`, the bot-related actions (`createBot`, `duplicateBot`, `deleteBot`, `updateBot`, `saveGraph`, `setBotStatus`, `snapshotVersion`) currently mutate `bots` as if it were authoritative. **Do not delete these** — other in-scope code (the Builder/Backtest pages' existing fallback pattern) still calls `saveLocalGraph`/`updateLocalBot` as a cache-write step after a successful remote call, and that pattern is correct and should be preserved/extended, not removed.
+
+What must change: audit every call site of these mock-store bot actions across the whole `apps/web` tree (`grep -rn "useWorkspace" apps/web/app apps/web/components`) and classify each as:
+- **(a) Already correctly used as a post-success cache write** (e.g., Builder's `save()` calling `saveLocalGraph` after `updateBotGraph` succeeds) — leave alone.
+- **(b) Used as the primary/only write path for something now covered by `lib/bots.ts`** — these are the ones you are fixing in Tasks 3–4 above.
+- **(c) Used for something genuinely out of scope this phase** (presets, marketplace, notifications, activity, billing) — leave alone, do not touch.
+
+Produce a short table of every call site found and which category it falls into, as part of your final output, so the next phase's agent (and the human) has a map of what's still mock vs. real.
+
+---
+
+## 7. Explicit non-goals for this phase
+
+Do **not**:
+- Touch anything in `apps/engine/app/nodes/` (node execution logic) — that's the "real intelligence layer" phase, later.
+- Touch `apps/web/lib/entitlements.ts`, billing pages, or Razorpay in any way — there is no real billing yet; plan tiers stay mock.
+- Touch presets (`myPresets`), marketplace, or the publish wizard.
+- Touch the Live tab / "Aether View" — still fully mock this phase.
+- Add new npm packages beyond `@supabase/ssr` (check it isn't already installed before adding — `apps/web/package.json`).
+- Redesign any UI. This phase is data-plumbing and auth correctness only. If a component's current visual design conflicts with a wiring requirement (e.g., a field that was purely decorative now needs a save handler), wire it into the existing markup — do not restyle.
+- Modify `supabase/migrations/0001–0004` — only ever *add* a new migration file (`0005_bot_archive.sql`), never edit an already-applied one.
+
+---
+
+## 8. Acceptance checklist
+
+Do not consider this phase complete until every item below is true and manually verified:
+
+- [ ] `npx tsc --noEmit` in `apps/web` returns 0 errors.
+- [ ] A brand-new email/password signup on a clean Supabase project reaches either `/onboarding/welcome` (if email confirmation is off) or a real "check your email" screen (if it's on) — not a fake auto-login.
+- [ ] Logging in with a real Supabase user redirects to `/app` and `useSession.authed`/`.profile` reflect the real user's data (name/email), not the old hardcoded `CURRENT_USER` mock fixture.
+- [ ] Hitting any `/app/*` route directly in a fresh incognito/no-cookie browser redirects to `/login` **server-side** (verify via view-source / network tab showing a 30x before any client JS runs), not just a client-side flash-then-redirect.
+- [ ] Logout actually invalidates the Supabase session (confirm a subsequent `getUser()` call returns null) and returns to `/login`.
+- [ ] Creating a bot from `/app/bots`, `/app/builder`, and the onboarding flow all produce a row in the `bots` table (verify in Supabase table editor), not just `localStorage`.
+- [ ] Renaming a bot, changing its description/visibility/tags in Settings, persists after a full page reload (confirm from Postgres, not from a stale `localStorage` cache masking a failed write).
+- [ ] Duplicating a bot creates a genuinely independent row with a fresh graph clone (new node/edge/note/frame IDs, per the existing `cloneGraph()` contract) — editing the duplicate must never affect the original.
+- [ ] Restoring an old version writes a *new* version snapshot on top, never destructively loses the version being restored from.
+- [ ] Archiving a bot removes it from the default `/app/bots` view without deleting its data; it is recoverable.
+- [ ] Deleting a bot removes it from Postgres (cascade-deletes its `bot_versions` and `backtest_runs`, per existing FK `ondelete=cascade`) and from the UI immediately.
+- [ ] The Builder and Backtest pages (already-wired, per your audit) still work exactly as before — this phase must not regress them.
+- [ ] The call-site audit table from Task 5 is included in your final output.
+
+---
+
+## 9. What this phase deliberately does NOT finish
+
+This phase ends with: real auth, and a fully Postgres-backed bot lifecycle. It does **not** produce a "backend-complete" product. After this phase, the honest state of the project is still:
+
+- Presets/marketplace/billing/notifications: 100% mock, `localStorage` only.
+- Trading intelligence: rule-based heuristics only (`UniversalNode` in `apps/engine/app/nodes/universal.py`), no real LLM/ML calls despite the UI collecting model/prompt configuration for them.
+- No live/paper trading execution loop — only historical/paper-slippage-adjusted/walk-forward/Monte-Carlo *backtest* simulation exists.
+- No Razorpay integration of any kind.
+
+That is expected and correct — say so plainly in your final summary rather than implying more was completed than actually was.

@@ -65,3 +65,63 @@ export async function getBacktest(runId: string): Promise<BacktestResultResponse
 
   return res.json()
 }
+
+export async function listBacktestRuns(botId: string): Promise<BacktestRun[]> {
+  const supabase = createClient()
+  const { data: { session } } = await supabase.auth.getSession()
+
+  const engineUrl = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000'
+  try {
+    const res = await fetch(`${engineUrl}/bots/${botId}/backtests`, {
+      headers: {
+        Authorization: `Bearer ${session?.access_token}`,
+      },
+    })
+
+    if (!res.ok) {
+      return []
+    }
+
+    const data = await res.json()
+    return (data || []).map((r: any) => ({
+      id: r.id,
+      botId: r.botId,
+      status: r.status,
+      createdAt: r.createdAt,
+      config: r.config,
+      metrics: r.metrics || {
+        totalReturn: 0,
+        sharpe: 0,
+        maxDrawdown: 0,
+        winRate: 0,
+        trades: 0,
+        profitFactor: 0,
+      },
+      trades: [],
+      equity: [],
+      logs: [],
+      errorMessage: r.errorMessage,
+    }))
+  } catch (e) {
+    console.error('Failed to fetch backtests from engine:', e)
+    return []
+  }
+}
+
+export async function deleteBacktestRun(runId: string): Promise<void> {
+  const supabase = createClient()
+  const { data: { session } } = await supabase.auth.getSession()
+
+  const engineUrl = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000'
+  const res = await fetch(`${engineUrl}/backtest/${runId}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${session?.access_token}`,
+    },
+  })
+
+  if (!res.ok) {
+    const errorText = await res.text()
+    throw new Error(errorText || `Engine returned status ${res.status}`)
+  }
+}

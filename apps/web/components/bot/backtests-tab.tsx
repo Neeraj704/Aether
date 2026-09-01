@@ -1,10 +1,11 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { LineChart, Trash2, ExternalLink } from 'lucide-react'
-import type { Bot } from '@/mock/data'
+import type { Bot, BacktestRun } from '@/mock/data'
 import { useWorkspace } from '@/lib/workspace-store'
+import { listBacktestRuns, deleteBacktestRun } from '@/lib/engine'
 import { toast } from '@/lib/store'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -15,12 +16,29 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { formatDate, formatPct } from '@/lib/utils'
 
 export function BacktestsTab({ bot }: { bot: Bot }) {
-  const runs = useWorkspace((s) => s.runs).filter((r) => r.botId === bot.id)
-  const deleteRun = useWorkspace((s) => s.deleteRun)
-
+  const localRuns = useWorkspace((s) => s.runs).filter((r) => r.botId === bot.id)
+  const deleteRunLocal = useWorkspace((s) => s.deleteRun)
+  const [runs, setRuns] = useState<BacktestRun[]>(localRuns)
   const [sortKey, setSortKey] = useState<'createdAt' | 'totalReturn' | 'sharpe' | 'trades'>('createdAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [runToDelete, setRunToDelete] = useState<{ id: string; dateStr: string } | null>(null)
+
+  useEffect(() => {
+    let active = true
+    listBacktestRuns(bot.id)
+      .then((remoteRuns) => {
+        if (!active) return
+        if (remoteRuns && remoteRuns.length > 0) {
+          setRuns(remoteRuns)
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load remote backtest runs:', err)
+      })
+    return () => {
+      active = false
+    }
+  }, [bot.id])
 
   const toggleSort = (key: typeof sortKey) => {
     if (sortKey === key) {
@@ -38,13 +56,13 @@ export function BacktestsTab({ bot }: { bot: Bot }) {
         return mul * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
       }
       if (sortKey === 'totalReturn') {
-        return mul * (a.metrics.totalReturn - b.metrics.totalReturn)
+        return mul * ((a.metrics?.totalReturn ?? 0) - (b.metrics?.totalReturn ?? 0))
       }
       if (sortKey === 'sharpe') {
-        return mul * (a.metrics.sharpe - b.metrics.sharpe)
+        return mul * ((a.metrics?.sharpe ?? 0) - (b.metrics?.sharpe ?? 0))
       }
       if (sortKey === 'trades') {
-        return mul * (a.metrics.trades - b.metrics.trades)
+        return mul * ((a.metrics?.trades ?? 0) - (b.metrics?.trades ?? 0))
       }
       return 0
     })
@@ -52,6 +70,20 @@ export function BacktestsTab({ bot }: { bot: Bot }) {
 
   const handleDeleteRun = (id: string, dateStr: string) => {
     setRunToDelete({ id, dateStr })
+  }
+
+  const handleConfirmDelete = async () => {
+    if (runToDelete) {
+      try {
+        await deleteBacktestRun(runToDelete.id)
+      } catch (err) {
+        console.error('Engine delete backtest error:', err)
+      }
+      deleteRunLocal(runToDelete.id)
+      setRuns((prev) => prev.filter((r) => r.id !== runToDelete.id))
+      toast.info('Backtest deleted', 'Run record removed.')
+      setRunToDelete(null)
+    }
   }
 
   return (
@@ -111,6 +143,11 @@ export function BacktestsTab({ bot }: { bot: Bot }) {
             <TBody>
               {sortedRuns.map((run) => {
                 const formattedDate = formatDate(run.createdAt, { withTime: true })
+                const totalReturn = run.metrics?.totalReturn ?? 0
+                const sharpe = run.metrics?.sharpe ?? 0
+                const tradesCount = run.metrics?.trades ?? 0
+                const maxDrawdown = run.metrics?.maxDrawdown ?? 0
+
                 return (
                   <TR key={run.id}>
                     <TD className="font-medium text-foreground">
@@ -123,17 +160,17 @@ export function BacktestsTab({ bot }: { bot: Bot }) {
                     </TD>
                     <TD>
                       <Badge variant="outline" size="sm" className="capitalize">
-                        {run.config.type}
+                        {run.config?.type || 'historical'}
                       </Badge>
                     </TD>
-                    <TD className="text-muted-foreground text-xs">{run.config.symbols}</TD>
-                    <TD numeric className={`font-bold ${run.metrics.totalReturn >= 0 ? 'text-profit' : 'text-loss'}`}>
-                      {formatPct(run.metrics.totalReturn)}
+                    <TD className="text-muted-foreground text-xs">{run.config?.symbols || 'BTC/USDT'}</TD>
+                    <TD numeric className={`font-bold ${totalReturn >= 0 ? 'text-profit' : 'text-loss'}`}>
+                      {formatPct(totalReturn)}
                     </TD>
-                    <TD numeric>{run.metrics.sharpe.toFixed(2)}</TD>
-                    <TD numeric>{run.metrics.trades}</TD>
+                    <TD numeric>{sharpe.toFixed(2)}</TD>
+                    <TD numeric>{tradesCount}</TD>
                     <TD numeric className="text-loss">
-                      {formatPct(run.metrics.maxDrawdown)}
+                      {formatPct(maxDrawdown)}
                     </TD>
                     <TD className="text-right">
                       <div className="flex items-center justify-end gap-2">
@@ -146,7 +183,7 @@ export function BacktestsTab({ bot }: { bot: Bot }) {
                         <button
                           type="button"
                           onClick={() => handleDeleteRun(run.id, formattedDate)}
-                          className="p-1 rounded text-tertiary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                          className="p-1 rounded text-tertiary hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
                           title="Delete run"
                         >
                           <Trash2 className="size-3.5" />
@@ -167,16 +204,10 @@ export function BacktestsTab({ bot }: { bot: Bot }) {
           if (!open) setRunToDelete(null)
         }}
         title={`Delete backtest run from ${runToDelete?.dateStr}?`}
-        description="This permanently removes the run and its results. This can't be undone."
+        description="This permanently removes the run and its results from the database. This can't be undone."
         confirmLabel="Delete run"
         destructive
-        onConfirm={() => {
-          if (runToDelete) {
-            deleteRun(runToDelete.id)
-            toast.info('Backtest deleted', 'Run record removed.')
-            setRunToDelete(null)
-          }
-        }}
+        onConfirm={handleConfirmDelete}
       />
     </Card>
   )

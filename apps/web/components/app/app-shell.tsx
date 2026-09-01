@@ -8,6 +8,7 @@ import { AppTopbar } from '@/components/app/app-topbar'
 import { CommandPalette } from '@/components/app/command-palette'
 import { useSession } from '@/lib/store'
 import { Skeleton } from '@/components/ui/skeleton'
+import { createClient } from '@/lib/supabase/client'
 
 function FullPageSkeleton() {
   return (
@@ -54,11 +55,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false)
   const authed = useSession((s) => s.authed)
   const onboardingComplete = useSession((s) => s.onboardingComplete)
+  const syncUserSession = useSession((s) => s.syncUserSession)
   const router = useRouter()
 
   useEffect(() => {
     setMounted(true)
-  }, [])
+    const supabase = createClient()
+
+    // Initial auth check
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        syncUserSession(user)
+      } else {
+        syncUserSession(null)
+        router.replace('/login')
+      }
+    }).catch(() => {
+      syncUserSession(null)
+      router.replace('/login')
+    })
+
+    // Listen to real auth events
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        syncUserSession(session.user)
+      } else if (event === 'SIGNED_OUT') {
+        syncUserSession(null)
+        router.replace('/login')
+      }
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [router, syncUserSession])
 
   useEffect(() => {
     if (!mounted) return

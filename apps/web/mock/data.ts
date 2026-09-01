@@ -97,6 +97,7 @@ export interface Bot {
   graph: BotGraph
   headlineMetric: { label: string; value: string; positive: boolean }
   visibility: 'private' | 'unlisted' | 'public'
+  archived?: boolean
   versions: BotVersion[]
   runIds: string[]
 }

@@ -10,14 +10,31 @@ export async function GET(request: Request) {
     const supabase = await createClient()
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
+      // Determine if this is a first-time user (0 bots in database)
+      let destination = next
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (user && next === '/app') {
+        const { count } = await supabase
+          .from('bots')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+
+        if (count === 0) {
+          destination = '/onboarding/welcome'
+        }
+      }
+
       const forwardedHost = request.headers.get('x-forwarded-host')
       const isLocalEnv = process.env.NODE_ENV === 'development'
       if (isLocalEnv) {
-        return NextResponse.redirect(`${origin}${next}`)
+        return NextResponse.redirect(`${origin}${destination}`)
       } else if (forwardedHost) {
-        return NextResponse.redirect(`https://${forwardedHost}${next}`)
+        return NextResponse.redirect(`https://${forwardedHost}${destination}`)
       } else {
-        return NextResponse.redirect(`${origin}${next}`)
+        return NextResponse.redirect(`${origin}${destination}`)
       }
     }
   }

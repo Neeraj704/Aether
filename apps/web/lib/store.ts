@@ -6,8 +6,10 @@ import type { PlanTier } from '@/mock/layers'
 import { CURRENT_USER } from '@/mock/data'
 import { slugId } from '@/lib/utils'
 
+import { createClient } from '@/lib/supabase/client'
+
 /* ------------------------------------------------------------------ */
-/* Session store — the dev-toggleable fake auth/plan/theme state       */
+/* Session store — session state synced with Supabase Auth            */
 /* ------------------------------------------------------------------ */
 
 export type ThemeMode = 'light' | 'dark' | 'system'
@@ -55,6 +57,7 @@ interface SessionState {
   onboarding: OnboardingState
 
   setAuthed: (v: boolean) => void
+  syncUserSession: (user: any, profileData?: Partial<UserProfile>) => void
   setPlan: (p: PlanTier) => void
   setCredits: (n: number) => void
   spendCredits: (n: number) => boolean
@@ -69,7 +72,7 @@ interface SessionState {
   updateApiKeys: (patch: Partial<UserApiKeys>) => void
   updateNotificationPrefs: (patch: Partial<UserNotificationPrefs>) => void
   reset: () => void
-  logout: () => void
+  logout: () => Promise<void>
 }
 
 function computeInitials(name: string): string {
@@ -80,7 +83,7 @@ function computeInitials(name: string): string {
 }
 
 const INITIAL = {
-  authed: true,
+  authed: false,
   plan: CURRENT_USER.plan,
   credits: CURRENT_USER.credits,
   onboardingComplete: true,
@@ -117,6 +120,28 @@ export const useSession = create<SessionState>()(
       ...INITIAL,
 
       setAuthed: (authed) => set({ authed }),
+      syncUserSession: (user, profileData) => {
+        if (!user) {
+          set({ authed: false })
+          return
+        }
+        const email = user.email || ''
+        const name =
+          user.user_metadata?.full_name ||
+          profileData?.name ||
+          (email ? email.split('@')[0] : 'Trader')
+        const initials = computeInitials(name)
+        set((state) => ({
+          authed: true,
+          profile: {
+            ...state.profile,
+            name,
+            email,
+            initials,
+            ...profileData,
+          },
+        }))
+      },
       setPlan: (plan) => set({ plan }),
       setCredits: (credits) => set({ credits }),
       spendCredits: (n) => {
@@ -160,7 +185,15 @@ export const useSession = create<SessionState>()(
           notificationPrefs: { ...get().notificationPrefs, ...patch },
         }),
       reset: () => set(INITIAL),
-      logout: () => set({ ...INITIAL, authed: false }),
+      logout: async () => {
+        try {
+          const supabase = createClient()
+          await supabase.auth.signOut()
+        } catch (err) {
+          console.error('Supabase signOut error:', err)
+        }
+        set({ ...INITIAL, authed: false })
+      },
     }),
     {
       name: 'aether.session',

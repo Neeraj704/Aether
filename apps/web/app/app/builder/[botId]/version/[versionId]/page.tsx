@@ -12,6 +12,8 @@ import {
 import { useBot, useWorkspace, useHydrated } from '@/lib/workspace-store'
 import { useBuilder } from '@/lib/builder-store'
 import { cloneGraph } from '@/lib/graph-utils'
+import { getBot, restoreBotVersion } from '@/lib/bots'
+import type { Bot } from '@/mock/data'
 import { toast } from '@/lib/store'
 import { PillButton } from '@/components/ui/pill-button'
 import { Badge } from '@/components/ui/badge'
@@ -23,11 +25,32 @@ export default function VersionRestorePage() {
   const { botId, versionId } = useParams<{ botId: string; versionId: string }>()
   const router = useRouter()
   const hydrated = useHydrated()
-  const bot = useBot(botId)
+  const localBot = useBot(botId)
+  const [bot, setBot] = useState<Bot | null>(localBot || null)
+  const [loading, setLoading] = useState(true)
   const { saveGraph, snapshotVersion } = useWorkspace()
   const load = useBuilder((s) => s.load)
 
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [restoring, setRestoring] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    getBot(botId)
+      .then((remote) => {
+        if (!active) return
+        if (remote) setBot(remote)
+      })
+      .catch((err) => {
+        console.error('Failed to load bot versions from DB:', err)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [botId])
 
   const version = bot?.versions.find((v) => v.id === versionId)
 
@@ -38,7 +61,7 @@ export default function VersionRestorePage() {
     }
   }, [version, bot, load])
 
-  if (!hydrated) {
+  if (!hydrated && loading) {
     return (
       <div className="flex flex-1 items-center justify-center p-12 text-xs text-muted-foreground animate-pulse font-mono">
         Loading snapshot preview...
@@ -59,12 +82,20 @@ export default function VersionRestorePage() {
     )
   }
 
-  const handleRestore = () => {
-    const graph = cloneGraph(version.graph)
-    saveGraph(bot.id, graph)
-    snapshotVersion(bot.id, `Restored from ${version.label}`)
-    toast.success('Version Restored', `Loaded graph state from ${version.label}, including its notes and section frames.`)
-    router.push(`/app/builder/${bot.id}`)
+  const handleRestore = async () => {
+    setRestoring(true)
+    try {
+      await restoreBotVersion(bot.id, version.id)
+      const graph = cloneGraph(version.graph)
+      saveGraph(bot.id, graph)
+      snapshotVersion(bot.id, `Restored from ${version.label}`)
+      toast.success('Version Restored', `Loaded graph state from ${version.label} and created a new version snapshot.`)
+      router.push(`/app/builder/${bot.id}`)
+    } catch (err: any) {
+      toast.error('Restore failed', err?.message || 'Could not restore bot version.')
+    } finally {
+      setRestoring(false)
+    }
   }
 
   return (
@@ -91,8 +122,13 @@ export default function VersionRestorePage() {
         </div>
 
         <div className="flex items-center gap-3">
-          <PillButton onClick={() => setConfirmOpen(true)} size="sm" className="gap-1.5 shadow-md shadow-brand/20">
-            <RotateCcw className="size-3.5" /> Restore This Version
+          <PillButton
+            onClick={() => setConfirmOpen(true)}
+            disabled={restoring}
+            size="sm"
+            className="gap-1.5 shadow-md shadow-brand/20"
+          >
+            <RotateCcw className="size-3.5" /> {restoring ? 'Restoring...' : 'Restore This Version'}
           </PillButton>
         </div>
       </div>
@@ -113,7 +149,7 @@ export default function VersionRestorePage() {
           open={confirmOpen}
           onOpenChange={setConfirmOpen}
           title={`Restore ${version.label}?`}
-          description={`This will overwrite the current working graph of "${bot.name}" with this historical snapshot (${version.nodeCount} nodes). A backup version of your current state will be saved automatically.`}
+          description={`This will overwrite the current working graph of "${bot.name}" with this historical snapshot (${version.nodeCount} nodes) in the database. A new version snapshot recording this restore will be saved automatically.`}
           confirmLabel="Restore Snapshot"
           onConfirm={handleRestore}
         />

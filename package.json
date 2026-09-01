@@ -1,0 +1,8 @@
+{
+  "name": "aether",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "packageManager": "pnpm@latest"
+}

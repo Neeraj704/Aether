@@ -1,0 +1,573 @@
+# AETHER — Master Implementation Prompt (Phases 10–11 combined)
+### "Real Auth + Real Bot Persistence + Real Crypto Backtest Engine"
+
+> **How to use this file:** paste this entire document as one task to your coding agent (Claude Code or equivalent), pointed at your existing AETHER repo. It is written as a direct instruction to that agent — first person plural "you" refers to the agent, not to you. It is self-contained: the agent should not need to ask you clarifying questions to execute Parts A–K in order. Where a decision was made on your behalf (library choice, folder name, table name), it is stated as fact, not a question, on purpose.
+>
+> **Scope boundary, stated up front:** this single task produces one, complete, demoable slice: a user signs up for real, builds a bot on the existing (unchanged) canvas, saves it to a real database, clicks "Run Backtest," and gets back a real historical backtest computed by a real Python engine against real BTC/ETH market data — with real trades and a real equity curve, rendered by the existing (unchanged) results UI. Nothing about LLM agents, live/paper trading loops, ML models, marketplace, or billing is in scope here — those are later, separate tasks (Phases 12+). Do not start on them.
+
+---
+
+## PART A — Read the codebase before writing anything
+
+Before making any change, read and hold in context:
+
+- `lib/store.ts` — the current mocked `useSession` store (auth, plan, credits, profile).
+- `lib/workspace-store.ts` — the current mocked `useWorkspace` store (bots, runs, presets, activity).
+- `lib/builder-store.ts` — the ephemeral canvas store (`useBuilder`) — **this one does not change in this task.**
+- `lib/validate.ts` — the existing structural DAG validation rules. You will port these, not rewrite them from scratch.
+- `lib/graph-utils.ts` — `cloneGraph()`, `exportBot()`, etc. Reuse these signatures/shapes; don't invent parallel ones.
+- `mock/data.ts` — canonical `BotGraph`, `Bot`, `BotVersion`, `BacktestRun`, `Trade`, `EquityPoint`, `BacktestMetrics` TypeScript interfaces. **Every schema you create in Postgres and every Pydantic model you create in Python must be a byte-for-byte mirror of these shapes.** This is the single most important constraint in this task — if the Python engine's JSON response doesn't match these interfaces exactly, the existing frontend result components (which you are not allowed to modify) will break or silently render nothing.
+- `mock/layers.ts` — `ComponentDef`, `FieldDef`, `LAYERS`, `COMPONENTS`. You need the exact `componentId` strings for the handful of components you're implementing for real in this task (see Part F).
+- `app/login/page.tsx`, `app/signup/page.tsx`, `app/forgot-password/page.tsx`, `app/reset-password/page.tsx`, `app/verify-email/page.tsx` — current mocked auth screens. Keep every visual element; you're only replacing the submit handlers and the underlying data flow.
+- `components/app/app-shell.tsx` — current client-side mock auth guard. This gets replaced by real middleware (Part C.5).
+- `app/app/builder/[botId]/page.tsx` (or wherever the builder route lives) and its Save/Autosave logic.
+- `app/app/bots/[botId]/backtest/page.tsx` (or the equivalent route) and whatever currently calls the mock `generateBacktest()` function in `mock/data.ts`.
+
+Do not modify the visual JSX/CSS of any component unless explicitly instructed below. Every instruction below that touches a UI file is about **replacing a data source or event handler**, never the markup or styling.
+
+---
+
+## PART B — Monorepo restructure
+
+The repo currently has the Next.js app at its root. Restructure it into a monorepo so the new Python engine lives alongside it without polluting the frontend's dependency tree or build process.
+
+1. Create this directory layout, moving the existing app with `git mv` (preserve history, don't recreate files):
+   ```
+   aether/
+   ├── apps/
+   │   ├── web/                 ← existing Next.js app, moved here as-is
+   │   └── engine/               ← new, empty for now, filled in Part E
+   ├── supabase/
+   │   └── migrations/           ← new, filled in Part D
+   ├── docs/                     ← move the existing PRD docs + this file here
+   └── package.json               ← new root, npm/pnpm workspaces
+   ```
+2. Root `package.json`:
+   ```json
+   {
+     "name": "aether",
+     "private": true,
+     "workspaces": ["apps/web"],
+     "packageManager": "pnpm@latest"
+   }
+   ```
+   (`apps/engine` is Python and is not part of the JS workspace — it manages its own `requirements.txt`/venv independently.)
+3. Update any relative paths broken by the move (tsconfig paths, `next.config`, CI config if any, `.gitignore` entries for `node_modules`, `.env*`).
+4. Vercel project settings (do this in the Vercel dashboard, not in code): set **Root Directory** to `apps/web`.
+5. Verify `apps/web` still builds and runs identically after the move (`pnpm install && pnpm build` from repo root, or `cd apps/web && pnpm build`) before proceeding to Part C. **Do not proceed past this checkpoint if the build is broken.**
+
+---
+
+## PART C — Supabase project: setup, schema, RLS, and real auth wiring
+
+### C.1 — Project setup (dashboard steps, do these first)
+1. Create a new Supabase project.
+2. In **Database → Extensions**, enable `pgvector` now even though it isn't used until a later phase — doing it once here avoids a migration headache later.
+3. In **Authentication → Providers**, enable **Email** (with "Confirm email" turned on, matching the existing signup spec's `/verify-email` flow) and **Google** OAuth (create a Google Cloud OAuth client, add the Supabase callback URL `https://<project-ref>.supabase.co/auth/v1/callback` as an authorized redirect URI, paste the client ID/secret into Supabase's Google provider settings).
+4. In **Authentication → URL Configuration**, set the Site URL to your Vercel deployment URL, and add `http://localhost:3000/**` as an additional redirect URL for local development.
+5. Collect these values for later use as environment variables: Project URL, `anon` public key, `service_role` secret key (server-only, never shipped to the browser), and the JWT secret (**Settings → API → JWT Settings**, needed by the Python engine to verify tokens independently in Part E).
+
+### C.2 — Schema migrations
+
+Create these as numbered SQL files under `supabase/migrations/`, in this exact order, and apply them (via `supabase db push` if you have the CLI linked, or by pasting each file's contents into the Supabase SQL Editor in order):
+
+**`0001_profiles.sql`**
+```sql
+create table public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  display_name text,
+  bio text,
+  plan text not null default 'free' check (plan in ('free','starter','pro','payg')),
+  credits integer not null default 240,
+  public_profile boolean not null default false,
+  avatar_color text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.profiles enable row level security;
+
+create policy "profiles are readable by owner"
+  on public.profiles for select using (auth.uid() = id);
+create policy "profiles are updatable by owner"
+  on public.profiles for update using (auth.uid() = id);
+
+-- Auto-create a profile row on signup
+create function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, display_name)
+  values (new.id, coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)));
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+```
+
+**`0002_bots.sql`**
+```sql
+create table public.bots (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null default 'Untitled bot',
+  description text not null default '',
+  status text not null default 'draft' check (status in ('draft','backtested','live','paused','error')),
+  graph jsonb not null default '{"nodes":[],"edges":[],"notes":[],"frames":[],"schemaVersion":2}'::jsonb,
+  headline_metric jsonb,
+  visibility text not null default 'private' check (visibility in ('private','unlisted','public')),
+  tags text[] not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.bot_versions (
+  id uuid primary key default gen_random_uuid(),
+  bot_id uuid not null references public.bots(id) on delete cascade,
+  label text not null,
+  note text not null default '',
+  node_count integer not null default 0,
+  graph jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.bots enable row level security;
+alter table public.bot_versions enable row level security;
+
+create policy "bots CRUD by owner" on public.bots
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create policy "bot_versions readable via owned bot" on public.bot_versions
+  for select using (exists (select 1 from public.bots b where b.id = bot_id and b.user_id = auth.uid()));
+create policy "bot_versions insertable via owned bot" on public.bot_versions
+  for insert with check (exists (select 1 from public.bots b where b.id = bot_id and b.user_id = auth.uid()));
+
+create index bots_user_id_idx on public.bots(user_id);
+create index bot_versions_bot_id_idx on public.bot_versions(bot_id);
+```
+
+**`0003_candles.sql`** (raw market data cache, populated by the ingestion script in Part F)
+```sql
+create table public.candles (
+  symbol text not null,
+  resolution text not null,
+  open_time timestamptz not null,
+  open numeric not null,
+  high numeric not null,
+  low numeric not null,
+  close numeric not null,
+  volume numeric not null,
+  primary key (symbol, resolution, open_time)
+);
+create index candles_symbol_res_time_idx on public.candles (symbol, resolution, open_time);
+-- No RLS: this is shared, non-user-owned reference data, read by the engine's service role only.
+alter table public.candles enable row level security;
+create policy "candles readable by anyone authenticated" on public.candles for select using (auth.role() = 'authenticated');
+```
+
+**`0004_backtests.sql`**
+```sql
+create table public.backtest_runs (
+  id uuid primary key default gen_random_uuid(),
+  bot_id uuid not null references public.bots(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  status text not null default 'queued' check (status in ('queued','running','complete','error')),
+  config jsonb not null,
+  metrics jsonb,
+  error_message text,
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+
+create table public.trades (
+  id uuid primary key default gen_random_uuid(),
+  run_id uuid not null references public.backtest_runs(id) on delete cascade,
+  symbol text not null,
+  side text not null check (side in ('long','short')),
+  entry_time timestamptz not null,
+  exit_time timestamptz not null,
+  size numeric not null,
+  pnl numeric not null,
+  pnl_pct numeric not null,
+  trigger_node text not null,
+  confidence numeric not null
+);
+
+create table public.equity_points (
+  run_id uuid not null references public.backtest_runs(id) on delete cascade,
+  ts timestamptz not null,
+  equity numeric not null,
+  benchmark numeric not null,
+  drawdown numeric not null,
+  primary key (run_id, ts)
+);
+
+alter table public.backtest_runs enable row level security;
+alter table public.trades enable row level security;
+alter table public.equity_points enable row level security;
+
+create policy "backtest_runs CRUD by owner" on public.backtest_runs
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create policy "trades readable via owned run" on public.trades
+  for select using (exists (select 1 from public.backtest_runs r where r.id = run_id and r.user_id = auth.uid()));
+create policy "equity_points readable via owned run" on public.equity_points
+  for select using (exists (select 1 from public.backtest_runs r where r.id = run_id and r.user_id = auth.uid()));
+
+-- The engine writes trades/equity_points using the service_role key, which bypasses RLS by design —
+-- do not add insert policies for the anon/authenticated role on these two tables.
+
+create index backtest_runs_bot_id_idx on public.backtest_runs(bot_id);
+create index trades_run_id_idx on public.trades(run_id);
+create index equity_points_run_id_idx on public.equity_points(run_id);
+```
+
+### C.3 — Frontend Supabase clients
+
+Install: `@supabase/supabase-js` and `@supabase/ssr` in `apps/web`.
+
+Create exactly these three files (this is the standard Supabase-recommended App Router pattern — do not deviate from it, it's what makes server components, client components, and middleware all share one session correctly):
+
+- `lib/supabase/client.ts` — browser client, used inside `'use client'` components, via `createBrowserClient` from `@supabase/ssr`.
+- `lib/supabase/server.ts` — server client, used inside Server Components and Route Handlers, via `createServerClient` from `@supabase/ssr`, reading/writing the Next.js `cookies()` store.
+- `lib/supabase/middleware.ts` — a `updateSession(request)` helper that refreshes the auth cookie on every request, used by root `middleware.ts`.
+
+### C.4 — Environment variables (add to `apps/web/.env.local` and to Vercel project settings)
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=          # server-only, never referenced in any 'use client' file
+NEXT_PUBLIC_ENGINE_URL=             # e.g. https://aether-engine.onrender.com, filled in after Part E deploy
+```
+
+### C.5 — Root `middleware.ts`
+Replace the current client-side `AppShell` mock redirect guard with real middleware:
+```ts
+// apps/web/middleware.ts
+export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'] }
+```
+Logic: call `updateSession(request)` from `lib/supabase/middleware.ts`, get the current user; if the path starts with `/app` and there is no user, redirect to `/login?redirect=<original path>`; if the path is `/login`, `/signup`, `/forgot-password`, or `/reset-password` and there **is** a user, redirect to `/app`. Every other path passes through unchanged.
+
+Once this is in, **delete** the client-side redirect logic inside `components/app/app-shell.tsx` — it's now redundant and the middleware is the single source of truth for the auth gate.
+
+### C.6 — Rewire the five auth pages
+For each page below, keep 100% of the existing JSX/styling/copy. Only change the `onSubmit`/click handler and the loading/error state wiring.
+
+- **`app/signup/page.tsx`**: on submit, call `supabase.auth.signUp({ email, password, options: { data: { full_name: name }, emailRedirectTo: '<origin>/verify-email' } })`. Show the existing inline validation error states on `error.message`. On success, show the existing "check your email" state (don't auto-redirect — email confirmation is on).
+- **`app/login/page.tsx`**: on submit, call `supabase.auth.signInWithPassword({ email, password })`. Wire the existing "wrong credentials" error state to `error.message`. Add the OAuth button's click handler: `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: '<origin>/app' } })`. On success, redirect to `/app` (or the `redirect` query param set by middleware).
+- **`app/forgot-password/page.tsx`**: on submit, call `supabase.auth.resetPasswordForEmail(email, { redirectTo: '<origin>/reset-password' })`, show the existing confirmation message state regardless of whether the email exists (don't leak account existence).
+- **`app/reset-password/page.tsx`**: Supabase's recovery flow lands the user back here with a session already established from the emailed link (it uses a URL hash fragment, handled automatically by the `@supabase/ssr` browser client via `detectSessionInUrl`). On submit of the new-password form, call `supabase.auth.updateUser({ password: newPassword })`, then redirect to `/login` with the existing success state.
+- **`app/verify-email/page.tsx`**: this route is now mostly a landing/status page — Supabase's confirmation link redirects here after confirming server-side. Read the current session; if present, show the existing "verified" success state and a button into `/app`; if not, show a "link expired, request a new one" state with a resend button calling `supabase.auth.resend({ type: 'signup', email })`.
+
+### C.7 — Profile data
+Add `lib/profile.ts` exporting a server-only `getProfile()` (used in the root `app/app/layout.tsx` Server Component) that selects the current user's row from `profiles`. Pass the result down as props into the existing top bar / avatar menu / dashboard header components — **do not change those components' prop shapes if you can avoid it**; if a prop shape must change, keep it minimal and update only the immediate call sites. Delete the `authed`, `profile`, and `credits` fields' role as *source of truth* inside `lib/store.ts`'s `useSession` — `useSession` may keep purely client-ephemeral concerns (`theme`, `toasts`, `onboarding` in-progress state), but must stop being asked for auth/profile truth anywhere in the app after this task.
+
+---
+
+## PART D — Bots: move from localStorage to Postgres
+
+This is the second big rewiring. The Builder canvas itself (`useBuilder` — nodes/edges/undo-redo while actively editing) **stays exactly as it is, client-only, unchanged.** What changes is the *persistence boundary*: where "Save" and autosave write to, and where the bot list / bot overview pages read from.
+
+1. Create `lib/bots.ts` with plain async functions backed directly by the browser Supabase client (RLS makes this safe — no Next.js API layer needed for simple CRUD):
+   - `listBots()` → `supabase.from('bots').select('*').order('updated_at', { ascending: false })`
+   - `getBot(id)` → single row by id
+   - `createBot(input)` → insert, returns the new row (used by "+ New Bot")
+   - `updateBotGraph(id, graph)` → update `graph` and `updated_at`
+   - `updateBotMeta(id, { name, description, status, visibility, tags })`
+   - `deleteBot(id)`
+   - `saveBotVersion(id, label, note)` → reads current `graph`/computes `node_count`, inserts into `bot_versions`
+2. In the Builder route, replace whatever currently reads/writes bots via `useWorkspace`'s localStorage-backed slice with `getBot`/`updateBotGraph`. Keep the existing "Saved Xm ago" indicator and autosave interval — just point its write call at `updateBotGraph` instead of the Zustand persist.
+3. In `/app/bots` (My Bots list) and `/app` (Dashboard "Your Trading Bots" / "Continue building"), replace the `useWorkspace().bots` read with `listBots()` (call it in a Server Component where the route allows, otherwise a `useEffect`-driven client fetch — prefer Server Components for anything that doesn't need live interactivity).
+4. Leave `runs`, `myPresets`, `publishedPresets`, `marketplacePresets`, `activity`, `notifications` inside `useWorkspace` exactly as they are for now — they are out of scope for this task and get migrated in later phases (17+). Only the `bots` slice's role as source of truth changes here.
+
+---
+
+## PART E — Python engine skeleton (`apps/engine`)
+
+### E.1 — Files to create
+```
+apps/engine/
+├── app/
+│   ├── main.py
+│   ├── config.py
+│   ├── deps.py                    # auth dependency, db session dependency
+│   ├── db/
+│   │   ├── models.py               # SQLAlchemy models mirroring the SQL migrations exactly
+│   │   └── session.py
+│   ├── schemas/
+│   │   ├── graph.py                 # Pydantic mirror of BotGraph/BotNode/BotEdge
+│   │   └── backtest.py              # Pydantic mirror of BacktestRun/Trade/EquityPoint/BacktestMetrics
+│   ├── graph/
+│   │   ├── compiler.py              # topological sort of BotGraph -> ordered execution plan
+│   │   └── validate.py              # ported structural rules from lib/validate.ts
+│   ├── nodes/
+│   │   ├── base.py                  # Node protocol
+│   │   ├── registry.py              # REGISTRY dict
+│   │   ├── data_collection/ohlcv_feed.py
+│   │   ├── feature_engineering/technical_indicators.py
+│   │   ├── intelligence_agents/technical_analyst.py
+│   │   ├── risk_management/risk_gate.py
+│   │   └── execution/paper_executor.py
+│   ├── engine/
+│   │   ├── backtest_runner.py
+│   │   └── slippage.py
+│   ├── data/
+│   │   └── binance_ingest.py        # standalone script, run manually / via cron, not an HTTP route
+│   └── routers/
+│       ├── health.py
+│       ├── validate.py
+│       └── backtest.py
+├── requirements.txt
+├── Dockerfile
+└── .env.example
+```
+
+### E.2 — `requirements.txt` (package names — resolve latest compatible versions yourself; do not guess exact version pins, use `pip freeze` after install to lock them)
+```
+fastapi
+uvicorn[standard]
+pydantic
+sqlalchemy[asyncio]
+asyncpg
+python-jose[cryptography]
+httpx
+pandas
+pandas-ta
+ccxt
+python-dotenv
+apscheduler
+```
+
+### E.3 — `app/config.py`
+Load from environment (via `python-dotenv` locally, real env vars on Render): `DATABASE_URL` (Supabase's connection string, **use the pooled/transaction-mode connection string**, port 6543, not the direct 5432 one — the engine will hold many short-lived connections during a backtest run and the pooler is what Supabase's own docs recommend for this pattern), `SUPABASE_JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ALLOWED_ORIGINS` (comma-separated, for CORS — the Vercel deployment URL + `http://localhost:3000`).
+
+### E.4 — `app/deps.py` — JWT verification
+```python
+from fastapi import Header, HTTPException
+from jose import jwt, JWTError
+from .config import settings
+
+async def get_current_user_id(authorization: str = Header(...)) -> str:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing bearer token")
+    token = authorization.removeprefix("Bearer ")
+    try:
+        payload = jwt.decode(
+            token, settings.SUPABASE_JWT_SECRET,
+            algorithms=["HS256"], audience="authenticated",
+        )
+    except JWTError:
+        raise HTTPException(401, "Invalid or expired token")
+    return payload["sub"]  # this is the Supabase auth.users.id
+```
+Every route that touches a user's own data takes `user_id: str = Depends(get_current_user_id)` and uses it both to authorize (fetch the bot by id **and** `user_id`, 404 if mismatched — never trust a client-supplied `user_id`) and to stamp `user_id` on inserted rows.
+
+### E.5 — `app/main.py`
+FastAPI app, CORS middleware configured from `settings.ALLOWED_ORIGINS`, include the three routers, and:
+```python
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+```
+
+### E.6 — `app/routers/validate.py`
+`POST /validate-graph`, body = the `BotGraph` schema, returns `{ valid: bool, issues: [{ nodeId, message, severity }] }`. Port these rules from `lib/validate.ts` / `04_Builder_Canvas_Deep_Dive` §5 exactly:
+- An Execution-layer node cannot have a Data-Collection-layer node as a direct upstream input — a Risk-Management-layer node must sit between them.
+- A Self-Learning-layer node must have at least one Trade-Monitoring-layer output as an input.
+- Every enabled node with `needsConfig: true` (i.e. a required field is empty) is reported as an issue at `severity: 'warning'`.
+- A graph with zero nodes, or with an Execution node unreachable from any Data Collection node, is reported as `severity: 'error'`.
+
+### E.7 — `app/graph/compiler.py`
+Implement Kahn's algorithm topological sort over `BotGraph.edges`, restricted to `enabled: true` nodes and edges where both endpoints are enabled. Return an ordered list of `BotNode`s such that every node appears after all of its upstream dependencies. Raise a clear error if a cycle is detected (should be structurally impossible given the port-type rules, but don't assume — check it).
+
+### E.8 — Node interface and registry
+`app/nodes/base.py`:
+```python
+from typing import Protocol, Any
+
+class NodeContext:
+    """Carries the current bar/candle, running portfolio state, and prior nodes' outputs."""
+    def __init__(self, candle, portfolio, upstream_outputs: dict[str, Any]):
+        self.candle = candle
+        self.portfolio = portfolio
+        self.upstream_outputs = upstream_outputs
+
+class Node(Protocol):
+    component_id: str
+    async def run(self, ctx: NodeContext, config: dict) -> dict: ...
+```
+`app/nodes/registry.py`:
+```python
+from .data_collection.ohlcv_feed import OhlcvFeedNode
+from .feature_engineering.technical_indicators import TechnicalIndicatorsNode
+from .intelligence_agents.technical_analyst import TechnicalAnalystNode
+from .risk_management.risk_gate import RiskGateNode
+from .execution.paper_executor import PaperExecutorNode
+
+REGISTRY: dict[str, type] = {
+    "ohlcv-feed": OhlcvFeedNode,
+    "technical-indicators": TechnicalIndicatorsNode,
+    "technical-analyst": TechnicalAnalystNode,   # confirm exact componentId strings against mock/layers.ts before wiring — use the file, not this doc, as ground truth
+    "risk-gate": RiskGateNode,
+    "paper-executor": PaperExecutorNode,
+}
+```
+**Before writing this file, open `mock/layers.ts` and copy the real `id` string for each of these five components verbatim** — do not guess or slugify the display name yourself; a mismatch here is the single most likely bug in this whole task, since it silently makes a node a no-op instead of erroring.
+
+### E.9 — The five real node implementations
+- **OHLCV Price Feed** (`data_collection/ohlcv_feed.py`): reads `config.symbols` and `config.resolution`, queries the `candles` table for the current backtest's date range, and on each call to `run()` returns the current bar plus a rolling window (config-driven, default 200 bars) for downstream indicator calculation. Output type: `MarketData` (matching the port type in `layers.ts`).
+- **Technical Indicators** (`feature_engineering/technical_indicators.py`): takes the `MarketData` window, computes RSI(14), EMA(20/50 cross), MACD via `pandas-ta`, returns a `FeatureVector`.
+- **Technical Analyst** (`intelligence_agents/technical_analyst.py`): **rule-based only in this task, no LLM call** — e.g. emit a `Signal` (`{direction: 'long'|'short'|'flat', confidence: float}`) when RSI crosses below 30 (long) or above 70 (short) and the EMA cross agrees with direction; otherwise `flat`.
+- **Risk Gate** (`risk_management/risk_gate.py`): takes the `Signal` plus current `ctx.portfolio` state, applies max-position-size and stop-loss config fields (already defined on this component in `layers.ts` — read its real field keys from there, don't invent new ones), outputs a `RiskDecision` (`{approved: bool, sizedQuantity: float, stopPrice: float | null}`).
+- **Paper Executor** (`execution/paper_executor.py`): takes an approved `RiskDecision`, computes the fill price using the slippage model below, opens/closes a position in `ctx.portfolio`, and emits a closed `Trade` record when a position exits (on stop-loss hit or an opposing signal).
+
+### E.10 — `app/engine/slippage.py`
+```python
+def fill_price(signal_price: float, side: str, candle_high: float, candle_low: float,
+               order_size: float, candle_volume: float, slippage_bps_override: float | None,
+               taker_fee_bps: float = 10.0) -> float:
+    spread_proxy = (candle_high - candle_low) / 2
+    if slippage_bps_override is not None:
+        slip = signal_price * (slippage_bps_override / 10_000)
+    else:
+        participation = min(order_size / max(candle_volume, 1e-9), 1.0)
+        # scaled slippage: larger relative to candle volume -> worse fill, capped at 50 bps
+        slip = signal_price * (min(participation * 50, 50) / 10_000)
+    fee = signal_price * (taker_fee_bps / 10_000)
+    direction = 1 if side == "long" else -1
+    return signal_price + direction * (spread_proxy + slip + fee)
+```
+This is the volume-scaled model specified in the architecture doc §5 — implement it exactly as above (or an equivalent that satisfies the same properties: deterministic given the same seed/inputs, worse fills for larger orders relative to that candle's volume, respects the field's `slippage_bps_override` as an escape hatch).
+
+### E.11 — `app/engine/backtest_runner.py`
+```python
+async def run_backtest(bot_graph: BotGraph, config: BacktestConfig, run_id: str, db):
+    ordered_nodes = compile_graph(bot_graph)          # Part E.7
+    candles = await fetch_candles(config.symbols, config.from_, config.to, db)
+    portfolio = Portfolio(cash=config.capital, seed=config.seed)
+    equity_curve, trades = [], []
+
+    for candle in candles:
+        ctx = NodeContext(candle=candle, portfolio=portfolio, upstream_outputs={})
+        for node in ordered_nodes:
+            impl = REGISTRY[node.component_id](node.config)
+            output = await impl.run(ctx, node.config)
+            ctx.upstream_outputs[node.id] = output
+            if isinstance(output, ClosedTrade):
+                trades.append(output)
+        equity_curve.append(EquityPoint(
+            ts=candle.open_time, equity=portfolio.equity,
+            benchmark=benchmark_equity(config, candle), drawdown=portfolio.current_drawdown(),
+        ))
+
+    metrics = compute_metrics(trades, equity_curve, config.capital)  # total_return, win_rate, max_drawdown, sharpe, trades count, avg_r, profit_factor, exposure — same fields as BacktestMetrics in mock/data.ts, computed for real from the trades/equity arrays, not faked
+    await persist_results(run_id, metrics, trades, equity_curve, db)  # writes to backtest_runs/trades/equity_points using the service_role DB connection
+```
+Fill in the helper functions (`fetch_candles`, `Portfolio`, `benchmark_equity`, `compute_metrics`, `persist_results`) with straightforward implementations — the important constraint is that `compute_metrics`'s output dict has **exactly** the same keys as the TypeScript `BacktestMetrics` interface in `mock/data.ts` (`totalReturn`, `winRate`, `maxDrawdown`, `sharpe`, `trades`, `avgR`, `profitFactor`, `exposure`), and that Sharpe/drawdown/etc. are computed from the real equity curve, not hardcoded.
+
+### E.12 — `app/routers/backtest.py`
+```python
+@router.post("/backtest")
+async def start_backtest(payload: BacktestRequest, user_id: str = Depends(get_current_user_id), db = Depends(get_db)):
+    bot = await get_bot_owned_by(payload.bot_id, user_id, db)  # 404 if not found or not owned
+    run = await create_backtest_run_row(bot.id, user_id, payload.config, db, status="queued")
+    background_tasks.add_task(run_backtest, bot.graph, payload.config, run.id, db)
+    return {"runId": run.id, "status": "queued"}
+
+@router.get("/backtest/{run_id}")
+async def get_backtest(run_id: str, user_id: str = Depends(get_current_user_id), db = Depends(get_db)):
+    run = await get_run_owned_by(run_id, user_id, db)   # 404 if not found or not owned
+    if run.status != "complete":
+        return {"status": run.status}
+    trades = await fetch_trades(run_id, db)
+    equity = await fetch_equity(run_id, db)
+    return {
+        "status": "complete",
+        "metrics": run.metrics,
+        "trades": trades,
+        "equity": equity,
+    }
+```
+Use FastAPI's `BackgroundTasks` for the MVP (no queue infra needed at this scope, per the architecture doc's decision) — but be aware Render's free-tier web service can idle/cold-start between the POST and the GET poll; if the process restarts mid-run, the run row will be stuck at `status: 'running'` — add a simple watchdog: any run still `running` after e.g. 5 minutes is marked `error` with a message the frontend can display, rather than polling forever.
+
+### E.13 — `app/data/binance_ingest.py`
+A standalone script (not an HTTP endpoint) that:
+1. Downloads `BTCUSDT` and `ETHUSDT` 15-minute klines from Binance's public bulk archive (`data.binance.vision`) for a configurable date range (default: the last 2 years).
+2. Parses each zipped monthly CSV into rows matching the `candles` table schema.
+3. Upserts into `candles` (`on conflict (symbol, resolution, open_time) do nothing`) using the service-role DB connection.
+4. Is idempotent — safe to re-run, and should support an incremental mode (only fetch months not already present) so it can later be scheduled to run daily via APScheduler once you're past this task's scope.
+
+Run this manually once (`python -m app.data.binance_ingest`) after the engine is deployed and connected to the database, before attempting any backtest — a backtest against an empty `candles` table should fail with a clear, specific error message ("no candle data for BTCUSDT 15m in the requested range — has the ingestion script been run?"), not a silent empty result.
+
+### E.14 — `Dockerfile`
+Standard Python slim image, install `requirements.txt`, copy `app/`, run via `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (Render injects `$PORT`).
+
+### E.15 — Deploy to Render
+Create a new **Web Service** on Render, root directory `apps/engine`, Docker runtime (uses the Dockerfile above), health check path `/health`. Add every env var from E.3 in Render's dashboard. Once deployed, note the public URL and set it as `NEXT_PUBLIC_ENGINE_URL` in Vercel's env vars (Part C.4), then redeploy the frontend.
+
+---
+
+## PART F — Wire the frontend backtest page to the real engine
+
+Locate the existing backtest page/component that currently calls the mock `generateBacktest()` (in `mock/data.ts`) when the user clicks "Run Backtest."
+
+1. Create `lib/engine.ts`:
+   ```ts
+   export async function startBacktest(botId: string, config: BacktestConfigInput) {
+     const { data: { session } } = await supabase.auth.getSession()
+     const res = await fetch(`${process.env.NEXT_PUBLIC_ENGINE_URL}/backtest`, {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+       body: JSON.stringify({ botId, config }),
+     })
+     if (!res.ok) throw new Error(await res.text())
+     return res.json() as Promise<{ runId: string; status: string }>
+   }
+
+   export async function getBacktest(runId: string) {
+     const { data: { session } } = await supabase.auth.getSession()
+     const res = await fetch(`${process.env.NEXT_PUBLIC_ENGINE_URL}/backtest/${runId}`, {
+       headers: { Authorization: `Bearer ${session?.access_token}` },
+     })
+     return res.json()
+   }
+   ```
+2. Replace the mock call with `startBacktest(...)`, keep the existing progress bar UI, and poll `getBacktest(runId)` every 2 seconds (existing loading-state component, just change what drives it) until `status === 'complete'` or `'error'`.
+3. On completion, the response's `metrics`/`trades`/`equity` shape must plug directly into the existing results dashboard components with **zero prop-shape changes** — if you find yourself needing to reshape the engine's response before handing it to those components, that's a signal the Pydantic schema in Part E doesn't actually match `mock/data.ts`; go fix the schema, don't add a translation layer in the UI.
+4. On error, surface `run.error_message` in the existing error/empty state, not a generic failure toast.
+
+---
+
+## PART G — Explicit boundaries — do not do these in this task
+
+- Do not touch the Live Execution page, Marketplace, Presets, Billing, Compare, Library, or Account pages beyond what Part C.7 requires for profile data. They stay exactly as they are, fully mocked, for now.
+- Do not implement any LLM call anywhere in this task. The Technical Analyst node is rule-based only (Part E.9).
+- Do not implement Walk-Forward, Monte Carlo, Paper Trading, or A/B Compare backtest types — only `'historical'`. The config's `type` field for the other four should be accepted by the schema (so the UI's tab selector doesn't break) but the engine can return a `501 not implemented` error for them for now.
+- Do not add Celery, Redis, or any queue infrastructure — `BackgroundTasks` is the correct scope per the architecture doc.
+- Do not implement `walk-forward`/RL/ML model nodes — only the five nodes listed in E.9.
+- Do not hardcode any secret (DB URL, JWT secret, service role key) in a committed file — env vars only, and confirm `.env` / `.env.local` are in `.gitignore`.
+
+---
+
+## PART H — Definition of done (self-check every item before declaring the task complete)
+
+- [ ] `apps/web` builds and deploys on Vercel from the new monorepo path with no broken imports.
+- [ ] A new user can sign up, receives a real verification email, clicks it, and lands authenticated on `/app`.
+- [ ] A returning user can log in with email/password and with Google OAuth.
+- [ ] Refreshing the page keeps the session; logging out clears it.
+- [ ] Visiting any `/app/*` route while logged out redirects to `/login`; visiting `/login` while logged in redirects to `/app`.
+- [ ] Creating a new bot in the Builder produces a real row in the `bots` table (verify in the Supabase table editor).
+- [ ] Editing the graph and waiting for autosave (or clicking Save) updates that row's `graph` column.
+- [ ] Reloading the builder page loads the graph from Postgres — not from `localStorage` (confirm by clearing site data and reloading; the bot should still be there because it lives server-side now).
+- [ ] A second test account cannot see the first account's bots (RLS check — log in as user B, confirm `/app/bots` is empty or only shows B's own bots).
+- [ ] The deployed engine's `GET /health` returns `200 {"status":"ok"}`.
+- [ ] `binance_ingest.py` has been run at least once and `candles` contains real `BTCUSDT` 15m rows spanning at least 90 days.
+- [ ] Assembling a 5-node bot (OHLCV Feed → Technical Indicators → Technical Analyst → Risk Gate → Paper Executor) and clicking Run Backtest returns a `runId` immediately.
+- [ ] Polling that `runId` eventually returns `status: 'complete'` with non-empty `trades` and `equity` arrays.
+- [ ] The results dashboard renders this real data through the existing, unmodified UI components.
+- [ ] Changing the RSI threshold field on the Technical Analyst node's config and re-running produces a **different** equity curve and trade count than before — this is the concrete proof the whole pipeline is real and not silently falling back to anything mocked.
+- [ ] No secret values appear anywhere in git history introduced by this task.
+
+Stop and report back once every box above is checked. Do not proceed to any Phase-12-scope work (LLM agents, live trading loop) without a new, separate task prompt.

@@ -6,6 +6,7 @@ import { Download, Bookmark, GitCompare, Play } from 'lucide-react'
 import type { Bot, BacktestRun } from '@/mock/data'
 import { useWorkspace } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
+import { startLiveSession } from '@/lib/engine'
 import { PillButton } from '@/components/ui/pill-button'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,6 +27,7 @@ export function ResultsActions({ bot, run }: { bot: Bot; run: BacktestRun }) {
 
   const [presetDialogOpen, setPresetDialogOpen] = useState(false)
   const [presetName, setPresetName] = useState(`${bot.name} — from this run`)
+  const [promoting, setPromoting] = useState(false)
 
   const handleExport = () => {
     toast.info('Exporting Report', 'Generating summary download...')
@@ -53,10 +55,22 @@ export function ResultsActions({ bot, run }: { bot: Bot; run: BacktestRun }) {
     setPresetDialogOpen(false)
   }
 
-  const handlePromoteLive = () => {
-    setBotStatus(bot.id, 'live')
-    toast.success('Bot promoted', `${bot.name} is now marked live. Open the Live tab to monitor it.`)
+  const handlePromoteLive = async () => {
+    setPromoting(true)
+    try {
+      const symbol = run.config.symbols ? run.config.symbols.split(',')[0].trim() : 'BTCUSDT'
+      const capital = run.config.capital || 100000
+      await startLiveSession(bot.id, symbol, capital)
+      setBotStatus(bot.id, 'live')
+      toast.success('Bot Promoted to Live', `${bot.name} is now executing in live paper-trading mode.`)
+      router.push(`/app/bots/${bot.id}?tab=live`)
+    } catch (err: any) {
+      toast.error('Could Not Promote Bot', err.message || 'Validation or engine error')
+    } finally {
+      setPromoting(false)
+    }
   }
+
 
   return (
     <>

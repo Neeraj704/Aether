@@ -13,6 +13,7 @@ from ..graph.compiler import compile_graph
 from ..nodes.base import NodeContext, ClosedTrade
 from ..nodes.registry import REGISTRY
 from ..db.models import CandleModel, BacktestRunModel, TradeModel, EquityPointModel
+from .bar_runner import build_node_instances, run_one_bar
 
 class Portfolio:
 
@@ -264,17 +265,12 @@ async def simulate_historical_pass(
     trades: List[ClosedTrade] = []
     first_close = float(candle_records[0]["close"]) if candle_records and isinstance(candle_records[0], dict) else (float(candle_records[0].close) if candle_records else 1.0)
 
-    # Pre-instantiate node instances once per pass
-    node_instances = []
-    for node in ordered_nodes:
-        node_cls = REGISTRY.get(node.componentId)
-        if node_cls:
-            merged_cfg = dict(node.config)
-            if node.componentId == "paper-executor" and slippage_multiplier != 1.0:
-                base_slip = float(merged_cfg.get("slippage", config.slippage or 8.0))
-                merged_cfg["slippage"] = base_slip * slippage_multiplier
-            node_instance = node_cls(merged_cfg)
-            node_instances.append((node, node_instance, merged_cfg))
+    # Pre-instantiate node instances using shared helper
+    node_instances = build_node_instances(
+        ordered_nodes,
+        config=config,
+        slippage_multiplier=slippage_multiplier,
+    )
 
     total_len = len(candle_records)
     log_interval = max(1, total_len // 250)
@@ -284,21 +280,9 @@ async def simulate_historical_pass(
         if idx % 300 == 0:
             await asyncio.sleep(0)
 
-        ctx = NodeContext(
-            candle=candle,
-            portfolio=portfolio,
-            upstream_outputs={},
-            historical_window=None,
-        )
-
-        for node, node_instance, merged_cfg in node_instances:
-            output = await node_instance.run(ctx, merged_cfg)
-            ctx.upstream_outputs[node.id] = output
-            if isinstance(output, ClosedTrade):
-                trades.append(output)
-
-        close_p = float(candle["close"] if isinstance(candle, dict) else getattr(candle, "close", 0.0))
-        portfolio.update_unrealized(close_p)
+        closed_trade, current_eq = await run_one_bar(node_instances, candle, portfolio)
+        if closed_trade is not None:
+            trades.append(closed_trade)
 
         if idx % log_interval == 0 or idx == total_len - 1:
             open_time = candle["open_time"] if isinstance(candle, dict) else getattr(candle, "open_time", None)

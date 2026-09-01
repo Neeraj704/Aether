@@ -48,6 +48,7 @@ class BotModel(Base):
 
     versions = relationship("BotVersionModel", back_populates="bot", cascade="all, delete-orphan")
     runs = relationship("BacktestRunModel", back_populates="bot", cascade="all, delete-orphan")
+    live_sessions = relationship("LiveSessionModel", back_populates="bot", cascade="all, delete-orphan")
 
 class BotVersionModel(Base):
     __tablename__ = "bot_versions"
@@ -123,3 +124,55 @@ class EquityPointModel(Base):
     drawdown = Column(Numeric, nullable=False)
 
     run = relationship("BacktestRunModel", back_populates="equity_points")
+
+class LiveSessionModel(Base):
+    __tablename__ = "live_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="cascade"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    status = Column(String, nullable=False, default="running")
+    symbol = Column(Text, nullable=False)
+    capital = Column(Numeric, nullable=False)
+    cash = Column(Numeric, nullable=False)
+    equity = Column(Numeric, nullable=False)
+    position = Column(JSONB, nullable=True)
+    peak_equity = Column(Numeric, nullable=False)
+    max_drawdown = Column(Numeric, nullable=False, default=0.0)
+    last_bar_time = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    stopped_at = Column(DateTime(timezone=True), nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    bot = relationship("BotModel", back_populates="live_sessions")
+    trades = relationship("LiveTradeModel", back_populates="session", cascade="all, delete-orphan")
+    equity_points = relationship("LiveEquityPointModel", back_populates="session", cascade="all, delete-orphan")
+
+class LiveTradeModel(Base):
+    __tablename__ = "live_trades"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    live_session_id = Column(UUID(as_uuid=True), ForeignKey("live_sessions.id", ondelete="cascade"), nullable=False, index=True)
+    symbol = Column(Text, nullable=False)
+    side = Column(String, nullable=False)
+    entry_time = Column(DateTime(timezone=True), nullable=False)
+    exit_time = Column(DateTime(timezone=True), nullable=False)
+    size = Column(Numeric, nullable=False)
+    pnl = Column(Numeric, nullable=False)
+    pnl_pct = Column(Numeric, nullable=False)
+    trigger_node = Column(Text, nullable=False)
+    confidence = Column(Numeric, nullable=False)
+    execution_flow = Column(JSONB, nullable=True)
+
+    session = relationship("LiveSessionModel", back_populates="trades")
+
+class LiveEquityPointModel(Base):
+    __tablename__ = "live_equity_points"
+
+    live_session_id = Column(UUID(as_uuid=True), ForeignKey("live_sessions.id", ondelete="cascade"), primary_key=True, nullable=False, index=True)
+    ts = Column(DateTime(timezone=True), primary_key=True, nullable=False)
+    equity = Column(Numeric, nullable=False)
+    drawdown = Column(Numeric, nullable=False)
+
+    session = relationship("LiveSessionModel", back_populates="equity_points")
+

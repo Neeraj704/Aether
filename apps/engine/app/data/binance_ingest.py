@@ -4,6 +4,7 @@ import httpx
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
+from typing import Optional
 from ..config import settings
 from ..db.session import get_async_database_url
 from ..db.models import CandleModel
@@ -27,6 +28,79 @@ async def fetch_binance_klines_api(symbol: str = "BTCUSDT", interval: str = "15m
             print(f"Error fetching klines for {symbol}: {resp.status_code} {resp.text}")
             return []
         return resp.json()
+
+async def fetch_latest_candle(symbol: str = "BTCUSDT", interval: str = "15m", session: Optional[AsyncSession] = None) -> Optional[dict]:
+    """
+    Fetches the latest fully-closed candle from Binance REST API (limit=2, takes second-to-last bar).
+    Optionally upserts it into the candles database table.
+    """
+    klines = await fetch_binance_klines_api(symbol=symbol, interval=interval, limit=2)
+    if not klines or len(klines) < 2:
+        return None
+
+    # The last element is the in-progress candle; take the second-to-last fully-closed candle
+    k = klines[-2]
+    open_ts = int(k[0])
+    open_time = datetime.fromtimestamp(open_ts / 1000.0, tz=timezone.utc)
+    candle = {
+        "symbol": symbol,
+        "resolution": interval,
+        "open_time": open_time,
+        "open": float(k[1]),
+        "high": float(k[2]),
+        "low": float(k[3]),
+        "close": float(k[4]),
+        "volume": float(k[5]),
+    }
+
+    if session is not None:
+        try:
+            stmt = pg_insert(CandleModel).values([candle])
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=["symbol", "resolution", "open_time"]
+            )
+            await session.execute(stmt)
+            await session.commit()
+        except Exception as e:
+            await session.rollback()
+            print(f"[Candle Ingest] Notice on candle upsert: {e}")
+
+    return candle
+
+async def fetch_recent_candles_df(symbol: str = "BTCUSDT", interval: str = "1m", limit: int = 60) -> Optional[Any]:
+    """
+    Fetches the latest N closed candles from Binance and returns a pandas DataFrame
+    with pre-calculated indicator columns for instant live feature evaluation.
+    """
+    import pandas as pd
+    import numpy as np
+
+    klines = await fetch_binance_klines_api(symbol=symbol, interval=interval, limit=max(limit, 30))
+    if not klines or len(klines) < 2:
+        return None
+
+    records = []
+    for k in klines[:-1]:
+        open_ts = int(k[0])
+        open_time = datetime.fromtimestamp(open_ts / 1000.0, tz=timezone.utc)
+        records.append({
+            "symbol": symbol,
+            "resolution": interval,
+            "open_time": open_time,
+            "open": float(k[1]),
+            "high": float(k[2]),
+            "low": float(k[3]),
+            "close": float(k[4]),
+            "volume": float(k[5]),
+        })
+
+    if not records:
+        return None
+
+    df = pd.DataFrame(records)
+    return df
+
+
 
 async def ingest_symbol(symbol: str, session: AsyncSession, days: int = 180):
     print(f"Ingesting {symbol} 15m candles for the last {days} days...")

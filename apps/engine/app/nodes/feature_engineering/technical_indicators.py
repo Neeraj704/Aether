@@ -19,11 +19,15 @@ class TechnicalIndicatorsNode:
         ema_fast_len = int(cfg.get("macdFast", 20))
         ema_slow_len = int(cfg.get("macdSlow", 50))
 
+        c = ctx.candle
+        if isinstance(c, dict):
+            current_close = float(c.get("close", 0.0))
+        else:
+            current_close = float(getattr(c, "close", 0.0))
+
         df = ctx.historical_window
-        current_close = float(getattr(ctx.candle, "close", 0.0))
 
         # 1. Fast O(1) check if indicators were precomputed in vectorized pass
-        c = ctx.candle
         if isinstance(c, dict) and "_rsi" in c:
             return {
                 "type": "FeatureVector",
@@ -46,7 +50,7 @@ class TechnicalIndicatorsNode:
             }
 
         # 2. Fallback to rolling calculation if not precomputed
-        if df is None or len(df) < max(rsi_period, ema_slow_len, 26):
+        if df is None or len(df) < max(rsi_period, 10):
             return {
                 "type": "FeatureVector",
                 "rsi": 50.0,

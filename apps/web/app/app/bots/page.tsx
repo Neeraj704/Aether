@@ -245,7 +245,7 @@ export default function MyBotsPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex flex-col min-w-0">
                     <Link
-                      href={`/app/builder/${bot.id}`}
+                      href={`/app/bots/${bot.id}`}
                       className="font-bold text-base hover:text-brand transition-colors truncate"
                     >
                       {bot.name}
@@ -339,6 +339,24 @@ export default function MyBotsPage() {
                   >
                     <Trash2 className="size-3.5" />
                   </button>
+                  
+                  {bot.status === 'live' ? (
+                    <Link
+                      href={`/app/bots/${bot.id}?tab=live`}
+                      className="h-8 px-3 inline-flex items-center justify-center rounded-lg bg-profit/15 text-profit border border-profit/30 text-xs font-semibold hover:bg-profit/25 transition-colors gap-1.5 shadow-sm"
+                    >
+                      <span className="size-2 rounded-full bg-profit animate-ping" />
+                      Live Monitor
+                    </Link>
+                  ) : (
+                    <Link
+                      href={`/app/bots/${bot.id}`}
+                      className="h-8 px-2.5 inline-flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary text-xs font-medium transition-colors"
+                    >
+                      Overview
+                    </Link>
+                  )}
+
                   <Link
                     href={`/app/builder/${bot.id}`}
                     className="h-8 px-3 inline-flex items-center justify-center rounded-lg bg-brand text-brand-foreground text-xs font-semibold hover:opacity-90 transition-opacity gap-1"

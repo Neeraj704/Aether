@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
             res = await session.execute(stmt)
             running_bot_ids = res.scalars().all()
             for b_id in running_bot_ids:
-                register_bot_job(str(b_id), scheduler)
+                await register_bot_job(str(b_id), scheduler, session)
             if running_bot_ids:
                 print(f"[Engine Startup] Resumed scheduled live ticks for {len(running_bot_ids)} active bot(s).")
     except Exception as e:
@@ -117,6 +117,7 @@ else:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -273,17 +273,19 @@ async def get_live_state(
         for ep in equity_pts
     ]
 
-    # Fetch latest 50 trades
+    # Fetch all closed trades for this bot across all sessions (ordered by exit time)
+    session_ids_subquery = select(LiveSessionModel.id).where(LiveSessionModel.bot_id == bot_uuid)
     trades_res = await db.execute(
         select(LiveTradeModel)
-        .where(LiveTradeModel.live_session_id == live_session.id)
-        .order_by(LiveTradeModel.entry_time.desc())
-        .limit(50)
+        .where(LiveTradeModel.live_session_id.in_(session_ids_subquery))
+        .order_by(LiveTradeModel.exit_time.desc())
+        .limit(200)
     )
     trades = trades_res.scalars().all()
     trades_list = [
         {
             "id": str(t.id),
+            "sessionId": str(t.live_session_id),
             "symbol": t.symbol,
             "side": t.side,
             "entryTime": t.entry_time.isoformat() if hasattr(t.entry_time, "isoformat") else str(t.entry_time),
@@ -385,3 +387,56 @@ async def list_active_live_sessions(
         })
 
     return active_sessions
+
+@router.get("/live/trades")
+async def list_all_live_trades(
+    limit: int = 100,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns recent live executed trades across all of the user's bots.
+    """
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user_id UUID")
+
+    stmt = (
+        select(LiveTradeModel, BotModel.name, BotModel.id.label("bot_id"))
+        .join(LiveSessionModel, LiveTradeModel.live_session_id == LiveSessionModel.id)
+        .join(BotModel, LiveSessionModel.bot_id == BotModel.id)
+        .where(LiveSessionModel.user_id == user_uuid)
+        .order_by(LiveTradeModel.exit_time.desc())
+        .limit(limit)
+    )
+    res = await db.execute(stmt)
+    rows = res.all()
+    trades = []
+    for trade, bot_name, bot_id in rows:
+        trades.append({
+            "id": str(trade.id),
+            "botId": str(bot_id),
+            "botName": bot_name,
+            "sessionId": str(trade.live_session_id),
+            "symbol": trade.symbol,
+            "side": trade.side,
+            "entryTime": trade.entry_time.isoformat() if hasattr(trade.entry_time, "isoformat") else str(trade.entry_time),
+            "exitTime": trade.exit_time.isoformat() if hasattr(trade.exit_time, "isoformat") else str(trade.exit_time),
+            "size": float(trade.size),
+            "pnl": float(trade.pnl),
+            "pnlPct": float(trade.pnl_pct),
+            "triggerNode": trade.trigger_node,
+            "confidence": float(trade.confidence),
+            "executionFlow": trade.execution_flow if hasattr(trade, "execution_flow") and trade.execution_flow is not None else None,
+        })
+    return trades
+
+@router.post("/bots/{bot_id}/live/logs/clear")
+async def clear_live_logs(
+    bot_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    from ..engine.live_runner import clear_bot_activity_logs
+    clear_bot_activity_logs(str(bot_id))
+    return {"status": "cleared", "botId": bot_id}

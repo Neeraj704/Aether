@@ -1,5 +1,6 @@
+import asyncio
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import Optional, Any, Tuple, Dict, List
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,11 +14,32 @@ from ..data.binance_ingest import fetch_latest_candle, fetch_recent_candles_df
 from .bar_runner import build_node_instances, run_one_bar
 from .backtest_runner import Portfolio
 
+def make_json_serializable(obj: Any) -> Any:
+    if obj is None:
+        return None
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, uuid.UUID):
+        return str(obj)
+    if isinstance(obj, (int, float, str, bool)):
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [make_json_serializable(item) for item in obj]
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    if hasattr(obj, "__dict__"):
+        return make_json_serializable(obj.__dict__)
+    return str(obj)
+
 _scheduler: Optional[AsyncIOScheduler] = None
 # In-memory recent live evaluation snapshots per bot
 _latest_bot_evaluations: Dict[str, Dict[str, Any]] = {}
 # Rolling in-memory execution activity logs (last 50 logs per bot)
 _bot_activity_logs: Dict[str, List[Dict[str, Any]]] = {}
+# Track consecutive transient tick errors per bot (only halt after 5 in a row)
+_bot_consecutive_errors: Dict[str, int] = {}
 
 def set_scheduler(scheduler: AsyncIOScheduler):
     global _scheduler
@@ -33,18 +55,29 @@ def get_latest_bot_evaluation(bot_id: str) -> Optional[Dict[str, Any]]:
 def get_bot_activity_logs(bot_id: str) -> List[Dict[str, Any]]:
     return _bot_activity_logs.get(str(bot_id), [])
 
+_log_seq_counter = 0
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def clear_bot_activity_logs(bot_id: str):
+    _bot_activity_logs[str(bot_id)] = []
+
 def append_bot_log(bot_id: str, log_type: str, text: str, node_name: Optional[str] = None):
+    global _log_seq_counter
+    _log_seq_counter += 1
     logs = _bot_activity_logs.setdefault(str(bot_id), [])
+    now_ist = datetime.now(timezone.utc).astimezone(IST)
+    ms = now_ist.strftime("%f")[:3]
+    time_str = f"{now_ist.strftime('%I:%M:%S')}.{ms} {now_ist.strftime('%p')}"
     entry = {
-        "id": f"log-{int(datetime.now(timezone.utc).timestamp() * 1000)}-{len(logs)}",
-        "time": datetime.now(timezone.utc).strftime("%H:%M:%S"),
+        "id": f"log-{int(now_ist.timestamp() * 1000)}-{_log_seq_counter}-{uuid.uuid4().hex[:6]}",
+        "time": time_str,
         "type": log_type,
         "node": node_name or "System",
         "text": text,
     }
     logs.insert(0, entry)
-    if len(logs) > 60:
-        _bot_activity_logs[str(bot_id)] = logs[:60]
+    if len(logs) > 1000:
+        _bot_activity_logs[str(bot_id)] = logs[:1000]
 
 def extract_bot_resolution_and_interval(bot_graph_dict: dict) -> Tuple[str, int]:
     nodes = bot_graph_dict.get("nodes", []) if isinstance(bot_graph_dict, dict) else []
@@ -385,7 +418,7 @@ async def tick_bot(bot_id: str, session: Optional[AsyncSession] = None):
         if not already_processed:
             live_session.cash = portfolio.cash
             live_session.equity = portfolio.equity
-            live_session.position = portfolio.position
+            live_session.position = make_json_serializable(portfolio.position) if portfolio.position else None
             live_session.peak_equity = portfolio.peak_equity
             live_session.max_drawdown = portfolio.max_dd
             live_session.last_bar_time = candle_open_time
@@ -411,41 +444,59 @@ async def tick_bot(bot_id: str, session: Optional[AsyncSession] = None):
                     pnl_pct=closed_trade.pnl_pct,
                     trigger_node=closed_trade.trigger_node,
                     confidence=closed_trade.confidence,
-                    execution_flow=getattr(closed_trade, "execution_flow", {}),
+                    execution_flow=make_json_serializable(getattr(closed_trade, "execution_flow", {})),
                 )
                 session.add(trade_model)
                 append_bot_log(str(bot_id), "fill", f"ORDER CLOSED: {closed_trade.side.upper()} {closed_trade.symbol} P&L: ₹{closed_trade.pnl:+,.2f}")
 
             await session.commit()
+            _bot_consecutive_errors[str(bot_id)] = 0
             print(f"[Live Runner] Processed closed bar tick for bot {bot_id} ({resolution}). Equity: {portfolio.equity}")
 
     except Exception as e:
-        print(f"[Live Runner] Exception during tick_bot for {bot_id}: {e}")
-        append_bot_log(str(bot_id), "warn", f"Engine tick notice: {str(e)}")
+        if isinstance(e, asyncio.CancelledError):
+            print(f"[Live Runner] Tick cancelled for bot {bot_id} (system reload/shutdown).")
+            return
+
+        err_msg = str(e) or repr(e)
+        err_count = _bot_consecutive_errors.get(str(bot_id), 0) + 1
+        _bot_consecutive_errors[str(bot_id)] = err_count
+
+        print(f"[Live Runner] Transient tick error ({err_count}/5) for bot {bot_id}: {err_msg}")
+        append_bot_log(str(bot_id), "warn", f"Tick notice ({err_count}/5): {err_msg}. Retrying next tick...")
+
         try:
             await session.rollback()
-            await session.execute(
-                update(LiveSessionModel)
-                .where(
-                    LiveSessionModel.bot_id == bot_uuid,
-                    LiveSessionModel.status == "running",
-                )
-                .values(
-                    status="error",
-                    error_message=str(e),
-                    stopped_at=datetime.now(timezone.utc),
-                )
-            )
-            await session.execute(
-                update(BotModel)
-                .where(BotModel.id == bot_uuid)
-                .values(status="error")
-            )
-            await session.commit()
-        except Exception as persist_err:
-            print(f"[Live Runner] Failed to persist error state: {persist_err}")
+        except Exception:
+            pass
 
-        deregister_bot_job(str(bot_id))
+        # Only halt and deregister if it fails repeatedly 5 times consecutively
+        if err_count >= 5:
+            print(f"[Live Runner] Halting bot {bot_id} after 5 consecutive tick failures.")
+            append_bot_log(str(bot_id), "warn", f"Halted: 5 consecutive failures. Last error: {err_msg}")
+            try:
+                await session.execute(
+                    update(LiveSessionModel)
+                    .where(
+                        LiveSessionModel.bot_id == bot_uuid,
+                        LiveSessionModel.status == "running",
+                    )
+                    .values(
+                        status="error",
+                        error_message=f"Halted after 5 consecutive failures: {err_msg}",
+                        stopped_at=datetime.now(timezone.utc),
+                    )
+                )
+                await session.execute(
+                    update(BotModel)
+                    .where(BotModel.id == bot_uuid)
+                    .values(status="error")
+                )
+                await session.commit()
+            except Exception as persist_err:
+                print(f"[Live Runner] Failed to persist error state: {persist_err}")
+
+            deregister_bot_job(str(bot_id))
 
     finally:
         if should_close_session:

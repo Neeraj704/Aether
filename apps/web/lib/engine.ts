@@ -135,8 +135,18 @@ export interface LiveSessionPosition {
   size: number
   entry_price: number
   entry_time: string
-  stop_price?: number
+  stop_price?: number | null
   confidence?: number
+  entry_candle?: any
+  entry_features?: any
+  entry_signal?: any
+  entry_risk?: any
+  execution_flow?: any
+  [key: string]: any
+}
+
+export type LiveTrade = BacktestRun['trades'][number] & {
+  executionFlow?: any
 }
 
 export interface LiveSessionSummary {
@@ -164,6 +174,7 @@ export interface LiveNodeStep {
   metricLabel: string
   metricValue: string
   output: any
+  executionTimeMs?: number
 }
 
 export interface LiveEvaluationSnapshot {
@@ -199,7 +210,7 @@ export interface LiveStateResponse {
   session?: LiveSessionSummary | null
   position?: LiveSessionPosition | null
   equity: Array<{ date: string; equity: number; drawdown: number }>
-  trades: BacktestRun['trades']
+  trades: LiveTrade[]
   evaluation?: LiveEvaluationSnapshot | null
   logs?: LiveLogEntry[]
 }
@@ -329,4 +340,51 @@ export async function listActiveLiveSessions(): Promise<ActiveLiveSession[]> {
     return []
   }
 }
+
+export async function clearLiveLogs(botId: string): Promise<void> {
+  const supabase = createClient()
+  const { data: { session } } = await supabase.auth.getSession()
+
+  const engineUrl = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000'
+  try {
+    await fetch(`${engineUrl}/bots/${botId}/live/logs/clear`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session?.access_token}`,
+      },
+    })
+  } catch (e) {
+    console.warn('Notice on clearing live logs:', e)
+  }
+}
+
+export interface GlobalLiveTradeItem extends LiveTrade {
+  botId: string
+  botName: string
+  sessionId: string
+}
+
+export async function listAllLiveTrades(limit = 100): Promise<GlobalLiveTradeItem[]> {
+  const supabase = createClient()
+  const { data: { session } } = await supabase.auth.getSession()
+
+  const engineUrl = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000'
+  try {
+    const res = await fetch(`${engineUrl}/live/trades?limit=${limit}`, {
+      headers: {
+        Authorization: `Bearer ${session?.access_token}`,
+      },
+    })
+
+    if (!res.ok) {
+      return []
+    }
+
+    return res.json()
+  } catch (e) {
+    console.error('Failed to fetch all live trades:', e)
+    return []
+  }
+}
+
 

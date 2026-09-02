@@ -22,12 +22,16 @@ async def fetch_binance_klines_api(symbol: str = "BTCUSDT", interval: str = "15m
     if start_time:
         params["startTime"] = start_time
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(base_url, params=params)
-        if resp.status_code != 200:
-            print(f"Error fetching klines for {symbol}: {resp.status_code} {resp.text}")
-            return []
-        return resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(base_url, params=params)
+            if resp.status_code != 200:
+                print(f"Error fetching klines for {symbol}: {resp.status_code} {resp.text}")
+                return []
+            return resp.json()
+    except Exception as e:
+        print(f"[Binance Ingest] Transient network error fetching klines for {symbol}: {e}")
+        return []
 
 async def fetch_latest_candle(symbol: str = "BTCUSDT", interval: str = "15m", session: Optional[AsyncSession] = None) -> Optional[dict]:
     """

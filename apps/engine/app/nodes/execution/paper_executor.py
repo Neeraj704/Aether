@@ -281,7 +281,7 @@ class PaperExecutorNode:
                     side=side,
                     size=order_qty,
                     entry_price=executed_price,
-                    entry_time=open_time,
+                    entry_time=open_time.isoformat() if hasattr(open_time, "isoformat") else str(open_time),
                     stop_price=decision.get("stopPrice"),
                     confidence=decision.get("confidence", 0.75),
                 )
@@ -290,5 +290,14 @@ class PaperExecutorNode:
                 portfolio.position["entry_features"] = features_data
                 portfolio.position["entry_signal"] = signal_data
                 portfolio.position["entry_risk"] = decision
+                try:
+                    from ...engine.live_runner import make_json_serializable
+                    portfolio.position["upstream_outputs"] = make_json_serializable(getattr(ctx, "upstream_outputs", {}))
+                except Exception:
+                    pass
+
+                if hasattr(ctx, "bot_id") and ctx.bot_id:
+                    from ...engine.live_runner import append_bot_log
+                    append_bot_log(str(ctx.bot_id), "fill", f"ORDER FILLED: {side.upper()} {order_qty:,.4f} units @ ${executed_price:,.2f}")
 
         return closed_trade

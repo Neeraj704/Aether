@@ -54,9 +54,20 @@ export function formatCompact(value: number) {
 
 export function formatDate(iso: string, opts: { withTime?: boolean } = {}) {
   const d = new Date(iso)
-  const date = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  const date = d.toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
   if (!opts.withTime) return date
-  return `${date}, ${d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`
+  return `${date}, ${d.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  })} IST`
 }
 
 export function relativeTime(iso: string) {

@@ -9,6 +9,7 @@ import {
   Play,
   AlertTriangle,
   ArrowUpRight,
+  ArrowDownRight,
   ShieldAlert,
   Zap,
   RefreshCw,
@@ -19,6 +20,8 @@ import {
   Cpu,
   Activity,
   Maximize2,
+  History,
+  Eye,
 } from 'lucide-react'
 import { useWorkspace } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
@@ -30,9 +33,12 @@ import {
   getLiveState,
   startLiveSession,
   stopLiveSession,
+  listAllLiveTrades,
   type ActiveLiveSession,
   type LiveStateResponse,
+  type GlobalLiveTradeItem,
 } from '@/lib/engine'
+import { TradeFlowModal, type TradeInspectionData } from '@/components/bot/trade-flow-modal'
 import { formatINR, formatPct, formatDate } from '@/lib/utils'
 
 interface PositionItem {
@@ -43,8 +49,11 @@ interface PositionItem {
   side: 'long' | 'short'
   size: number
   entryPrice: number
-  stopPrice?: number
+  stopPrice?: number | null
   confidence: number
+  currentLtp?: number
+  unrealizedPnl?: number
+  unrealizedPnlPct?: number
 }
 
 interface AuditLog {
@@ -61,6 +70,9 @@ export default function LiveMonitoringPage() {
 
   const [bots, setBots] = useState<Bot[]>(localBots)
   const [activeSessions, setActiveSessions] = useState<ActiveLiveSession[]>([])
+  const [allTrades, setAllTrades] = useState<GlobalLiveTradeItem[]>([])
+  const [inspectTrade, setInspectTrade] = useState<TradeInspectionData | null>(null)
+  const [tradeModalOpen, setTradeModalOpen] = useState(false)
   const [detailedStates, setDetailedStates] = useState<Record<string, LiveStateResponse>>({})
   const [botFilter, setBotFilter] = useState<'live' | 'all'>('all')
   const [killConfirmed, setKillConfirmed] = useState(false)
@@ -105,8 +117,12 @@ export default function LiveMonitoringPage() {
   const refreshLiveSessions = useCallback(async () => {
     if (!isStreaming) return
     try {
-      const sessions = await listActiveLiveSessions()
+      const [sessions, trades] = await Promise.all([
+        listActiveLiveSessions(),
+        listAllLiveTrades(100),
+      ])
       setActiveSessions(sessions)
+      setAllTrades(trades)
 
       // Synchronize bot statuses with active sessions
       setBots((prevBots) => {
@@ -167,20 +183,90 @@ export default function LiveMonitoringPage() {
   const liveBots = bots.filter((b) => b.status === 'live' || activeBotIdSet.has(b.id))
   const displayedBots = botFilter === 'live' ? liveBots : bots
 
-  // Extract open positions across all active sessions
+  // Extract open positions across all active sessions with live P&L
   const openPositions: PositionItem[] = activeSessions
     .filter((s) => s.position)
-    .map((s) => ({
-      id: `pos-${s.id}`,
-      botId: s.botId,
-      botName: s.botName,
-      symbol: s.symbol,
-      side: s.position!.side,
-      size: s.position!.size,
-      entryPrice: s.position!.entry_price,
-      stopPrice: s.position!.stop_price,
-      confidence: s.position!.confidence || 0.75,
-    }))
+    .map((s) => {
+      const pos = s.position!
+      const botState = detailedStates[s.botId]
+      const ltp = botState?.evaluation?.candle?.close || pos.entry_price
+      const isLong = pos.side === 'long'
+      const posSize = Number(pos.size || 0)
+      const entryP = Number(pos.entry_price || 0)
+      const uPnl = posSize > 0 && entryP > 0
+        ? (isLong ? (ltp - entryP) * posSize : (entryP - ltp) * posSize)
+        : 0
+      const uPnlPct = (entryP * posSize > 0) ? (uPnl / (entryP * posSize)) * 100 : 0
+
+      return {
+        id: `pos-${s.id}`,
+        botId: s.botId,
+        botName: s.botName,
+        symbol: s.symbol,
+        side: pos.side,
+        size: posSize,
+        entryPrice: entryP,
+        stopPrice: pos.stop_price,
+        confidence: pos.confidence || 0.75,
+        currentLtp: ltp,
+        unrealizedPnl: uPnl,
+        unrealizedPnlPct: uPnlPct,
+      }
+    })
+
+  // Open inspection modal handlers
+  const openPositionInspector = (pos: PositionItem) => {
+    const rawPos = detailedStates[pos.botId]?.position
+    const tradeData: TradeInspectionData = {
+      isOpenPosition: true,
+      symbol: pos.symbol,
+      side: pos.side,
+      size: pos.size,
+      entryPrice: pos.entryPrice,
+      stopPrice: pos.stopPrice,
+      confidence: pos.confidence,
+      entryTime: rawPos?.entry_time || new Date().toISOString(),
+      entryCandle: rawPos?.entry_candle,
+      entryFeatures: rawPos?.entry_features,
+      entrySignal: rawPos?.entry_signal,
+      entryRisk: rawPos?.entry_risk,
+      rawPosition: rawPos,
+    }
+    setInspectTrade(tradeData)
+    setTradeModalOpen(true)
+  }
+
+  const openClosedTradeInspector = (t: GlobalLiveTradeItem) => {
+    const flow = (t.executionFlow as any)?.flow || []
+    const candleNode = flow.find((f: any) => f.type === 'candle')
+    const featuresNode = flow.find((f: any) => f.type === 'features')
+    const signalNode = flow.find((f: any) => f.type === 'signal')
+    const riskNode = flow.find((f: any) => f.type === 'risk')
+    const fillNode = flow.find((f: any) => f.type === 'fill')
+
+    const tradeData: TradeInspectionData = {
+      isOpenPosition: false,
+      symbol: t.symbol,
+      side: t.side,
+      size: t.size,
+      entryPrice: fillNode?.output?.entryPrice || 0,
+      exitPrice: fillNode?.output?.exitPrice || 0,
+      stopPrice: riskNode?.output?.stopPrice || null,
+      confidence: t.confidence,
+      entryTime: t.entryTime,
+      exitTime: t.exitTime,
+      pnl: t.pnl,
+      pnlPct: t.pnlPct,
+      triggerNode: t.triggerNode,
+      entryCandle: candleNode?.output,
+      entryFeatures: featuresNode?.output,
+      entrySignal: signalNode?.output,
+      entryRisk: riskNode?.output,
+      executionFlow: t.executionFlow,
+    }
+    setInspectTrade(tradeData)
+    setTradeModalOpen(true)
+  }
 
   // Aggregate stats
   const totalCapital = activeSessions.reduce((acc, s) => acc + s.capital, 0)
@@ -586,7 +672,7 @@ export default function LiveMonitoringPage() {
         )}
       </div>
 
-      {/* Live Market Positions Table */}
+      {/* Live Market Positions Table Card */}
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -604,7 +690,10 @@ export default function LiveMonitoringPage() {
                 <th className="p-3">Side</th>
                 <th className="p-3">Size</th>
                 <th className="p-3">Entry Price</th>
-                <th className="p-3">Stop Price</th>
+                <th className="p-3">Live LTP</th>
+                <th className="p-3">Unrealized P&amp;L (₹)</th>
+                <th className="p-3">P&amp;L %</th>
+                <th className="p-3">Stop Loss</th>
                 <th className="p-3">Confidence</th>
                 <th className="p-3">Originating Bot</th>
                 <th className="p-3 pr-4 text-right">Action</th>
@@ -614,52 +703,203 @@ export default function LiveMonitoringPage() {
               <AnimatePresence initial={false}>
                 {openPositions.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-8 text-center text-muted-foreground text-xs font-medium">
+                    <td colSpan={11} className="p-8 text-center text-muted-foreground text-xs font-medium">
                       No active open positions currently. Live strategy graphs will enter positions upon meeting conviction thresholds on closed candles.
                     </td>
                   </tr>
                 ) : (
-                  openPositions.map((pos) => (
-                    <motion.tr
-                      key={pos.id}
-                      initial={{ opacity: 0, y: -8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      transition={{ duration: 0.2 }}
-                      className="hover:bg-secondary/30 transition-colors"
-                    >
-                      <td className="p-3 pl-4 font-bold text-foreground">{pos.symbol}</td>
-                      <td className="p-3">
-                        <Badge variant={pos.side === 'long' ? 'profit' : 'loss'} size="sm" className="uppercase font-mono">
-                          {pos.side}
-                        </Badge>
-                      </td>
-                      <td className="p-3 font-mono">{pos.size}</td>
-                      <td className="p-3 font-mono">{formatINR(pos.entryPrice)}</td>
-                      <td className="p-3 font-mono text-muted-foreground">
-                        {pos.stopPrice ? formatINR(pos.stopPrice) : 'None'}
-                      </td>
-                      <td className="p-3 font-mono font-semibold text-brand">
-                        {Math.round(pos.confidence * 100)}%
-                      </td>
-                      <td className="p-3">
-                        <Link
-                          href={`/app/bots/${pos.botId}?tab=live`}
-                          className="font-medium text-foreground hover:text-brand transition-colors inline-flex items-center gap-1"
-                        >
-                          {pos.botName} <ExternalLink className="size-3" />
-                        </Link>
-                      </td>
-                      <td className="p-3 pr-4 text-right">
-                        <Link
-                          href={`/app/bots/${pos.botId}?tab=live`}
-                          className="h-7 px-2.5 inline-flex items-center justify-center rounded-lg bg-secondary text-[11px] font-medium hover:bg-secondary/80 transition-colors"
-                        >
-                          View Bot
-                        </Link>
-                      </td>
-                    </motion.tr>
-                  ))
+                  openPositions.map((pos) => {
+                    const isLong = pos.side === 'long'
+                    const uPnl = pos.unrealizedPnl || 0
+                    const uPnlPct = pos.unrealizedPnlPct || 0
+
+                    return (
+                      <motion.tr
+                        key={pos.id}
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        transition={{ duration: 0.2 }}
+                        onClick={() => openPositionInspector(pos)}
+                        className="hover:bg-secondary/30 transition-colors cursor-pointer group"
+                      >
+                        <td className="p-3 pl-4 font-bold text-foreground group-hover:text-brand transition-colors">{pos.symbol}</td>
+                        <td className="p-3">
+                          <Badge
+                            variant={isLong ? 'profit' : 'loss'}
+                            size="sm"
+                            className="uppercase font-mono inline-flex items-center gap-0.5 text-[10px]"
+                          >
+                            {isLong ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
+                            {pos.side}
+                          </Badge>
+                        </td>
+                        <td className="p-3 font-mono font-semibold text-foreground">
+                          {pos.size < 1 ? pos.size.toFixed(4) : pos.size.toFixed(2)}
+                        </td>
+                        <td className="p-3 font-mono">{formatINR(pos.entryPrice)}</td>
+                        <td className="p-3 font-mono font-semibold text-foreground">
+                          ${(pos.currentLtp || pos.entryPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className={`p-3 font-mono font-bold ${uPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+                          {formatINR(uPnl, { signed: true })}
+                        </td>
+                        <td className={`p-3 font-mono font-bold ${uPnlPct >= 0 ? 'text-profit' : 'text-loss'}`}>
+                          {formatPct(uPnlPct)}
+                        </td>
+                        <td className="p-3 font-mono text-muted-foreground">
+                          {pos.stopPrice ? formatINR(pos.stopPrice) : 'None'}
+                        </td>
+                        <td className="p-3 font-mono font-semibold text-brand">
+                          {Math.round(pos.confidence * 100)}%
+                        </td>
+                        <td className="p-3">
+                          <Link
+                            href={`/app/bots/${pos.botId}?tab=live`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="font-medium text-foreground hover:text-brand transition-colors inline-flex items-center gap-1"
+                          >
+                            {pos.botName} <ExternalLink className="size-3" />
+                          </Link>
+                        </td>
+                        <td className="p-3 pr-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openPositionInspector(pos)
+                              }}
+                              className="h-7 px-2.5 inline-flex items-center justify-center rounded-lg border border-border bg-secondary/80 text-[11px] font-medium hover:bg-secondary hover:text-brand transition-colors cursor-pointer"
+                            >
+                              <Eye className="size-3 mr-1 text-brand" />
+                              Inspect Flow
+                            </button>
+                            <Link
+                              href={`/app/bots/${pos.botId}?tab=live`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="h-7 px-2.5 inline-flex items-center justify-center rounded-lg bg-secondary text-[11px] font-medium hover:bg-secondary/80 transition-colors"
+                            >
+                              View Bot
+                            </Link>
+                          </div>
+                        </td>
+                      </motion.tr>
+                    )
+                  })
+                )}
+              </AnimatePresence>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Live Executed & Closed Trades History Card */}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-bold tracking-tight">Recent Executed &amp; Closed Trades</h2>
+            <Badge variant="neutral" size="sm" className="font-mono text-[10px]">
+              {allTrades.length} Closed
+            </Badge>
+          </div>
+          <span className="text-xs text-muted-foreground font-mono">Across All User Bots</span>
+        </div>
+
+        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          <table className="w-full text-left text-xs">
+            <thead className="border-b border-border bg-secondary/50 font-medium text-muted-foreground">
+              <tr>
+                <th className="p-3 pl-4">Symbol</th>
+                <th className="p-3">Side</th>
+                <th className="p-3">Originating Bot</th>
+                <th className="p-3">Entry Time (IST)</th>
+                <th className="p-3">Exit Time (IST)</th>
+                <th className="p-3">Size</th>
+                <th className="p-3">Realized P&amp;L (₹)</th>
+                <th className="p-3">P&amp;L %</th>
+                <th className="p-3">Exit Trigger</th>
+                <th className="p-3 pr-4 text-right">Execution Flow</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              <AnimatePresence initial={false}>
+                {allTrades.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="p-8 text-center text-muted-foreground text-xs font-medium">
+                      No live executed trades recorded yet across active sessions.
+                    </td>
+                  </tr>
+                ) : (
+                  allTrades.map((trade) => {
+                    const isLong = trade.side === 'long'
+
+                    return (
+                      <motion.tr
+                        key={trade.id}
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        transition={{ duration: 0.2 }}
+                        onClick={() => openClosedTradeInspector(trade)}
+                        className="hover:bg-secondary/30 transition-colors cursor-pointer group"
+                      >
+                        <td className="p-3 pl-4 font-bold text-foreground group-hover:text-brand transition-colors">
+                          {trade.symbol}
+                        </td>
+                        <td className="p-3">
+                          <Badge
+                            variant={isLong ? 'profit' : 'loss'}
+                            size="sm"
+                            className="uppercase font-mono inline-flex items-center gap-0.5 text-[10px]"
+                          >
+                            {isLong ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
+                            {trade.side}
+                          </Badge>
+                        </td>
+                        <td className="p-3">
+                          <Link
+                            href={`/app/bots/${trade.botId}?tab=live`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="font-medium text-foreground hover:text-brand transition-colors inline-flex items-center gap-1"
+                          >
+                            {trade.botName} <ExternalLink className="size-3" />
+                          </Link>
+                        </td>
+                        <td className="p-3 font-mono text-muted-foreground text-xs">
+                          {formatDate(trade.entryTime, { withTime: true })}
+                        </td>
+                        <td className="p-3 font-mono text-muted-foreground text-xs">
+                          {formatDate(trade.exitTime, { withTime: true })}
+                        </td>
+                        <td className="p-3 font-mono font-semibold text-foreground">
+                          {Number(trade.size).toFixed(4)}
+                        </td>
+                        <td className={`p-3 font-mono font-bold ${trade.pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+                          {formatINR(trade.pnl, { signed: true })}
+                        </td>
+                        <td className={`p-3 font-mono font-bold ${trade.pnlPct >= 0 ? 'text-profit' : 'text-loss'}`}>
+                          {formatPct(trade.pnlPct)}
+                        </td>
+                        <td className="p-3 text-muted-foreground font-mono text-xs">
+                          {trade.triggerNode || 'take-profit'}
+                        </td>
+                        <td className="p-3 pr-4 text-right">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openClosedTradeInspector(trade)
+                            }}
+                            className="h-7 px-2.5 inline-flex items-center justify-center rounded-lg border border-border bg-secondary/80 text-[11px] font-medium hover:bg-secondary hover:text-brand transition-colors cursor-pointer gap-1"
+                          >
+                            <Eye className="size-3 text-brand" />
+                            Inspect Flow &rarr;
+                          </button>
+                        </td>
+                      </motion.tr>
+                    )
+                  })
                 )}
               </AnimatePresence>
             </tbody>
@@ -727,6 +967,13 @@ export default function LiveMonitoringPage() {
           </AnimatePresence>
         </div>
       </div>
+
+      {/* Trade Decision & DAG Execution Flow Modal */}
+      <TradeFlowModal
+        open={tradeModalOpen}
+        onOpenChange={setTradeModalOpen}
+        trade={inspectTrade}
+      />
     </div>
   )
 }

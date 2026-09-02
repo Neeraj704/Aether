@@ -1,0 +1,223 @@
+# AETHER — Phase 11: Scheduled Paper-Trading Loop & Persisted Live State
+
+> Bounded, single-phase prompt, same discipline as Phases 0–10. Do not expand scope. Presets, marketplace, billing, and real LLM/ML node intelligence remain explicitly out of scope — see §7.
+
+---
+
+## 0. Context you must internalize first
+
+Phase 10 made bot CRUD and historical/paper/walk-forward/Monte-Carlo *backtesting* fully real (Supabase + FastAPI engine). The Live tab (`components/bot/live-tab.tsx`) and the global `/app/live` "Aether View" are still 100% deterministic mock data, seeded from `hashString(bot.id)` (Prompt 03). There is no actual live/paper execution loop anywhere in the system yet.
+
+**Critical design constraint — read before writing any code:** do not build this as raw WebSocket exchange streaming. That is a much larger, riskier lift than this phase should attempt, and it isn't what the existing codebase is set up for. Instead, notice that `apps/engine/requirements.txt` already includes `apscheduler>=3.10.4`, which is not currently used anywhere — this is a strong signal that the intended design for "live" is a **scheduled polling loop**: every N minutes (matching the bot's candle resolution, 15m), fetch the latest closed candle for each live bot's symbol, execute one bar of that bot's compiled graph against its persisted position state, and write the result. The frontend polls a REST endpoint for the latest state — no WebSocket push required from the engine to the browser either.
+
+This mirrors exactly how `apps/engine/app/engine/backtest_runner.py`'s `simulate_historical_pass` already works, just triggered by a scheduler instead of a loop over historical rows, and running forever (until stopped) instead of over a fixed date range.
+
+---
+
+## 1. Mandatory Step Zero: Audit before you touch anything
+
+Read and summarize (real vs. needs-building) before writing code:
+
+1. `apps/engine/app/engine/backtest_runner.py` — specifically `Portfolio`, `simulate_historical_pass`, and how `node_instances` are built. You will factor shared logic out of here; do not duplicate it.
+2. `apps/engine/app/data/binance_ingest.py` — the existing historical backfill. Confirm exactly how it calls the Binance REST klines endpoint; you'll reuse the same fetch function for "get the latest closed candle."
+3. `apps/engine/app/main.py` — the `lifespan` context manager, where you'll register the scheduler.
+4. `apps/engine/app/db/models.py` — `BotModel.status`, and confirm there is currently no live-state table.
+5. `apps/web/lib/workspace-store.ts` — `setBotStatus`, and how `/app/bots/[botId]/backtest/[runId]/page.tsx`'s "Promote to Live" button currently calls it (per Phase 2's docs) — this is the existing UI trigger you're wiring to a real backend call.
+6. `apps/web/components/bot/live-tab.tsx` and `apps/web/app/app/live/page.tsx` — confirm they still read `OPEN_POSITIONS`/`LIVE_LOGS` mock fixtures and the `hashString`-scoped pattern from Prompt 03, and note every prop/shape they currently expect, since your real data must match those shapes or you must update the components to match the new real shapes (prefer matching existing shapes to minimize UI changes).
+7. `apps/web/mock/data.ts` — the `BacktestMetrics`/`Trade`/`EquityPoint` types you'll mirror for live state, and the `Bot['status']` union (`draft | backtested | live | paused | error`) you'll be driving from the backend now instead of only the UI.
+
+Produce a short "real vs. mock" note for each before proceeding.
+
+---
+
+## 2. Task 1 — Database: persisted live state
+
+New migration `supabase/migrations/0006_live_trading.sql`:
+
+```sql
+create table public.live_sessions (
+  id uuid primary key default gen_random_uuid(),
+  bot_id uuid not null references public.bots(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  status text not null default 'running' check (status in ('running','stopped','error')),
+  symbol text not null,
+  capital numeric not null,
+  cash numeric not null,
+  equity numeric not null,
+  position jsonb,               -- null when flat; {side,size,entry_price,entry_time,stop_price,confidence} when open
+  peak_equity numeric not null,
+  max_drawdown numeric not null default 0,
+  last_bar_time timestamptz,
+  started_at timestamptz not null default now(),
+  stopped_at timestamptz,
+  error_message text
+);
+
+create table public.live_trades (
+  id uuid primary key default gen_random_uuid(),
+  live_session_id uuid not null references public.live_sessions(id) on delete cascade,
+  symbol text not null,
+  side text not null check (side in ('long','short')),
+  entry_time timestamptz not null,
+  exit_time timestamptz not null,
+  size numeric not null,
+  pnl numeric not null,
+  pnl_pct numeric not null,
+  trigger_node text not null,
+  confidence numeric not null,
+  execution_flow jsonb
+);
+
+create table public.live_equity_points (
+  live_session_id uuid not null references public.live_sessions(id) on delete cascade,
+  ts timestamptz not null,
+  equity numeric not null,
+  drawdown numeric not null,
+  primary key (live_session_id, ts)
+);
+
+alter table public.live_sessions enable row level security;
+alter table public.live_trades enable row level security;
+alter table public.live_equity_points enable row level security;
+
+create policy "live_sessions CRUD by owner" on public.live_sessions
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "live_trades readable via owned session" on public.live_trades
+  for select using (exists (select 1 from public.live_sessions s where s.id = live_session_id and s.user_id = auth.uid()));
+create policy "live_equity_points readable via owned session" on public.live_equity_points
+  for select using (exists (select 1 from public.live_sessions s where s.id = live_session_id and s.user_id = auth.uid()));
+
+create unique index live_sessions_one_active_per_bot on public.live_sessions(bot_id) where status = 'running';
+create index live_trades_session_idx on public.live_trades(live_session_id);
+create index live_equity_points_session_idx on public.live_equity_points(live_session_id);
+
+-- Engine writes trades/equity via service_role, bypassing RLS by design — same pattern as backtest_runs/trades.
+```
+
+The partial unique index (`where status = 'running'`) is the enforcement that a bot can only have one active live session at a time — rely on the DB constraint, don't just check-then-insert in application code (race condition).
+
+Add matching SQLAlchemy models `LiveSessionModel`, `LiveTradeModel`, `LiveEquityPointModel` to `apps/engine/app/db/models.py`, following the exact column/type conventions already used for `BacktestRunModel`/`TradeModel`/`EquityPointModel`.
+
+---
+
+## 3. Task 2 — Refactor: extract shared single-bar execution logic
+
+In `apps/engine/app/engine/backtest_runner.py`, `simulate_historical_pass` loops over `candle_records` and for each one builds a `NodeContext`, runs every node instance in order, and updates the portfolio. Extract the **body of that per-candle loop** into a new function in a new file `apps/engine/app/engine/bar_runner.py`:
+
+```python
+async def run_one_bar(
+    node_instances: list,      # [(node, node_instance, merged_cfg), ...] — same shape backtest_runner already builds
+    candle: dict,
+    portfolio: Portfolio,      # reuse the existing Portfolio class from backtest_runner.py
+) -> tuple[Optional[ClosedTrade], float]:
+    """Runs one bar through the compiled node pipeline against a live portfolio.
+    Returns (closed_trade_or_None, current_equity)."""
+    ctx = NodeContext(candle=candle, portfolio=portfolio, upstream_outputs={}, historical_window=None)
+    closed_trade = None
+    for node, node_instance, merged_cfg in node_instances:
+        output = await node_instance.run(ctx, merged_cfg)
+        ctx.upstream_outputs[node.id] = output
+        if isinstance(output, ClosedTrade):
+            closed_trade = output
+    close_p = float(candle.get("close", 0.0))
+    portfolio.update_unrealized(close_p)
+    return closed_trade, portfolio.equity
+```
+
+Then **update `simulate_historical_pass` to call `run_one_bar`** instead of inlining the loop body — this is a refactor of existing, working code, so do it carefully and re-run a backtest manually afterward to confirm you haven't changed behavior. Do not skip this step and just duplicate the loop body into a new file — the whole point is one shared implementation so a bug fix in bar-level execution logic never has to be made twice.
+
+`node_instances` construction (instantiating `REGISTRY[node.componentId](merged_cfg)` for each compiled node) should also be extracted into a small helper, e.g. `build_node_instances(ordered_nodes, config)`, reusable by both the backtest runner and the new live runner.
+
+---
+
+## 4. Task 3 — Live candle polling
+
+Add `fetch_latest_candle(symbol: str, interval: str = "15m") -> Optional[dict]` to `apps/engine/app/data/binance_ingest.py`, reusing the existing `fetch_binance_klines_api` helper already in that file with `limit=2` (Binance returns the current in-progress candle as the last element; take the second-to-last, fully-closed one — do not trade on an incomplete bar). Return it in the same dict shape `candle_records` already use elsewhere (`open_time`, `open`, `high`, `low`, `close`, `volume`, `symbol`), and also **upsert it into the `candles` table** using the same `on_conflict_do_nothing` pattern `ingest_symbol` already uses, so live-fetched bars also backfill the historical cache for free.
+
+---
+
+## 5. Task 4 — The scheduler and live runner
+
+New file `apps/engine/app/engine/live_runner.py`:
+
+```python
+async def tick_bot(bot_id: str, session: AsyncSession):
+    """Runs one live bar for a single bot's active live session. Called by the scheduler every 15m."""
+```
+
+Logic:
+1. Load the active `LiveSessionModel` for this bot (`status == 'running'`). If none, return (bot isn't live — should not normally happen if the scheduler is registered/unregistered correctly, see below).
+2. Load the `BotModel` and compile its graph via the existing `compile_graph`.
+3. Fetch the latest closed candle via `fetch_latest_candle`. If its `open_time` is not newer than `live_session.last_bar_time`, skip (avoids double-processing if the scheduler tick and candle close don't align perfectly).
+4. Reconstruct a `Portfolio` instance from the persisted session row (`cash`, `equity`, `peak_equity`, `max_dd`, and `position` if not null).
+5. Build `node_instances` via the shared helper (Task 2) and call `run_one_bar`.
+6. Persist: update the `live_sessions` row (`cash`, `equity`, `position`, `peak_equity`, `max_drawdown`, `last_bar_time`), insert a `live_equity_points` row, and if a trade closed, insert a `live_trades` row.
+7. Wrap the whole function body in try/except — on any exception, set `live_sessions.status = 'error'`, `error_message = str(e)`, and **deregister the scheduler job for this bot** (Task below) so a broken bot doesn't spam retries forever. This must also update the bot's own `status` to `'error'` via the existing `bots.status` column, so the rest of the UI (status badges, per Phase-established conventions) reflects it.
+
+### Scheduler registration
+
+In `apps/engine/app/main.py`'s `lifespan`, instantiate an `AsyncIOScheduler` (from `apscheduler.schedulers.asyncio`), store it on `app.state.scheduler`, `.start()` it in `lifespan`, `.shutdown()` on exit. On startup, **re-register a job for every bot that currently has an active `live_sessions` row** (`status == 'running'`) — this handles the engine process restarting while bots are supposed to still be live. Each job: `scheduler.add_job(tick_bot, 'interval', minutes=15, args=[bot_id], id=f"live-{bot_id}", next_run_time=<align to next 15m boundary>)`. Aligning `next_run_time` to actual 15-minute wall-clock boundaries (`:00`, `:15`, `:30`, `:45`) rather than "15 minutes from whenever start was clicked" matters — it keeps live ticks synchronized with when Binance candles actually close.
+
+---
+
+## 6. Task 5 — New API endpoints (`apps/engine/app/routers/live.py`, new file, register in `main.py` alongside the existing routers)
+
+- `POST /bots/{bot_id}/live/start` — body: `{ symbol: str, capital: float }`. Validates bot ownership (same `get_current_user_id` dependency pattern as every other authenticated route), validates the bot's graph via the existing `validate_bot_graph` (refuse to start if it has blocking errors — reuse, don't reimplement), creates the `live_sessions` row (relying on the partial unique index to reject a second concurrent session for the same bot — catch the resulting IntegrityError and return a clean 409), updates `bots.status = 'live'`, and registers the scheduler job (Task 4). Returns the new session id.
+- `POST /bots/{bot_id}/live/stop` — the kill switch. Sets the active session's `status = 'stopped'`, `stopped_at = now()`, updates `bots.status = 'paused'`, and removes the scheduler job (`scheduler.remove_job(f"live-{bot_id}")`, guarded — job may not exist if the engine restarted).
+- `GET /bots/{bot_id}/live/state` — returns the current session (or 404/`{status: 'not_running'}` if none active), its `position`, latest N (e.g. 200) `live_equity_points`, and latest N (e.g. 50) `live_trades`, in the same field-naming convention (`camelCase`) as `GET /backtest/{run_id}` already uses, so the frontend can reuse formatting helpers.
+
+All three endpoints must reject with 403/404 if the requesting user doesn't own the bot — same ownership-check pattern already established in `backtest.py`.
+
+---
+
+## 7. Task 6 — Frontend wiring
+
+### 7.1 `apps/web/lib/engine.ts` — add
+```ts
+export async function startLiveSession(botId: string, symbol: string, capital: number): Promise<{ sessionId: string }>
+export async function stopLiveSession(botId: string): Promise<void>
+export async function getLiveState(botId: string): Promise<LiveStateResponse>
+```
+Same auth-header pattern (`session?.access_token`) as every other function in this file.
+
+### 7.2 `apps/web/components/bot/live-tab.tsx`
+Replace the `hashString(bot.id)`-derived mock `OPEN_POSITIONS`/`LIVE_LOGS` with `getLiveState(bot.id)`, polled on an interval (e.g. every 15–20 seconds — this is a UI refresh poll, unrelated to the engine's 15-minute bar interval) while the tab is mounted and the session status is `running`. Wire the **Stop Bot** kill-switch button to `stopLiveSession`. Wire whatever "Go Live" / start control this tab (or the Bot Overview / Backtest report's existing "Promote to Live" button, per Phase 2's docs) currently only flips local state, to also call `startLiveSession`. **Keep the persistent "Paper trading only — no real funds are being used" banner exactly as Prompt 11 added it — do not remove or condition it on anything in this phase; there is no real-money tier yet.**
+
+### 7.3 `apps/web/app/app/live/page.tsx` (global Aether View)
+This page aggregates across all of a user's live bots. Add a lightweight `listActiveLiveBots()`-style aggregation — either a new engine endpoint `GET /live/active` returning all running sessions for the authenticated user, or (simpler, prefer this if it avoids a redundant endpoint) have the frontend call `listBots()` (already filters by ownership) then `getLiveState` for each bot with `status === 'live'`. Match whichever approach keeps the existing page's layout/props contract most intact.
+
+### 7.4 Status consistency
+`updateBot`/`setBotStatus` in the mock `workspace-store.ts` should remain as the post-success local cache write (same pattern established in Phase 10), now triggered *after* `startLiveSession`/`stopLiveSession` succeed, not as the primary action.
+
+---
+
+## 8. Explicit non-goals for this phase
+
+Do **not**:
+- Implement real WebSocket exchange connectivity, CCXT order placement, or anything resembling the "Quantum Edge" / HERMES real-execution blueprint from `docs/Full context.md` §9 — this phase is paper-simulation only, on a polling schedule, exactly like backtesting but continuous.
+- Touch real-money execution, Razorpay, entitlements/plan gating for the live feature (the UI's `[AUTH, GATED]` marking on `/app/bots/:botId/live` per the sitemap stays enforced client-side as it already is — don't add new server-side plan checks in this phase).
+- Touch presets, marketplace, or notifications.
+- Change how historical/paper/walk-forward/Monte-Carlo *backtests* behave — Task 2's refactor must be behavior-preserving for those, verified manually.
+- Support more than one symbol per live bot, or multiple concurrent live sessions per bot (the partial unique index enforces the latter).
+
+---
+
+## 9. Acceptance checklist
+
+- [ ] `npx tsc --noEmit` (web) and a clean Python import check (engine, same pattern as Phase 10's verification) both pass.
+- [ ] Running an existing historical backtest produces identical metrics before and after the Task 2 refactor (spot-check one bot/config pair pre- and post-refactor).
+- [ ] Starting a live session on a bot with a validation-blocking graph is rejected with a clear error, not silently started.
+- [ ] Starting a live session twice on the same bot (e.g., two tabs) results in a clean 409 on the second attempt, not two scheduler jobs or a DB error leaking to the user.
+- [ ] After starting, `bots.status` becomes `live` and a `live_sessions` row exists with `status = 'running'`.
+- [ ] Waiting past a 15-minute boundary produces a new `live_equity_points` row and, if the graph's risk gate approved a trade, a `live_trades` row — verify directly in Supabase, not just in the UI.
+- [ ] The Stop Bot kill switch immediately sets `live_sessions.status = 'stopped'`, `bots.status = 'paused'`, and the scheduler stops ticking that bot (no further rows appear after stopping).
+- [ ] Restarting the FastAPI engine process while a bot is live resumes ticking it (scheduler re-registration on startup) without requiring the user to click Stop/Start again.
+- [ ] A bot whose live tick throws (e.g., transient Binance fetch failure) flips to `status = 'error'` with a stored `error_message`, and does not continue silently retrying forever.
+- [ ] The Live tab and `/app/live` show real, polled data — verify by manually starting a live session and watching a new equity point appear without a page reload.
+- [ ] The "Paper trading only" banner is still present, unconditional, on every live-related view.
+
+---
+
+## 10. What this phase deliberately does not finish
+
+After this phase: bots can run a real, persisted, scheduled paper-trading loop against live Binance data using the exact same node-execution logic as backtests — but still no real order execution, no WebSocket-speed reaction (15-minute granularity only, matching the candle resolution), no real-money tier, and the underlying node intelligence is still the rule-based `UniversalNode` heuristic from `apps/engine/app/nodes/universal.py`, not real LLM/ML calls. State that plainly in your summary rather than implying more was completed.

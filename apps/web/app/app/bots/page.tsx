@@ -14,6 +14,8 @@ import {
   Download,
   Archive,
   ArchiveRestore,
+  MoreVertical,
+  Activity,
 } from 'lucide-react'
 import { useWorkspace } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
@@ -31,6 +33,13 @@ import { StatusBadge, Badge } from '@/components/ui/badge'
 import { PillButton } from '@/components/ui/pill-button'
 import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import {
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+} from '@/components/ui/menu'
 
 export default function MyBotsPage() {
   const router = useRouter()
@@ -235,12 +244,18 @@ export default function MyBotsPage() {
           {filteredBots.map((bot) => (
             <div
               key={bot.id}
-              className={`flex flex-col justify-between rounded-xl border bg-card p-5 transition-all duration-200 ${
-                bot.archived
+              className={`flex flex-col justify-between rounded-xl border bg-card p-5 transition-all duration-200 relative overflow-hidden ${
+                bot.status === 'live'
+                  ? 'border-profit/40 shadow-sm shadow-profit/5'
+                  : bot.archived
                   ? 'border-border/60 opacity-75 hover:opacity-100'
                   : 'border-border hover:border-brand/40'
               }`}
             >
+              {bot.status === 'live' && (
+                <div className="absolute top-0 right-0 left-0 h-[2px] bg-gradient-to-r from-profit/80 via-brand to-profit/80 animate-pulse" />
+              )}
+
               <div className="flex flex-col gap-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex flex-col min-w-0">
@@ -260,7 +275,72 @@ export default function MyBotsPage() {
                         Archived
                       </Badge>
                     )}
-                    <StatusBadge status={bot.status} />
+                    {bot.status === 'live' ? (
+                      <Link href={`/app/bots/${bot.id}?tab=live`} title="Open Live Monitor">
+                        <StatusBadge status="live" className="cursor-pointer hover:ring-1 hover:ring-profit/50 transition-all" />
+                      </Link>
+                    ) : (
+                      <StatusBadge status={bot.status} />
+                    )}
+
+                    <Menu>
+                      <MenuTrigger
+                        render={
+                          <button
+                            type="button"
+                            title="More actions"
+                            aria-label="More actions"
+                            className="size-7 flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+                          >
+                            <MoreVertical className="size-3.5" />
+                          </button>
+                        }
+                      />
+                      <MenuContent align="end" className="w-48">
+                        <MenuItem onClick={() => handleDuplicate(bot.id)}>
+                          <Copy className="size-3.5" />
+                          <span>Duplicate Bot</span>
+                        </MenuItem>
+                        <MenuItem
+                          onClick={() => {
+                            downloadBotExport(bot)
+                            toast.success('Bot Exported', `Saved ${bot.name}.aether.json`)
+                          }}
+                        >
+                          <Download className="size-3.5" />
+                          <span>Export JSON</span>
+                        </MenuItem>
+                        <MenuItem
+                          onClick={() =>
+                            setBotToArchive({
+                              id: bot.id,
+                              name: bot.name,
+                              archived: Boolean(bot.archived),
+                            })
+                          }
+                        >
+                          {bot.archived ? (
+                            <>
+                              <ArchiveRestore className="size-3.5" />
+                              <span>Restore Bot</span>
+                            </>
+                          ) : (
+                            <>
+                              <Archive className="size-3.5" />
+                              <span>Archive Bot</span>
+                            </>
+                          )}
+                        </MenuItem>
+                        <MenuSeparator />
+                        <MenuItem
+                          destructive
+                          onClick={() => handleDelete(bot.id, bot.name)}
+                        >
+                          <Trash2 className="size-3.5" />
+                          <span>Delete Bot</span>
+                        </MenuItem>
+                      </MenuContent>
+                    </Menu>
                   </div>
                 </div>
 
@@ -297,61 +377,23 @@ export default function MyBotsPage() {
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => {
-                      downloadBotExport(bot)
-                      toast.success('Bot Exported', `Saved ${bot.name}.aether.json`)
-                    }}
-                    title="Export Bot as JSON"
-                    className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-                  >
-                    <Download className="size-3.5" />
-                  </button>
-                  <button
-                    onClick={() => handleDuplicate(bot.id)}
-                    title="Duplicate Bot"
-                    className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-                  >
-                    <Copy className="size-3.5" />
-                  </button>
-                  <button
-                    onClick={() =>
-                      setBotToArchive({
-                        id: bot.id,
-                        name: bot.name,
-                        archived: Boolean(bot.archived),
-                      })
-                    }
-                    title={bot.archived ? 'Restore Bot' : 'Archive Bot'}
-                    className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-                  >
-                    {bot.archived ? (
-                      <ArchiveRestore className="size-3.5" />
-                    ) : (
-                      <Archive className="size-3.5" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => handleDelete(bot.id, bot.name)}
-                    title="Delete Bot"
-                    className="p-2 rounded-lg border border-border text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
-                  
+                <div className="flex items-center gap-2">
                   {bot.status === 'live' ? (
                     <Link
                       href={`/app/bots/${bot.id}?tab=live`}
-                      className="h-8 px-3 inline-flex items-center justify-center rounded-lg bg-profit/15 text-profit border border-profit/30 text-xs font-semibold hover:bg-profit/25 transition-colors gap-1.5 shadow-sm"
+                      className="h-8 px-3 inline-flex items-center justify-center rounded-lg bg-profit/10 text-profit border border-profit/25 hover:bg-profit/20 hover:border-profit/40 text-xs font-semibold transition-all gap-2 group shadow-xs"
+                      title="Open Live Monitor"
                     >
-                      <span className="size-2 rounded-full bg-profit animate-ping" />
-                      Live Monitor
+                      <span className="relative flex size-2 shrink-0">
+                        <span className="absolute -inset-0.5 animate-ping rounded-full bg-profit/60" />
+                        <span className="relative size-2 rounded-full bg-profit" />
+                      </span>
+                      <span>Live Monitor</span>
                     </Link>
                   ) : (
                     <Link
                       href={`/app/bots/${bot.id}`}
-                      className="h-8 px-2.5 inline-flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary text-xs font-medium transition-colors"
+                      className="h-8 px-3 inline-flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary text-xs font-medium transition-colors"
                     >
                       Overview
                     </Link>

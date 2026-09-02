@@ -4,7 +4,7 @@ import httpx
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
-from typing import Optional
+from typing import Optional, Any
 from ..config import settings
 from ..db.session import get_async_database_url
 from ..db.models import CandleModel

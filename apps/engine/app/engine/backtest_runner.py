@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 import numpy as np
 import pandas as pd
-from sqlalchemy import select, update, text
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schemas.graph import BotGraph
@@ -451,14 +451,6 @@ async def run_backtest(
         metrics = compute_metrics(trades, equity_curve, config.capital, exposure_pct)
 
         # Persist results to DB
-        # Ensure trades table has execution_flow column
-        try:
-            await db.execute(text("ALTER TABLE trades ADD COLUMN IF NOT EXISTS execution_flow JSONB;"))
-            await db.commit()
-        except Exception as mig_err:
-            await db.rollback()
-            print(f"[DB Migration Check] Notice: {mig_err}")
-
         # 1. Update backtest_run row
         await db.execute(
             update(BacktestRunModel)

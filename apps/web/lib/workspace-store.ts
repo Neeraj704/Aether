@@ -210,10 +210,10 @@ interface WorkspaceState {
 }
 
 const seed = () => ({
-  bots: BOTS,
-  runs: BACKTEST_RUNS,
-  myPresets: MY_PRESETS,
-  publishedPresets: PUBLISHED_PRESETS,
+  bots: [] as Bot[],
+  runs: [] as BacktestRun[],
+  myPresets: [] as MyPreset[],
+  publishedPresets: [] as PublishedPreset[],
   marketplacePresets: [] as Preset[],
   creatorEarnings: CREATOR_EARNINGS,
   notifications: NOTIFICATIONS,
@@ -657,9 +657,7 @@ export const useWorkspace = create<WorkspaceState>()(
         }
       },
       onRehydrateStorage: () => (state) => {
-        if (!state || !state.bots || state.bots.length === 0) {
-          useWorkspace.setState(seed())
-        } else {
+        if (state) {
           const bots = (state.bots || []).map(normalizeBot)
           const myPresets = (state.myPresets || []).map(normalizePreset)
           const publishedPresets = (state.publishedPresets || []).map(normalizePreset)

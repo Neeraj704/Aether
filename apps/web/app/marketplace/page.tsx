@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
   Store,
@@ -8,28 +8,42 @@ import {
   GitFork,
   Star,
 } from 'lucide-react'
-import { useMarketplacePresets } from '@/lib/workspace-store'
+import type { Preset } from '@/mock/data'
 import { Logo } from '@/components/brand/logo'
 import { TierBadge, Badge } from '@/components/ui/badge'
 import { PillLink } from '@/components/ui/pill-button'
 import { Input } from '@/components/ui/input'
+import { listMarketplace } from '@/lib/marketplace'
 
 export default function PublicMarketplacePage() {
-  const marketplacePresets = useMarketplacePresets()
+  const [marketplacePresets, setMarketplacePresets] = useState<Preset[]>([])
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('All')
 
-  const categories = ['All', 'Starter', 'Debate', 'Options', 'Momentum']
+  const categories = ['All', 'Starter', 'Debate', 'Options', 'Momentum', 'Risk', 'Adaptive', 'Research', 'Learning']
 
-  const filteredPresets = marketplacePresets.filter((preset) => {
-    const matchesSearch =
-      preset.name.toLowerCase().includes(search.toLowerCase()) ||
-      preset.tagline.toLowerCase().includes(search.toLowerCase()) ||
-      preset.tags.some((t) => t.toLowerCase().includes(search.toLowerCase()))
-    const matchesCategory =
-      selectedCategory === 'All' || preset.category === selectedCategory
-    return matchesSearch && matchesCategory
-  })
+  useEffect(() => {
+    let active = true
+    listMarketplace({
+      category: selectedCategory,
+      search: search,
+    })
+      .then((presets) => {
+        if (!active) return
+        setMarketplacePresets(presets)
+      })
+      .catch((err) => {
+        console.error('Error fetching public marketplace listings:', err)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [selectedCategory, search])
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -95,77 +109,91 @@ export default function PublicMarketplacePage() {
         </div>
 
         {/* Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredPresets.map((preset) => (
-            <div
-              key={preset.id}
-              className="group flex flex-col justify-between rounded-2xl border border-border bg-card p-6 hover:border-brand/40 transition-all duration-200 shadow-xs"
-            >
-              <div className="flex flex-col gap-3.5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-[11px] text-tertiary font-medium">
-                      By {preset.author.name}
+        {loading ? (
+          <div className="p-12 text-center text-xs text-muted-foreground animate-pulse font-mono">
+            Loading public marketplace...
+          </div>
+        ) : marketplacePresets.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border bg-card/40 p-12 text-center flex flex-col items-center justify-center gap-3">
+            <Store className="size-10 text-muted-foreground" />
+            <h3 className="text-base font-bold">No public strategies available</h3>
+            <p className="text-xs text-muted-foreground max-w-md">
+              Check back soon as quantitative traders publish strategies to the marketplace.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {marketplacePresets.map((preset) => (
+              <div
+                key={preset.id}
+                className="group flex flex-col justify-between rounded-2xl border border-border bg-card p-6 hover:border-brand/40 transition-all duration-200 shadow-xs"
+              >
+                <div className="flex flex-col gap-3.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[11px] text-tertiary font-medium">
+                        By {preset.author.name}
+                      </span>
+                      <Link
+                        href={`/marketplace/${preset.id}`}
+                        className="font-bold text-base tracking-tight hover:text-brand transition-colors truncate"
+                      >
+                        {preset.name}
+                      </Link>
+                    </div>
+                    <TierBadge tier={preset.tier} />
+                  </div>
+
+                  <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
+                    {preset.tagline}
+                  </p>
+
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground pt-1">
+                    <div className="flex items-center gap-1 text-gold font-medium">
+                      <Star className="size-3.5 fill-gold text-gold" />
+                      <span>{preset.rating}</span>
+                      <span className="text-tertiary">({preset.reviewCount})</span>
+                    </div>
+                    <div className="flex items-center gap-1 font-medium">
+                      <GitFork className="size-3.5" />
+                      <span>{preset.forks} forks</span>
+                    </div>
+                    <div>
+                      <span>{preset.nodeCount} nodes</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {preset.tags.map((t) => (
+                      <Badge key={t} variant="neutral" size="sm">
+                        #{t}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-6 pt-4 border-t border-border flex items-center justify-between">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] uppercase text-muted-foreground tracking-wider font-semibold">
+                      {preset.price > 0 ? `Price: ₹${preset.price}` : 'Free'}
                     </span>
-                    <Link
-                      href={`/marketplace/${preset.id}`}
-                      className="font-bold text-base tracking-tight hover:text-brand transition-colors truncate"
-                    >
-                      {preset.name}
-                    </Link>
+                    <span className="text-sm font-bold text-profit">
+                      {preset.headline.label}: {preset.headline.value}
+                    </span>
                   </div>
-                  <TierBadge tier={preset.tier} />
-                </div>
 
-                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
-                  {preset.tagline}
-                </p>
-
-                <div className="flex items-center gap-4 text-xs text-muted-foreground pt-1">
-                  <div className="flex items-center gap-1 text-gold font-medium">
-                    <Star className="size-3.5 fill-gold text-gold" />
-                    <span>{preset.rating}</span>
-                    <span className="text-tertiary">({preset.reviewCount})</span>
-                  </div>
-                  <div className="flex items-center gap-1 font-medium">
-                    <GitFork className="size-3.5" />
-                    <span>{preset.forks} forks</span>
-                  </div>
-                  <div>
-                    <span>{preset.nodeCount} nodes</span>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {preset.tags.map((t) => (
-                    <Badge key={t} variant="neutral" size="sm">
-                      #{t}
-                    </Badge>
-                  ))}
+                  <PillLink
+                    href={`/signup?clone=${preset.id}`}
+                    size="sm"
+                    className="gap-1.5"
+                  >
+                    <GitFork className="size-3.5" /> Clone Preset
+                  </PillLink>
                 </div>
               </div>
-
-              <div className="mt-6 pt-4 border-t border-border flex items-center justify-between">
-                <div className="flex flex-col">
-                  <span className="text-[10px] uppercase text-muted-foreground tracking-wider font-semibold">
-                    {preset.headline.label}
-                  </span>
-                  <span className="text-sm font-bold text-profit">
-                    {preset.headline.value}
-                  </span>
-                </div>
-
-                <PillLink
-                  href={`/signup?clone=${preset.id}`}
-                  size="sm"
-                  className="gap-1.5"
-                >
-                  <GitFork className="size-3.5" /> Clone Preset
-                </PillLink>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </main>
     </div>
   )

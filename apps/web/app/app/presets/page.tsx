@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -15,7 +15,7 @@ import {
   Wallet,
   Pencil,
 } from 'lucide-react'
-import { useWorkspace, useHydrated } from '@/lib/workspace-store'
+import { useWorkspace } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
 import type { MyPreset } from '@/mock/data'
 import { LAYER_MAP } from '@/mock/layers'
@@ -35,17 +35,18 @@ import {
 } from '@/components/ui/dialog'
 import { Segmented } from '@/components/ui/tabs'
 import { formatDate } from '@/lib/utils'
+import {
+  listMyPresets,
+  duplicatePreset as duplicatePresetDB,
+  deletePreset as deletePresetDB,
+  updatePresetMeta,
+} from '@/lib/presets'
+import { createBot as createBotDB } from '@/lib/bots'
 
 export default function MyPresetsPage() {
   const router = useRouter()
-  const hydrated = useHydrated()
-  const myPresets = useWorkspace((s) => s.myPresets)
-  const publishedPresets = useWorkspace((s) => s.publishedPresets)
-  const createBotFromPreset = useWorkspace((s) => s.createBotFromPreset)
-  const duplicatePreset = useWorkspace((s) => s.duplicatePreset)
-  const deletePreset = useWorkspace((s) => s.deletePreset)
-  const renamePreset = useWorkspace((s) => s.renamePreset)
-  const updatePresetVisibility = useWorkspace((s) => s.updatePresetVisibility)
+  const [myPresets, setMyPresets] = useState<MyPreset[]>([])
+  const [loading, setLoading] = useState(true)
 
   const [search, setSearch] = useState('')
   const [visibilityFilter, setVisibilityFilter] = useState<string>('all')
@@ -57,6 +58,26 @@ export default function MyPresetsPage() {
   const [shareCandidate, setShareCandidate] = useState<MyPreset | null>(null)
   const [copiedLink, setCopiedLink] = useState(false)
 
+  useEffect(() => {
+    let active = true
+    listMyPresets()
+      .then((presets) => {
+        if (!active) return
+        setMyPresets(presets)
+        useWorkspace.setState({ myPresets: presets })
+      })
+      .catch((err) => {
+        console.error('Failed to load presets:', err)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   const filteredPresets = myPresets.filter((preset) => {
     const matchSearch =
       preset.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -65,10 +86,20 @@ export default function MyPresetsPage() {
     return matchSearch && matchVis
   })
 
-  const handleLoadIntoBuilder = (presetId: string) => {
-    const newBot = createBotFromPreset(presetId)
-    toast.success('Strategy Instantiated', `Created "${newBot.name}". Launching builder canvas...`)
-    router.push(`/app/builder/${newBot.id}`)
+  const handleLoadIntoBuilder = async (preset: MyPreset) => {
+    try {
+      const newBot = await createBotDB({
+        name: `${preset.name} (Instance)`,
+        description: preset.description || 'Created from saved preset.',
+        graph: preset.graph,
+        tags: ['preset', 'custom'],
+      })
+      useWorkspace.getState().saveGraph(newBot.id, newBot.graph)
+      toast.success('Strategy Instantiated', `Created "${newBot.name}". Launching builder canvas...`)
+      router.push(`/app/builder/${newBot.id}`)
+    } catch (err: any) {
+      toast.error('Failed to load in builder', err?.message)
+    }
   }
 
   const handleStartRename = (preset: MyPreset) => {
@@ -76,12 +107,57 @@ export default function MyPresetsPage() {
     setEditingName(preset.name)
   }
 
-  const handleSaveRename = (presetId: string) => {
+  const handleSaveRename = async (presetId: string) => {
     if (editingName.trim()) {
-      renamePreset(presetId, editingName.trim())
-      toast.success('Preset Renamed')
+      try {
+        await updatePresetMeta(presetId, { name: editingName.trim() })
+        setMyPresets((prev) =>
+          prev.map((p) => (p.id === presetId ? { ...p, name: editingName.trim() } : p)),
+        )
+        useWorkspace.getState().renamePreset(presetId, editingName.trim())
+        toast.success('Preset Renamed')
+      } catch (err: any) {
+        toast.error('Rename failed', err?.message)
+      }
     }
     setEditingId(null)
+  }
+
+  const handleDuplicate = async (id: string) => {
+    try {
+      const copy = await duplicatePresetDB(id)
+      setMyPresets((prev) => [copy, ...prev])
+      useWorkspace.setState((s) => ({ myPresets: [copy, ...s.myPresets] }))
+      toast.success('Preset Duplicated', `Created a copy of ${copy.name}`)
+    } catch (err: any) {
+      toast.error('Duplication failed', err?.message)
+    }
+  }
+
+  const handleDelete = async (preset: MyPreset) => {
+    try {
+      await deletePresetDB(preset.id)
+      setMyPresets((prev) => prev.filter((p) => p.id !== preset.id))
+      useWorkspace.getState().deletePreset(preset.id)
+      toast.success('Preset Deleted', `${preset.name} has been removed.`)
+    } catch (err: any) {
+      toast.error('Delete failed', err?.message)
+    } finally {
+      setDeleteCandidate(null)
+    }
+  }
+
+  const handleUpdateVisibility = async (presetId: string, visibility: 'private' | 'unlisted' | 'public') => {
+    try {
+      await updatePresetMeta(presetId, { visibility })
+      setMyPresets((prev) =>
+        prev.map((p) => (p.id === presetId ? { ...p, visibility } : p)),
+      )
+      useWorkspace.getState().updatePresetVisibility(presetId, visibility)
+      toast.success('Visibility Updated', `Preset is now ${visibility}.`)
+    } catch (err: any) {
+      toast.error('Visibility update failed', err?.message)
+    }
   }
 
   const handleCopyShareLink = (preset: MyPreset) => {
@@ -94,7 +170,7 @@ export default function MyPresetsPage() {
     setTimeout(() => setCopiedLink(false), 2000)
   }
 
-  if (!hydrated) {
+  if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center p-12 text-xs text-muted-foreground animate-pulse font-mono">
         Loading presets library...
@@ -111,20 +187,18 @@ export default function MyPresetsPage() {
             <Bookmark className="size-3.5" /> Strategy Preset Library
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-            My Strategy Presets & Reusable Blocks
+            My Strategy Presets &amp; Reusable Blocks
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground max-w-xl">
             Save sub-graphs, modular multi-agent clusters, and full strategy templates to drop instantly onto any builder canvas.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 shrink-0">
-          {publishedPresets.length > 0 && (
-            <PillLink href="/app/creator/dashboard" variant="secondary" className="gap-1.5 text-xs">
-              <Wallet className="size-3.5" /> View creator earnings &rarr;
-            </PillLink>
-          )}
+          <PillLink href="/app/creator/dashboard" variant="secondary" className="gap-1.5 text-xs">
+            <Wallet className="size-3.5" /> Creator Dashboard &rarr;
+          </PillLink>
           <PillLink href="/app/builder" className="gap-2 shadow-lg shadow-brand/20">
-            <Plus className="size-4" /> Save New Block
+            <Plus className="size-4" /> Save New Block in Builder
           </PillLink>
         </div>
       </div>
@@ -161,7 +235,7 @@ export default function MyPresetsPage() {
             title={myPresets.length === 0 ? 'No saved presets yet' : 'No matching presets'}
             description={
               myPresets.length === 0
-                ? 'Create reusable sub-graphs inside the strategy builder by selecting nodes and clicking "Save as block" in the inspector.'
+                ? 'Create reusable strategy presets or sub-graphs inside the builder by selecting nodes and clicking "Save as block" in the inspector.'
                 : 'No presets match your current filter and search query.'
             }
             action={
@@ -254,7 +328,7 @@ export default function MyPresetsPage() {
               <div className="mt-5 pt-4 border-t border-border flex items-center justify-between gap-2">
                 <PillButton
                   size="sm"
-                  onClick={() => handleLoadIntoBuilder(preset.id)}
+                  onClick={() => handleLoadIntoBuilder(preset)}
                   className="gap-1.5"
                 >
                   <Wrench className="size-3.5" /> Load in Builder
@@ -282,10 +356,7 @@ export default function MyPresetsPage() {
                   <button
                     type="button"
                     title="Duplicate preset"
-                    onClick={() => {
-                      duplicatePreset(preset.id)
-                      toast.success('Preset Duplicated', `Created a copy of ${preset.name}`)
-                    }}
+                    onClick={() => handleDuplicate(preset.id)}
                     className="p-1.5 rounded-lg border border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
                   >
                     <Copy className="size-3.5" />
@@ -315,11 +386,7 @@ export default function MyPresetsPage() {
           description={`Are you sure you want to permanently delete "${deleteCandidate.name}"? This action cannot be undone.`}
           confirmLabel="Delete Preset"
           destructive
-          onConfirm={() => {
-            deletePreset(deleteCandidate.id)
-            toast.success('Preset Deleted', `${deleteCandidate.name} has been removed.`)
-            setDeleteCandidate(null)
-          }}
+          onConfirm={() => handleDelete(deleteCandidate)}
         />
       )}
 
@@ -340,9 +407,8 @@ export default function MyPresetsPage() {
                 <Segmented<'private' | 'unlisted' | 'public'>
                   value={shareCandidate.visibility}
                   onValueChange={(val) => {
-                    updatePresetVisibility(shareCandidate.id, val)
+                    handleUpdateVisibility(shareCandidate.id, val)
                     setShareCandidate({ ...shareCandidate, visibility: val })
-                    toast.success('Visibility Updated', `Preset is now ${val}.`)
                   }}
                   options={[
                     { value: 'private', label: 'Private' },

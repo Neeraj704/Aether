@@ -42,8 +42,8 @@ import type { Bot } from '@/mock/data'
 
 export default function WorkspaceDashboard() {
   const router = useRouter()
-  const localBots = useWorkspace((s) => s.bots)
-  const [bots, setBots] = useState<Bot[]>(localBots)
+  const [bots, setBots] = useState<Bot[]>([])
+  const [loadingBots, setLoadingBots] = useState(true)
   const runs = useWorkspace((s) => s.runs)
   const activity = useWorkspace((s) => s.activity)
   const setBotStatus = useWorkspace((s) => s.setBotStatus)
@@ -61,11 +61,12 @@ export default function WorkspaceDashboard() {
         }
 
         const dbBots = await listBots()
-        if (dbBots && dbBots.length > 0) {
-          setBots(dbBots)
-        }
+        setBots(dbBots || [])
+        useWorkspace.setState({ bots: dbBots || [] })
       } catch (err) {
         console.error('Failed to load dashboard data:', err)
+      } finally {
+        setLoadingBots(false)
       }
     }
     loadData()
@@ -177,82 +178,103 @@ export default function WorkspaceDashboard() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {bots.map((bot) => (
-            <div
-              key={bot.id}
-              className="group relative flex flex-col justify-between rounded-xl border border-border bg-card p-5 hover:border-brand/40 transition-all duration-200"
-            >
-              <div className="flex flex-col gap-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex flex-col gap-1 min-w-0">
+        {loadingBots ? (
+          <div className="p-8 text-center text-xs text-muted-foreground animate-pulse font-mono border border-border rounded-xl">
+            Loading strategy bots...
+          </div>
+        ) : bots.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border bg-card/40 p-8 text-center flex flex-col items-center justify-center gap-3">
+            <h3 className="text-sm font-semibold">No Strategy Bots Yet</h3>
+            <p className="text-xs text-muted-foreground max-w-sm">
+              Create your first visual trading strategy graph or explore pre-built templates in the community marketplace.
+            </p>
+            <div className="flex items-center gap-2 pt-1">
+              <PillButton size="sm" onClick={handleCreateBot}>
+                <Plus className="size-3.5 mr-1" /> Create Bot
+              </PillButton>
+              <PillLink href="/app/marketplace" size="sm" variant="secondary">
+                Explore Marketplace
+              </PillLink>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {bots.map((bot) => (
+              <div
+                key={bot.id}
+                className="group relative flex flex-col justify-between rounded-xl border border-border bg-card p-5 hover:border-brand/40 transition-all duration-200"
+              >
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <Link
+                        href={`/app/builder/${bot.id}`}
+                        className="font-semibold text-base truncate hover:text-brand transition-colors"
+                      >
+                        {bot.name}
+                      </Link>
+                      <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                        {bot.description || 'No description provided.'}
+                      </p>
+                    </div>
+                    <StatusBadge status={bot.status} />
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {bot.tags.map((t) => (
+                      <Badge key={t} variant="neutral" size="sm">
+                        #{t}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-5 pt-4 border-t border-border flex items-center justify-between">
+                  <div className="flex flex-col">
+                    <span className="text-[11px] text-muted-foreground">{bot.headlineMetric.label}</span>
+                    <span
+                      className={`text-sm font-bold ${
+                        bot.headlineMetric.positive ? 'text-profit' : 'text-loss'
+                      }`}
+                    >
+                      {bot.headlineMetric.value || 'N/A'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
                     <Link
                       href={`/app/builder/${bot.id}`}
-                      className="font-semibold text-base truncate hover:text-brand transition-colors"
+                      className="inline-flex h-8 items-center justify-center rounded-lg border border-border px-3 text-xs font-medium hover:bg-secondary transition-colors"
                     >
-                      {bot.name}
+                      Open Builder
                     </Link>
-                    <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-                      {bot.description || 'No description provided.'}
-                    </p>
+                    {bot.status === 'live' ? (
+                      <button
+                        onClick={() => {
+                          setBotStatus(bot.id, 'paused')
+                          toast.info('Bot paused', `${bot.name} has been paused.`)
+                        }}
+                        className="inline-flex h-8 items-center justify-center rounded-lg border border-warn/30 bg-warn/10 px-2.5 text-xs font-medium text-warn hover:bg-warn/20"
+                      >
+                        Pause
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setBotStatus(bot.id, 'live')
+                          toast.success('Bot set to Live', `${bot.name} is now monitoring live markets.`)
+                        }}
+                        className="inline-flex h-8 items-center justify-center rounded-lg border border-profit/30 bg-profit/10 px-2.5 text-xs font-medium text-profit hover:bg-profit/20"
+                      >
+                        Go Live
+                      </button>
+                    )}
                   </div>
-                  <StatusBadge status={bot.status} />
-                </div>
-
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {bot.tags.map((t) => (
-                    <Badge key={t} variant="neutral" size="sm">
-                      #{t}
-                    </Badge>
-                  ))}
                 </div>
               </div>
-
-              <div className="mt-5 pt-4 border-t border-border flex items-center justify-between">
-                <div className="flex flex-col">
-                  <span className="text-[11px] text-muted-foreground">{bot.headlineMetric.label}</span>
-                  <span
-                    className={`text-sm font-bold ${
-                      bot.headlineMetric.positive ? 'text-profit' : 'text-loss'
-                    }`}
-                  >
-                    {bot.headlineMetric.value || 'N/A'}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Link
-                    href={`/app/builder/${bot.id}`}
-                    className="inline-flex h-8 items-center justify-center rounded-lg border border-border px-3 text-xs font-medium hover:bg-secondary transition-colors"
-                  >
-                    Open Builder
-                  </Link>
-                  {bot.status === 'live' ? (
-                    <button
-                      onClick={() => {
-                        setBotStatus(bot.id, 'paused')
-                        toast.info('Bot paused', `${bot.name} has been paused.`)
-                      }}
-                      className="inline-flex h-8 items-center justify-center rounded-lg border border-warn/30 bg-warn/10 px-2.5 text-xs font-medium text-warn hover:bg-warn/20"
-                    >
-                      Pause
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        setBotStatus(bot.id, 'live')
-                        toast.success('Bot set to Live', `${bot.name} is now monitoring live markets.`)
-                      }}
-                      className="inline-flex h-8 items-center justify-center rounded-lg border border-profit/30 bg-profit/10 px-2.5 text-xs font-medium text-profit hover:bg-profit/20"
-                    >
-                      Go Live
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Activity Feed Section */}

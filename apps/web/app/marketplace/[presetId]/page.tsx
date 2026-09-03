@@ -1,6 +1,7 @@
 'use client'
 
-import { useParams, notFound } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft,
@@ -18,21 +19,56 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import { BACKTEST_RUNS } from '@/mock/data'
+import { BACKTEST_RUNS, type Preset } from '@/mock/data'
 import { LAYER_MAP } from '@/mock/layers'
-import { useMarketplacePresets } from '@/lib/workspace-store'
 import { Logo } from '@/components/brand/logo'
 import { TierBadge } from '@/components/ui/badge'
-import { PillLink } from '@/components/ui/pill-button'
+import { PillLink, PillButton } from '@/components/ui/pill-button'
 import { formatINR } from '@/lib/utils'
+import { getListing } from '@/lib/marketplace'
 
 export default function PublicPresetDetailPage() {
   const { presetId } = useParams<{ presetId: string }>()
-  const marketplacePresets = useMarketplacePresets()
-  const preset = marketplacePresets.find((p) => p.id === presetId)
+  const [preset, setPreset] = useState<Preset | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    if (!presetId) return
+
+    getListing(presetId)
+      .then((p) => {
+        if (!active) return
+        setPreset(p)
+      })
+      .catch((err) => {
+        console.error('Error loading public listing:', err)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [presetId])
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-12 text-xs text-muted-foreground animate-pulse font-mono">
+        Loading strategy blueprint...
+      </div>
+    )
+  }
 
   if (!preset) {
-    notFound()
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-12 text-center gap-4">
+        <h2 className="text-xl font-bold">Strategy not found</h2>
+        <p className="text-xs text-muted-foreground">This marketplace listing may have been delisted or does not exist.</p>
+        <PillLink href="/marketplace">&larr; Back to Marketplace</PillLink>
+      </div>
+    )
   }
 
   const sampleRun = BACKTEST_RUNS.find((r) => r.id === preset.sampleRunId) || BACKTEST_RUNS[0]
@@ -104,7 +140,7 @@ export default function PublicPresetDetailPage() {
               <GitFork className="size-4" /> Clone Strategy to Workspace
             </PillLink>
             <span className="text-[11px] text-center text-muted-foreground">
-              Free instant paper-trading sandbox
+              {preset.price > 0 ? `Listed at ₹${preset.price}` : 'Free instant sandbox'}
             </span>
           </div>
         </div>
@@ -178,7 +214,7 @@ export default function PublicPresetDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 flex flex-col gap-6">
             <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-3">
-              <h2 className="text-base font-bold">Strategy Concept & Logic</h2>
+              <h2 className="text-base font-bold">Strategy Concept &amp; Logic</h2>
               <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
                 {preset.description || preset.tagline}
               </p>
@@ -186,7 +222,7 @@ export default function PublicPresetDetailPage() {
 
             <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-4">
               <h2 className="text-base font-bold flex items-center gap-2">
-                <Layers className="size-4 text-brand" /> Architecture & Node Layers
+                <Layers className="size-4 text-brand" /> Architecture &amp; Node Layers
               </h2>
               <div className="flex flex-col gap-2.5 divide-y divide-border">
                 {preset.layers.map((lId) => {
@@ -215,7 +251,7 @@ export default function PublicPresetDetailPage() {
                 </div>
                 <div className="flex flex-col">
                   <span className="text-xs font-bold text-foreground">{preset.author.name}</span>
-                  <span className="text-[11px] text-muted-foreground">@{preset.author.handle || 'quant'}</span>
+                  <span className="text-[11px] text-muted-foreground">{preset.author.handle || '@quant'}</span>
                 </div>
               </div>
             </div>
@@ -226,7 +262,7 @@ export default function PublicPresetDetailPage() {
                 Fork this blueprint directly onto your visual node canvas to adjust thresholds, test alternate tickers, or plug into your broker.
               </p>
               <PillLink href={`/signup?clone=${preset.id}`} className="mt-2 w-full justify-center">
-                Sign Up & Clone Strategy
+                Sign Up &amp; Clone Strategy
               </PillLink>
             </div>
           </div>

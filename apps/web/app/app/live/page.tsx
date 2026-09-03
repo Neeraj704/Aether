@@ -68,7 +68,7 @@ export default function LiveMonitoringPage() {
   const localBots = useWorkspace((s) => s.bots)
   const setBotStatus = useWorkspace((s) => s.setBotStatus)
 
-  const [bots, setBots] = useState<Bot[]>(localBots)
+  const [bots, setBots] = useState<Bot[]>([])
   const [activeSessions, setActiveSessions] = useState<ActiveLiveSession[]>([])
   const [allTrades, setAllTrades] = useState<GlobalLiveTradeItem[]>([])
   const [inspectTrade, setInspectTrade] = useState<TradeInspectionData | null>(null)
@@ -96,12 +96,10 @@ export default function LiveMonitoringPage() {
     listBots(true)
       .then((remoteBots) => {
         if (!active) return
-        if (remoteBots && remoteBots.length > 0) {
-          setBots(remoteBots)
-          // Also sync with workspace store so other tabs have the bots
-          for (const b of remoteBots) {
-            useWorkspace.getState().saveGraph(b.id, b.graph)
-          }
+        setBots(remoteBots || [])
+        // Also sync with workspace store so other tabs have the bots
+        for (const b of (remoteBots || [])) {
+          useWorkspace.getState().saveGraph(b.id, b.graph)
         }
       })
       .catch((err) => {

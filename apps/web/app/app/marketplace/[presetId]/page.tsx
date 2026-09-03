@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useParams, useRouter, notFound } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft,
@@ -12,6 +12,8 @@ import {
   Flag,
   Share2,
   Check,
+  MessageSquarePlus,
+  User,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -22,11 +24,10 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import { BACKTEST_RUNS } from '@/mock/data'
+import { BACKTEST_RUNS, type Preset } from '@/mock/data'
 import { LAYER_MAP } from '@/mock/layers'
-import { useWorkspace, useMarketplacePresets } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
-import { TierBadge } from '@/components/ui/badge'
+import { TierBadge, Badge } from '@/components/ui/badge'
 import { PillButton } from '@/components/ui/pill-button'
 import {
   Dialog,
@@ -38,34 +39,88 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/input'
-import { formatINR } from '@/lib/utils'
+import { formatINR, formatDate } from '@/lib/utils'
+import { getListing, cloneListing, submitReview } from '@/lib/marketplace'
+import { createBot as createBotDB } from '@/lib/bots'
+import { useWorkspace } from '@/lib/workspace-store'
 
 export default function AppMarketplaceDetailPage() {
   const { presetId } = useParams<{ presetId: string }>()
   const router = useRouter()
-  const marketplacePresets = useMarketplacePresets()
-  const forkPreset = useWorkspace((s) => s.forkPreset)
-  const forkedPresets = useWorkspace((s) => s.forkedPresets)
-  const likedPresets = useWorkspace((s) => s.likedPresets)
-  const toggleLikePreset = useWorkspace((s) => s.toggleLikePreset)
 
-  const preset = marketplacePresets.find((p) => p.id === presetId)
-  if (!preset) {
-    notFound()
-  }
+  const [preset, setPreset] = useState<Preset | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [cloning, setCloning] = useState(false)
+  const [isLiked, setIsLiked] = useState(false)
 
-  const sampleRun = BACKTEST_RUNS.find((r) => r.id === preset.sampleRunId) || BACKTEST_RUNS[0]
-  const isForked = forkedPresets.includes(preset.id)
-  const isLiked = likedPresets.includes(preset.id)
+  // Review state
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewRating, setReviewRating] = useState(5)
+  const [reviewBody, setReviewBody] = useState('')
+  const [submittingReview, setSubmittingReview] = useState(false)
 
   const [reportOpen, setReportOpen] = useState(false)
   const [reportReason, setReportReason] = useState('')
   const [copiedLink, setCopiedLink] = useState(false)
 
-  const handleFork = () => {
-    const newBot = forkPreset(preset)
-    toast.success('Strategy Cloned', `Cloned "${preset.name}". Opening canvas...`)
-    router.push(`/app/builder/${newBot.id}`)
+  const loadListing = () => {
+    if (!presetId) return
+    getListing(presetId)
+      .then((p) => {
+        setPreset(p)
+      })
+      .catch((err) => {
+        console.error('Error loading listing:', err)
+      })
+      .finally(() => {
+        setLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    loadListing()
+  }, [presetId])
+
+  if (loading) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-12 text-xs text-muted-foreground animate-pulse font-mono">
+        Loading strategy blueprint...
+      </div>
+    )
+  }
+
+  if (!preset) {
+    return (
+      <div className="flex flex-col items-center justify-center p-16 text-center gap-4">
+        <h2 className="text-xl font-bold">Strategy not found</h2>
+        <p className="text-xs text-muted-foreground">This marketplace listing may have been delisted.</p>
+        <PillButton onClick={() => router.push('/app/marketplace')}>
+          &larr; Back to Marketplace
+        </PillButton>
+      </div>
+    )
+  }
+
+  const sampleRun = BACKTEST_RUNS.find((r) => r.id === preset.sampleRunId) || BACKTEST_RUNS[0]
+
+  const handleFork = async () => {
+    try {
+      setCloning(true)
+      await cloneListing(preset.id)
+      const newBot = await createBotDB({
+        name: preset.name,
+        description: preset.tagline || preset.description,
+        graph: preset.graph,
+        tags: preset.tags,
+      })
+      useWorkspace.getState().saveGraph(newBot.id, newBot.graph)
+      toast.success('Strategy Cloned', `Cloned "${preset.name}" into your workspace. Opening canvas...`)
+      router.push(`/app/builder/${newBot.id}`)
+    } catch (err: any) {
+      toast.error('Clone failed', err?.message || 'Could not clone strategy.')
+    } finally {
+      setCloning(false)
+    }
   }
 
   const handleCopyLink = () => {
@@ -73,6 +128,21 @@ export default function AppMarketplaceDetailPage() {
     setCopiedLink(true)
     toast.success('Link Copied')
     setTimeout(() => setCopiedLink(false), 2000)
+  }
+
+  const handleSubmitReview = async () => {
+    try {
+      setSubmittingReview(true)
+      await submitReview(preset.id, reviewRating, reviewBody)
+      toast.success('Review Submitted', 'Thank you for your rating and feedback.')
+      setReviewOpen(false)
+      setReviewBody('')
+      loadListing() // Refresh reviews & rating avg
+    } catch (err: any) {
+      toast.error('Review failed', err?.message || 'Could not submit review.')
+    } finally {
+      setSubmittingReview(false)
+    }
   }
 
   const handleSubmitReport = () => {
@@ -100,6 +170,9 @@ export default function AppMarketplaceDetailPage() {
           <div className="flex items-center gap-2.5 flex-wrap">
             <span className="text-xs text-muted-foreground font-medium">By {preset.author.name}</span>
             <TierBadge tier={preset.tier} size="md" />
+            <Badge variant="outline" size="sm" className="capitalize">
+              {preset.category}
+            </Badge>
           </div>
           <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">{preset.name}</h1>
           <p className="text-sm sm:text-base text-muted-foreground leading-relaxed max-w-2xl">
@@ -123,10 +196,19 @@ export default function AppMarketplaceDetailPage() {
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
           <button
             type="button"
-            onClick={() => toggleLikePreset(preset.id)}
+            onClick={() => setReviewOpen(true)}
+            className="h-10 px-3.5 rounded-xl border border-border bg-secondary/40 text-xs font-semibold hover:text-brand hover:bg-secondary transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <MessageSquarePlus className="size-4 text-brand" />
+            <span>Write Review</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsLiked(!isLiked)}
             className={`p-2.5 rounded-xl border text-xs transition-colors cursor-pointer ${
               isLiked
                 ? 'border-gold/50 bg-gold/10 text-gold'
@@ -158,9 +240,10 @@ export default function AppMarketplaceDetailPage() {
           <PillButton
             size="lg"
             onClick={handleFork}
-            className="gap-2 shadow-lg shadow-brand/20 ml-2"
+            disabled={cloning}
+            className="gap-2 shadow-lg shadow-brand/20 ml-1"
           >
-            <GitFork className="size-4" /> {isForked ? 'Clone Again' : 'Clone to My Bots'}
+            <GitFork className="size-4" /> {cloning ? 'Cloning...' : 'Clone to My Workspace'}
           </PillButton>
         </div>
       </div>
@@ -234,7 +317,7 @@ export default function AppMarketplaceDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 flex flex-col gap-6">
           <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-3">
-            <h2 className="text-base font-bold">Strategy Concept & Logic</h2>
+            <h2 className="text-base font-bold">Strategy Concept &amp; Logic</h2>
             <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
               {preset.description || preset.tagline}
             </p>
@@ -242,7 +325,7 @@ export default function AppMarketplaceDetailPage() {
 
           <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-4">
             <h2 className="text-base font-bold flex items-center gap-2">
-              <Layers className="size-4 text-brand" /> Architecture & Node Layers
+              <Layers className="size-4 text-brand" /> Architecture &amp; Node Layers
             </h2>
             <div className="flex flex-col gap-2.5 divide-y divide-border">
               {preset.layers.map((lId) => {
@@ -260,18 +343,69 @@ export default function AppMarketplaceDetailPage() {
               })}
             </div>
           </div>
+
+          {/* Community Reviews Section */}
+          <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-bold">Community Trader Reviews</h2>
+                <p className="text-xs text-muted-foreground">
+                  Verified user ratings and feedback
+                </p>
+              </div>
+              <PillButton size="sm" variant="secondary" onClick={() => setReviewOpen(true)}>
+                Leave a Review
+              </PillButton>
+            </div>
+
+            {preset.reviews.length === 0 ? (
+              <div className="p-6 text-center text-xs text-muted-foreground border border-dashed border-border rounded-xl">
+                No reviews posted yet for this strategy preset. Be the first trader to review it!
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {preset.reviews.map((rev) => (
+                  <div
+                    key={rev.id}
+                    className="rounded-xl border border-border/70 bg-background/50 p-4 flex flex-col gap-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="size-6 rounded-full bg-brand/20 text-brand flex items-center justify-center font-bold text-[10px]">
+                          {rev.initials}
+                        </div>
+                        <span className="text-xs font-bold text-foreground">{rev.author}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-gold text-xs font-bold">
+                        <Star className="size-3 fill-gold text-gold" />
+                        <span>{rev.rating}/5</span>
+                      </div>
+                    </div>
+                    {rev.body && (
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {rev.body}
+                      </p>
+                    )}
+                    <span className="text-[10px] text-tertiary">
+                      {formatDate(rev.createdAt)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-col gap-6">
           <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-4">
-            <h3 className="text-sm font-bold">Author Information</h3>
+            <h3 className="text-sm font-bold">Author Profile</h3>
             <div className="flex items-center gap-3">
               <div className="flex size-10 items-center justify-center rounded-xl bg-brand/15 font-bold text-brand text-sm">
                 {preset.author.initials}
               </div>
               <div className="flex flex-col">
                 <span className="text-xs font-bold text-foreground">{preset.author.name}</span>
-                <span className="text-[11px] text-muted-foreground">@{preset.author.handle || 'quant'}</span>
+                <span className="text-[11px] text-muted-foreground">{preset.author.handle || '@quant'}</span>
               </div>
             </div>
           </div>
@@ -281,12 +415,69 @@ export default function AppMarketplaceDetailPage() {
             <p className="text-xs text-muted-foreground leading-relaxed">
               Instantiate this full strategy graph into your personal workspace with all nodes, connections, and risk thresholds intact.
             </p>
-            <PillButton onClick={handleFork} className="mt-2 w-full justify-center">
-              <GitFork className="size-3.5 mr-1" /> Clone to My Bots
+            <PillButton onClick={handleFork} disabled={cloning} className="mt-2 w-full justify-center">
+              <GitFork className="size-3.5 mr-1" /> {cloning ? 'Cloning...' : 'Clone to My Workspace'}
             </PillButton>
           </div>
         </div>
       </div>
+
+      {/* Review Dialog */}
+      {reviewOpen && (
+        <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Review &ldquo;{preset.name}&rdquo;</DialogTitle>
+              <DialogDescription>
+                Share your experience running this strategy graph with other quantitative researchers.
+              </DialogDescription>
+            </DialogHeader>
+
+            <DialogBody className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-semibold">Rating</span>
+                <div className="flex items-center gap-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setReviewRating(star)}
+                      className="p-1 cursor-pointer transition-transform hover:scale-110"
+                    >
+                      <Star
+                        className={`size-6 ${
+                          star <= reviewRating ? 'fill-gold text-gold' : 'text-muted-foreground/40'
+                        }`}
+                      />
+                    </button>
+                  ))}
+                  <span className="text-xs font-bold text-foreground ml-2">{reviewRating} out of 5 stars</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-semibold">Review Comments</span>
+                <Textarea
+                  rows={4}
+                  value={reviewBody}
+                  onChange={(e) => setReviewBody(e.target.value)}
+                  placeholder="Share details on slippage, market regime performance, or recommended parameter adjustments..."
+                  className="text-xs"
+                />
+              </div>
+            </DialogBody>
+
+            <DialogFooter>
+              <PillButton variant="secondary" onClick={() => setReviewOpen(false)}>
+                Cancel
+              </PillButton>
+              <PillButton onClick={handleSubmitReview} disabled={submittingReview}>
+                {submittingReview ? 'Submitting...' : 'Submit Review'}
+              </PillButton>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Report Preset Dialog */}
       {reportOpen && (

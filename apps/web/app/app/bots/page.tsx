@@ -15,7 +15,6 @@ import {
   Archive,
   ArchiveRestore,
   MoreVertical,
-  Activity,
 } from 'lucide-react'
 import { useWorkspace } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
@@ -44,8 +43,7 @@ import {
 export default function MyBotsPage() {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const localBots = useWorkspace((s) => s.bots)
-  const [bots, setBots] = useState<Bot[]>(localBots)
+  const [bots, setBots] = useState<Bot[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -57,9 +55,8 @@ export default function MyBotsPage() {
     listBots(true)
       .then((remote) => {
         if (!active) return
-        if (remote && remote.length > 0) {
-          setBots(remote)
-        }
+        setBots(remote || [])
+        useWorkspace.setState({ bots: remote || [] })
       })
       .catch((err) => {
         console.error('Failed to load bots:', err)
@@ -209,7 +206,7 @@ export default function MyBotsPage() {
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
-              className={`h-8 px-3 rounded-full text-xs font-medium capitalize transition-colors whitespace-nowrap ${
+              className={`h-8 px-3 rounded-full text-xs font-medium capitalize transition-colors whitespace-nowrap cursor-pointer ${
                 statusFilter === st
                   ? 'bg-brand text-brand-foreground font-semibold'
                   : 'bg-secondary text-muted-foreground hover:text-foreground'
@@ -222,7 +219,11 @@ export default function MyBotsPage() {
       </div>
 
       {/* Bots List */}
-      {filteredBots.length === 0 ? (
+      {loading ? (
+        <div className="p-12 text-center text-xs text-muted-foreground animate-pulse font-mono">
+          Loading trading bots...
+        </div>
+      ) : filteredBots.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-12 text-center border border-dashed border-border rounded-xl">
           <BotIcon className="size-10 text-muted-foreground mb-3" />
           <h3 className="text-base font-semibold">
@@ -231,7 +232,7 @@ export default function MyBotsPage() {
           <p className="text-xs text-muted-foreground max-w-sm mt-1 mb-4">
             {statusFilter === 'archived'
               ? 'You do not have any archived trading bots.'
-              : 'No trading bots match your search criteria. Create a new bot to get started.'}
+              : 'No trading bots in your workspace. Create a new bot to get started.'}
           </p>
           {statusFilter !== 'archived' && (
             <PillButton onClick={handleCreateBot} size="sm">
@@ -350,7 +351,7 @@ export default function MyBotsPage() {
 
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   <Badge variant="outline" size="sm">
-                    {bot.graph?.nodes?.length ?? (bot as any).nodes?.length ?? 0} nodes
+                    {bot.graph?.nodes?.length ?? 0} nodes
                   </Badge>
                   <Badge variant="outline" size="sm">
                     v{bot.versions.length}
@@ -366,14 +367,14 @@ export default function MyBotsPage() {
               <div className="mt-6 pt-4 border-t border-border flex items-center justify-between">
                 <div className="flex flex-col">
                   <span className="text-[10px] uppercase text-muted-foreground tracking-wider font-semibold">
-                    {bot.headlineMetric.label}
+                    {bot.headlineMetric?.label || 'Status'}
                   </span>
                   <span
                     className={`text-sm font-bold ${
-                      bot.headlineMetric.positive ? 'text-profit' : 'text-loss'
+                      bot.headlineMetric?.positive ? 'text-profit' : 'text-loss'
                     }`}
                   >
-                    {bot.headlineMetric.value || 'Not run'}
+                    {bot.headlineMetric?.value || 'Not run'}
                   </span>
                 </div>
 

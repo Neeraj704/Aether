@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -13,10 +13,12 @@ import {
   Layers,
   History,
   Check,
+  RotateCcw,
 } from 'lucide-react'
-import { useWorkspace, useHydrated } from '@/lib/workspace-store'
+import { useWorkspace } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
 import { LAYER_MAP } from '@/mock/layers'
+import type { MyPreset } from '@/mock/data'
 import { Badge } from '@/components/ui/badge'
 import { PillButton } from '@/components/ui/pill-button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -32,24 +34,48 @@ import {
 import { Segmented } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { formatDate } from '@/lib/utils'
+import {
+  getPreset,
+  duplicatePreset as duplicatePresetDB,
+  deletePreset as deletePresetDB,
+  updatePresetMeta,
+  restorePresetVersion,
+} from '@/lib/presets'
+import { createBot as createBotDB } from '@/lib/bots'
 
 export default function PresetDetailPage() {
   const { presetId } = useParams<{ presetId: string }>()
   const router = useRouter()
-  const hydrated = useHydrated()
-  const myPresets = useWorkspace((s) => s.myPresets)
-  const createBotFromPreset = useWorkspace((s) => s.createBotFromPreset)
-  const duplicatePreset = useWorkspace((s) => s.duplicatePreset)
-  const deletePreset = useWorkspace((s) => s.deletePreset)
-  const updatePresetVisibility = useWorkspace((s) => s.updatePresetVisibility)
-
-  const preset = myPresets.find((p) => p.id === presetId)
+  const [preset, setPreset] = useState<MyPreset | null>(null)
+  const [loading, setLoading] = useState(true)
 
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [copiedLink, setCopiedLink] = useState(false)
+  const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null)
 
-  if (!hydrated) {
+  useEffect(() => {
+    let active = true
+    if (!presetId) return
+
+    getPreset(presetId)
+      .then((p) => {
+        if (!active) return
+        setPreset(p)
+      })
+      .catch((err) => {
+        console.error('Failed to load preset:', err)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [presetId])
+
+  if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center p-12 text-xs text-muted-foreground animate-pulse font-mono">
         Loading preset blueprint...
@@ -70,10 +96,66 @@ export default function PresetDetailPage() {
     )
   }
 
-  const handleLoad = () => {
-    const bot = createBotFromPreset(preset.id)
-    toast.success('Strategy Instantiated', `Opening builder canvas for "${bot.name}"...`)
-    router.push(`/app/builder/${bot.id}`)
+  const handleLoad = async () => {
+    try {
+      const bot = await createBotDB({
+        name: `${preset.name} (Instance)`,
+        description: preset.description || 'Created from saved preset.',
+        graph: preset.graph,
+        tags: ['preset', 'custom'],
+      })
+      useWorkspace.getState().saveGraph(bot.id, bot.graph)
+      toast.success('Strategy Instantiated', `Opening builder canvas for "${bot.name}"...`)
+      router.push(`/app/builder/${bot.id}`)
+    } catch (err: any) {
+      toast.error('Failed to instantiate bot', err?.message)
+    }
+  }
+
+  const handleDuplicate = async () => {
+    try {
+      const copy = await duplicatePresetDB(preset.id)
+      toast.success('Preset Duplicated', `Created a copy of ${preset.name}`)
+      router.push(`/app/presets/${copy.id}`)
+    } catch (err: any) {
+      toast.error('Duplication failed', err?.message)
+    }
+  }
+
+  const handleDelete = async () => {
+    try {
+      await deletePresetDB(preset.id)
+      useWorkspace.getState().deletePreset(preset.id)
+      toast.success('Preset Deleted', `${preset.name} has been removed.`)
+      router.push('/app/presets')
+    } catch (err: any) {
+      toast.error('Delete failed', err?.message)
+    }
+  }
+
+  const handleUpdateVisibility = async (visibility: 'private' | 'unlisted' | 'public') => {
+    try {
+      await updatePresetMeta(preset.id, { visibility })
+      setPreset({ ...preset, visibility })
+      useWorkspace.getState().updatePresetVisibility(preset.id, visibility)
+      toast.success('Visibility Updated', `Preset is now ${visibility}.`)
+    } catch (err: any) {
+      toast.error('Visibility update failed', err?.message)
+    }
+  }
+
+  const handleRestoreVersion = async (versionId: string, label: string) => {
+    try {
+      setRestoringVersionId(versionId)
+      await restorePresetVersion(preset.id, versionId)
+      const refreshed = await getPreset(preset.id)
+      if (refreshed) setPreset(refreshed)
+      toast.success('Version Restored', `Restored snapshot ${label}`)
+    } catch (err: any) {
+      toast.error('Restore failed', err?.message)
+    } finally {
+      setRestoringVersionId(null)
+    }
   }
 
   return (
@@ -129,10 +211,7 @@ export default function PresetDetailPage() {
           </PillButton>
           <button
             type="button"
-            onClick={() => {
-              duplicatePreset(preset.id)
-              toast.success('Preset Duplicated', `Created a copy of ${preset.name}`)
-            }}
+            onClick={handleDuplicate}
             className="p-2 rounded-lg border border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
             title="Duplicate preset"
           >
@@ -155,7 +234,7 @@ export default function PresetDetailPage() {
         <div className="lg:col-span-2 flex flex-col gap-5">
           <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-4">
             <h2 className="text-base font-bold flex items-center gap-2">
-              <Layers className="size-4 text-brand" /> Architecture & Layer Composition
+              <Layers className="size-4 text-brand" /> Architecture &amp; Layer Composition
             </h2>
 
             <div className="flex flex-col gap-3 divide-y divide-border">
@@ -200,13 +279,22 @@ export default function PresetDetailPage() {
                 preset.versions.map((ver) => (
                   <div
                     key={ver.id}
-                    className="flex flex-col gap-1 rounded-xl border border-border/80 bg-background/50 p-3.5"
+                    className="flex flex-col gap-2 rounded-xl border border-border/80 bg-background/50 p-3.5"
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-foreground">{ver.label}</span>
                       <span className="text-[10px] text-tertiary">{formatDate(ver.createdAt)}</span>
                     </div>
                     <p className="text-xs text-muted-foreground">{ver.note || 'No notes attached.'}</p>
+                    <div className="pt-1 flex justify-end">
+                      <button
+                        onClick={() => handleRestoreVersion(ver.id, ver.label)}
+                        disabled={restoringVersionId === ver.id}
+                        className="text-[11px] font-semibold text-brand hover:underline inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      >
+                        <RotateCcw className="size-3" /> Restore Snapshot
+                      </button>
+                    </div>
                   </div>
                 ))
               ) : (
@@ -228,11 +316,7 @@ export default function PresetDetailPage() {
           description={`Are you sure you want to permanently delete "${preset.name}"? This action cannot be undone.`}
           confirmLabel="Delete Preset"
           destructive
-          onConfirm={() => {
-            deletePreset(preset.id)
-            toast.success('Preset Deleted', `${preset.name} has been removed.`)
-            router.push('/app/presets')
-          }}
+          onConfirm={handleDelete}
         />
       )}
 
@@ -252,10 +336,7 @@ export default function PresetDetailPage() {
                 <span className="text-xs font-semibold">Visibility Status</span>
                 <Segmented<'private' | 'unlisted' | 'public'>
                   value={preset.visibility}
-                  onValueChange={(val) => {
-                    updatePresetVisibility(preset.id, val)
-                    toast.success('Visibility Updated', `Preset is now ${val}.`)
-                  }}
+                  onValueChange={handleUpdateVisibility}
                   options={[
                     { value: 'private', label: 'Private' },
                     { value: 'unlisted', label: 'Unlisted' },

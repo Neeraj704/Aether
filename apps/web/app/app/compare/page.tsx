@@ -16,7 +16,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import { useWorkspace, useMarketplacePresets } from '@/lib/workspace-store'
+import { useWorkspace } from '@/lib/workspace-store'
 import { BACKTEST_RUNS, type Bot, type BacktestRun, type Preset, type MyPreset } from '@/mock/data'
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
 import { PillButton } from '@/components/ui/pill-button'
@@ -30,6 +30,9 @@ import {
 } from '@/components/ui/dialog'
 import { Segmented } from '@/components/ui/tabs'
 import { cn, formatINR } from '@/lib/utils'
+import { listBots } from '@/lib/bots'
+import { listMyPresets } from '@/lib/presets'
+import { listMarketplace } from '@/lib/marketplace'
 
 interface CompareSlot {
   id: string
@@ -45,14 +48,37 @@ const SLOT_COLORS = ['#2997ff', '#00b8c4', '#ff6ac1', '#ff9f0a']
 
 function CompareContent() {
   const searchParams = useSearchParams()
-  const bots = useWorkspace((s) => s.bots)
   const runs = useWorkspace((s) => s.runs)
-  const myPresets = useWorkspace((s) => s.myPresets)
-  const marketplacePresets = useMarketplacePresets()
+
+  const [bots, setBots] = useState<Bot[]>([])
+  const [myPresets, setMyPresets] = useState<MyPreset[]>([])
+  const [marketplacePresets, setMarketplacePresets] = useState<Preset[]>([])
 
   const [slots, setSlots] = useState<(CompareSlot | null)[]>([null, null, null, null])
   const [activeSlotIdx, setActiveSlotIdx] = useState<number | null>(null)
   const [pickerTab, setPickerTab] = useState<'bots' | 'runs' | 'presets'>('bots')
+
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      listBots(true),
+      listMyPresets(),
+      listMarketplace(),
+    ])
+      .then(([b, p, m]) => {
+        if (!active) return
+        setBots(b)
+        setMyPresets(p)
+        setMarketplacePresets(m)
+      })
+      .catch((err) => {
+        console.error('Error fetching compare data:', err)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
 
   // Pre-fill run from query param on mount
   useEffect(() => {
@@ -127,7 +153,6 @@ function CompareContent() {
     })
   }, [activeSlots])
 
-  // Diff calculations for Bot vs Bot
   const botSlots = activeSlots.filter((s) => s.bot)
 
   return (
@@ -135,7 +160,7 @@ function CompareContent() {
       {/* Header */}
       <div className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-r from-brand/10 via-secondary/40 to-background p-6 sm:p-8 flex flex-col gap-2">
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand">
-          <GitCompareArrows className="size-3.5" /> Strategy Overlay & Differential Analysis
+          <GitCompareArrows className="size-3.5" /> Strategy Overlay &amp; Differential Analysis
         </div>
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
           Strategy Compare Engine
@@ -404,10 +429,10 @@ function CompareContent() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="rounded-xl border border-border/80 bg-background/50 p-4 flex flex-col gap-2">
                   <span className="text-xs font-bold text-foreground">
-                    Nodes in {botSlots[0].title} ({(botSlots[0].bot?.graph?.nodes ?? (botSlots[0].bot as any)?.nodes ?? []).length})
+                    Nodes in {botSlots[0].title} ({(botSlots[0].bot?.graph?.nodes ?? []).length})
                   </span>
                   <div className="flex flex-wrap gap-1.5">
-                    {(botSlots[0].bot?.graph?.nodes ?? (botSlots[0].bot as any)?.nodes ?? []).map((n: any) => (
+                    {(botSlots[0].bot?.graph?.nodes ?? []).map((n: any) => (
                       <Badge key={n.id} variant="neutral" size="sm">
                         {n.componentId}
                       </Badge>
@@ -417,10 +442,10 @@ function CompareContent() {
 
                 <div className="rounded-xl border border-border/80 bg-background/50 p-4 flex flex-col gap-2">
                   <span className="text-xs font-bold text-foreground">
-                    Nodes in {botSlots[1].title} ({(botSlots[1].bot?.graph?.nodes ?? (botSlots[1].bot as any)?.nodes ?? []).length})
+                    Nodes in {botSlots[1].title} ({(botSlots[1].bot?.graph?.nodes ?? []).length})
                   </span>
                   <div className="flex flex-wrap gap-1.5">
-                    {(botSlots[1].bot?.graph?.nodes ?? (botSlots[1].bot as any)?.nodes ?? []).map((n: any) => (
+                    {(botSlots[1].bot?.graph?.nodes ?? []).map((n: any) => (
                       <Badge key={n.id} variant="neutral" size="sm">
                         {n.componentId}
                       </Badge>
@@ -465,7 +490,7 @@ function CompareContent() {
                           id: b.id,
                           kind: 'bot',
                           title: b.name,
-                          subtitle: `${b.status} · ${b.graph?.nodes?.length ?? (b as any).nodes?.length ?? 0} nodes`,
+                          subtitle: `${b.status} · ${b.graph?.nodes?.length ?? 0} nodes`,
                           bot: b,
                         })
                       }
@@ -473,7 +498,7 @@ function CompareContent() {
                     >
                       <div className="flex flex-col">
                         <span className="text-xs font-bold text-foreground">{b.name}</span>
-                        <span className="text-[11px] text-muted-foreground">{b.graph?.nodes?.length ?? (b as any).nodes?.length ?? 0} nodes · {b.status}</span>
+                        <span className="text-[11px] text-muted-foreground">{b.graph?.nodes?.length ?? 0} nodes · {b.status}</span>
                       </div>
                       <PillButton size="sm" variant="secondary">
                         Select

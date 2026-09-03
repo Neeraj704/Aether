@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -9,34 +9,35 @@ import {
   AlertTriangle,
   LineChart,
 } from 'lucide-react'
-import { useWorkspace, useHydrated } from '@/lib/workspace-store'
+import { useWorkspace } from '@/lib/workspace-store'
 import { useSession, toast } from '@/lib/store'
-import { CURRENT_USER, type Preset, type PublishedPreset } from '@/mock/data'
-import { COMPONENT_MAP, type LayerId } from '@/mock/layers'
-import { cloneGraph } from '@/lib/graph-utils'
+import type { Bot, BacktestRun } from '@/mock/data'
 import { PillButton, PillLink } from '@/components/ui/pill-button'
 import { Input, Textarea, Field } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
-import { slugId } from '@/lib/utils'
+import { getBot } from '@/lib/bots'
+import { createPreset } from '@/lib/presets'
+import { publishPreset } from '@/lib/marketplace'
 
 export default function PublishWizardPage() {
   const { botId } = useParams<{ botId: string }>()
   const router = useRouter()
-  const hydrated = useHydrated()
-  const bots = useWorkspace((s) => s.bots)
-  const runs = useWorkspace((s) => s.runs).filter((r) => r.botId === botId)
-  const publishPreset = useWorkspace((s) => s.publishPreset)
   const plan = useSession((s) => s.plan)
 
-  const bot = bots.find((b) => b.id === botId)
+  const [bot, setBot] = useState<Bot | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [publishing, setPublishing] = useState(false)
+
+  const workspaceRuns = useWorkspace((s) => s.runs).filter((r) => r.botId === botId)
+  const [runs, setRuns] = useState<BacktestRun[]>(workspaceRuns)
 
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
 
   // Step 1: Info
-  const [name, setName] = useState(bot?.name || '')
-  const [tagline, setTagline] = useState(bot?.description?.slice(0, 80) || '')
-  const [description, setDescription] = useState(bot?.description || '')
+  const [name, setName] = useState('')
+  const [tagline, setTagline] = useState('')
+  const [description, setDescription] = useState('')
 
   // Step 2: Pricing
   const [pricingType, setPricingType] = useState<'free' | 'paid'>('free')
@@ -44,12 +45,43 @@ export default function PublishWizardPage() {
 
   // Step 3: Categorization
   const [category, setCategory] = useState('Momentum')
-  const [tagsInput, setTagsInput] = useState(bot?.tags.join(', ') || 'equities, intraday')
+  const [tagsInput, setTagsInput] = useState('equities, intraday')
 
   // Step 4: Backtest proof
-  const [selectedRunId, setSelectedRunId] = useState(runs[0]?.id || '')
+  const [selectedRunId, setSelectedRunId] = useState('')
 
-  if (!hydrated || !bot) {
+  useEffect(() => {
+    let active = true
+    if (!botId) return
+
+    getBot(botId)
+      .then((b) => {
+        if (!active || !b) return
+        setBot(b)
+        setName(b.name)
+        setTagline(b.description?.slice(0, 80) || 'Quantitative algorithmic strategy')
+        setDescription(b.description || '')
+        setTagsInput(b.tags?.join(', ') || 'equities, intraday')
+      })
+      .catch((err) => {
+        console.error('Error fetching bot for publish:', err)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [botId])
+
+  useEffect(() => {
+    if (runs.length > 0 && !selectedRunId) {
+      setSelectedRunId(runs[0].id)
+    }
+  }, [runs, selectedRunId])
+
+  if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center p-12 text-xs text-muted-foreground animate-pulse font-mono">
         Loading strategy for publishing...
@@ -57,92 +89,55 @@ export default function PublishWizardPage() {
     )
   }
 
-  // Pre-condition backtest proof gate
-  if (runs.length === 0) {
+  if (!bot) {
     return (
-      <div className="flex flex-col items-center justify-center p-12 max-w-lg mx-auto text-center gap-5">
-        <div className="flex size-14 items-center justify-center rounded-2xl bg-warn/10 text-warn border border-warn/30">
-          <AlertTriangle className="size-7" />
-        </div>
-        <div className="flex flex-col gap-2">
-          <h1 className="text-xl font-bold">Backtest Verification Required</h1>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            All strategies published to the Aether Marketplace must include at least one verified historical backtest run to prove quantitative performance and risk metrics.
-          </p>
-        </div>
-        <div className="flex items-center gap-3 pt-2">
-          <PillButton variant="secondary" onClick={() => router.push(`/app/bots/${bot.id}`)}>
-            &larr; Back to Bot
-          </PillButton>
-          <PillLink href={`/app/bots/${bot.id}/backtest`}>
-            <LineChart className="size-3.5 mr-1" /> Run Backtest First
-          </PillLink>
-        </div>
+      <div className="flex flex-col items-center justify-center p-12 text-center gap-4">
+        <h2 className="text-lg font-bold">Bot not found</h2>
+        <PillButton onClick={() => router.push('/app/bots')}>
+          &larr; Back to Bots
+        </PillButton>
       </div>
     )
   }
 
   const selectedRun = runs.find((r) => r.id === selectedRunId) || runs[0]
 
-  const handlePublish = () => {
-    const presetId = slugId('preset')
-    const finalPrice = pricingType === 'paid' ? parseInt(price) || 0 : 0
+  const handlePublish = async () => {
+    try {
+      setPublishing(true)
+      const finalPrice = pricingType === 'paid' ? parseInt(price) || 0 : 0
+      const tags = tagsInput
+        .split(',')
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean)
 
-    const publishedItem: PublishedPreset = {
-      id: presetId,
-      name: name.trim() || bot.name,
-      clones: 0,
-      revenue: 0,
-      rating: 5.0,
-      reviews: 0,
-      publishedAt: new Date().toISOString(),
-      price: finalPrice,
-      graph: cloneGraph(bot.graph),
+      // 1. Create a base preset from the bot's current graph
+      const newPreset = await createPreset({
+        name: name.trim() || bot.name,
+        description: description.trim() || bot.description,
+        graph: bot.graph,
+        visibility: 'public',
+      })
+
+      // 2. Publish the preset to the marketplace
+      const listing = await publishPreset(newPreset.id, {
+        tagline: tagline.trim() || bot.description.slice(0, 80) || 'Quantitative trading strategy',
+        description: description.trim() || bot.description || 'Systematic strategy for automated execution.',
+        authorNotes: 'Published from Aether Strategy Studio.',
+        category: category || 'Momentum',
+        tags,
+        price: finalPrice,
+        tier: plan === 'pro' ? 'pro' : 'free',
+        sampleRunId: selectedRun?.id || undefined,
+      })
+
+      toast.success('Strategy Published!', `"${listing.name}" is now live on the community marketplace.`)
+      router.push('/app/creator/dashboard')
+    } catch (err: any) {
+      toast.error('Publishing failed', err?.message || 'Could not publish preset.')
+    } finally {
+      setPublishing(false)
     }
-
-    const uniqueLayers = Array.from(
-      new Set(
-        bot.graph.nodes
-          .map((n) => COMPONENT_MAP[n.componentId]?.layer)
-          .filter((l): l is LayerId => Boolean(l)),
-      ),
-    )
-
-    const marketplaceItem: Preset = {
-      id: presetId,
-      name: name.trim() || bot.name,
-      tagline: tagline.trim() || bot.description.slice(0, 80) || 'Quantitative trading strategy',
-      description: description.trim() || bot.description || 'Systematic strategy for automated execution.',
-      authorNotes: 'Published from Aether Strategy Studio.',
-      author: {
-        name: CURRENT_USER.name,
-        initials: CURRENT_USER.initials,
-        handle: `@${CURRENT_USER.name.toLowerCase().replace(/\s+/g, '')}`,
-      },
-      price: finalPrice,
-      forks: 0,
-      rating: 5.0,
-      reviewCount: 0,
-      layers: uniqueLayers,
-      nodeCount: bot.graph.nodes.length,
-      tier: plan === 'pro' ? 'pro' : 'free',
-      headline: {
-        label: 'Verified Return',
-        value: `+${selectedRun?.metrics.totalReturn ?? 0}%`,
-        positive: (selectedRun?.metrics.totalReturn ?? 0) >= 0,
-      },
-      createdAt: new Date().toISOString(),
-      category: category || 'Momentum',
-      tags: tagsInput.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean),
-      graph: cloneGraph(bot.graph),
-      reviews: [],
-      sampleRunId: selectedRun.id,
-      trending: true,
-    }
-
-    publishPreset(publishedItem, marketplaceItem)
-    toast.success('Strategy Published!', `"${publishedItem.name}" is now live on the community marketplace.`)
-    router.push('/app/creator/dashboard')
   }
 
   return (
@@ -326,37 +321,46 @@ export default function PublishWizardPage() {
         <div className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 animate-in fade-in duration-200">
           <h2 className="text-base font-bold">4. Verified Simulation Proof</h2>
           <p className="text-xs text-muted-foreground">
-            Select the backtest run that will be publicly displayed on the preset&apos;s verified showcase page.
+            Attach verified backtest proof if available, or proceed with graph blueprint verification.
           </p>
 
-          <div className="flex flex-col gap-2.5 max-h-60 overflow-y-auto">
-            {runs.map((r) => {
-              const isSelected = selectedRunId === r.id
-              return (
-                <div
-                  key={r.id}
-                  onClick={() => setSelectedRunId(r.id)}
-                  className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${
-                    isSelected
-                      ? 'border-brand bg-brand/10 ring-1 ring-brand/30'
-                      : 'border-border bg-background/50 hover:bg-secondary/40'
-                  }`}
-                >
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-foreground">
-                      Run {r.id} · {r.config.type}
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      Sharpe {r.metrics.sharpe} · Win Rate {r.metrics.winRate}% · DD {r.metrics.maxDrawdown}%
+          {runs.length === 0 ? (
+            <div className="p-4 rounded-xl border border-border bg-secondary/30 text-xs text-muted-foreground flex flex-col gap-2">
+              <span>No prior backtest runs recorded yet for this strategy. The marketplace listing will be tagged as &ldquo;Blueprint Ready&rdquo;.</span>
+              <PillLink href={`/app/bots/${bot.id}/backtest`} size="sm" variant="secondary" className="self-start">
+                <LineChart className="size-3.5 mr-1" /> Run Backtest Now
+              </PillLink>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2.5 max-h-60 overflow-y-auto">
+              {runs.map((r) => {
+                const isSelected = selectedRunId === r.id
+                return (
+                  <div
+                    key={r.id}
+                    onClick={() => setSelectedRunId(r.id)}
+                    className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'border-brand bg-brand/10 ring-1 ring-brand/30'
+                        : 'border-border bg-background/50 hover:bg-secondary/40'
+                    }`}
+                  >
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-foreground">
+                        Run {r.id} · {r.config.type}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        Sharpe {r.metrics.sharpe} · Win Rate {r.metrics.winRate}% · DD {r.metrics.maxDrawdown}%
+                      </span>
+                    </div>
+                    <span className="text-xs font-bold text-profit">
+                      +{r.metrics.totalReturn}%
                     </span>
                   </div>
-                  <span className="text-xs font-bold text-profit">
-                    +{r.metrics.totalReturn}%
-                  </span>
-                </div>
-              )
-            })}
-          </div>
+                )
+              })}
+            </div>
+          )}
 
           <div className="flex items-center justify-between pt-2">
             <PillButton variant="secondary" onClick={() => setStep(3)}>
@@ -385,16 +389,16 @@ export default function PublishWizardPage() {
 
             <div className="grid grid-cols-3 gap-2 border-t border-border/60 pt-3 text-center text-xs">
               <div className="flex flex-col">
-                <span className="text-muted-foreground text-[10px]">Verified Return</span>
-                <span className="font-bold text-profit">+{selectedRun?.metrics.totalReturn}%</span>
+                <span className="text-muted-foreground text-[10px]">Nodes</span>
+                <span className="font-bold">{bot.graph?.nodes?.length || 0}</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-muted-foreground text-[10px]">Sharpe</span>
-                <span className="font-bold">{selectedRun?.metrics.sharpe}</span>
+                <span className="text-muted-foreground text-[10px]">Category</span>
+                <span className="font-bold">{category}</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-muted-foreground text-[10px]">Max DD</span>
-                <span className="font-bold text-loss">{selectedRun?.metrics.maxDrawdown}%</span>
+                <span className="text-muted-foreground text-[10px]">Status</span>
+                <span className="font-bold text-profit">Public Listing</span>
               </div>
             </div>
           </div>
@@ -403,8 +407,13 @@ export default function PublishWizardPage() {
             <PillButton variant="secondary" onClick={() => setStep(4)}>
               &larr; Back
             </PillButton>
-            <PillButton onClick={handlePublish} className="gap-2 shadow-lg shadow-brand/20">
-              <Globe className="size-4" /> Publish to Community Marketplace
+            <PillButton
+              onClick={handlePublish}
+              disabled={publishing}
+              className="gap-2 shadow-lg shadow-brand/20"
+            >
+              <Globe className="size-4" />
+              {publishing ? 'Publishing...' : 'Publish to Community Marketplace'}
             </PillButton>
           </div>
         </div>

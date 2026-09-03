@@ -9,6 +9,7 @@ import { CommandPalette } from '@/components/app/command-palette'
 import { useSession } from '@/lib/store'
 import { Skeleton } from '@/components/ui/skeleton'
 import { createClient } from '@/lib/supabase/client'
+import { getBillingState } from '@/lib/billing'
 
 function FullPageSkeleton() {
   return (
@@ -66,6 +67,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
         syncUserSession(user)
+        getBillingState().then((bState) => {
+          if (bState) {
+            if (bState.plan) useSession.getState().setPlan(bState.plan)
+            if (typeof bState.creditBalance === 'number') useSession.getState().setCredits(bState.creditBalance)
+          }
+        }).catch(() => {})
       } else {
         syncUserSession(null)
         router.replace('/login')
@@ -79,6 +86,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
         syncUserSession(session.user)
+        getBillingState().then((bState) => {
+          if (bState) {
+            if (bState.plan) useSession.getState().setPlan(bState.plan)
+            if (typeof bState.creditBalance === 'number') useSession.getState().setCredits(bState.creditBalance)
+          }
+        }).catch(() => {})
       } else if (event === 'SIGNED_OUT') {
         syncUserSession(null)
         router.replace('/login')

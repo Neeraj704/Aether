@@ -100,7 +100,7 @@ export default function PaymentMethodsPage() {
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-bold">Saved Payment Methods</h2>
-            <p className="text-xs text-muted-foreground">Used for monthly plan renewals and instant credit top-ups</p>
+            <p className="text-xs text-muted-foreground">Stored securely with Razorpay for monthly plan renewals and instant credit top-ups</p>
           </div>
 
           <PillButton onClick={() => setAddOpen(true)} className="gap-2 shadow-lg shadow-brand/20">

@@ -1,19 +1,49 @@
 'use client'
 
-import { useState } from 'react'
-import { Download } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Download, Receipt } from 'lucide-react'
 import { INVOICES, type Invoice } from '@/mock/data'
-import { toast } from '@/lib/store'
+import { toast, useSession } from '@/lib/store'
 import { BillingNav } from '@/components/billing/billing-nav'
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Segmented } from '@/components/ui/tabs'
 import { formatDate, formatINR } from '@/lib/utils'
+import { getBillingState, type BillingPayment } from '@/lib/billing'
 
 export default function BillingHistoryPage() {
+  const profile = useSession((s) => s.profile)
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [payments, setPayments] = useState<BillingPayment[]>([])
+  const [loading, setLoading] = useState(true)
 
-  const filteredInvoices = INVOICES.filter((inv) => {
+  useEffect(() => {
+    getBillingState()
+      .then((res) => {
+        if (res && res.payments && res.payments.length > 0) {
+          setPayments(res.payments)
+        }
+      })
+      .finally(() => setLoading(false))
+  }, [])
+
+  // Combine real database payments with initial fallback seed invoices
+  const combinedInvoices: Invoice[] = [
+    ...payments.map((p) => ({
+      id: p.paymentId || p.orderId,
+      date: p.createdAt,
+      description:
+        p.kind === 'subscription'
+          ? `AETHER Pro Subscription (${formatINR(p.amount)})`
+          : `Simulation Credits Top-up (${formatINR(p.amount)})`,
+      amount: p.amount,
+      status: (p.status === 'created' ? 'pending' : p.status) as 'paid' | 'pending' | 'failed' | 'refunded',
+      pdfUrl: '#',
+    })),
+    ...(payments.length === 0 ? INVOICES : []),
+  ]
+
+  const filteredInvoices = combinedInvoices.filter((inv) => {
     return statusFilter === 'all' || inv.status === statusFilter
   })
 
@@ -29,9 +59,9 @@ Payment Status : ${inv.status.toUpperCase()}
 GSTIN          : 27AABCA1234F1Z5
 SAC Code       : 998313 (IT Software & SaaS)
 ------------------------------------------------
-Customer Name  : Neeraj Sharma
-Email          : arjun@aether.dev
-Workspace ID   : ws_live_0942
+Customer Name  : ${profile.name || 'Aether Trader'}
+Email          : ${profile.email || 'trader@aether.dev'}
+Workspace ID   : ws_live_${inv.id.slice(-6)}
 ------------------------------------------------
 Thank you for building systematic algorithms with Aether.
 Support: support@aether.dev | https://aether.dev
@@ -67,14 +97,14 @@ Support: support@aether.dev | https://aether.dev
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-bold">Past Invoices & Receipts</h2>
-            <p className="text-xs text-muted-foreground">All transactions billed to your default payment methods</p>
+            <p className="text-xs text-muted-foreground">All transactions billed via Razorpay Checkout</p>
           </div>
 
           <Segmented<string>
             value={statusFilter}
             onValueChange={setStatusFilter}
             options={[
-              { value: 'all', label: `All (${INVOICES.length})` },
+              { value: 'all', label: `All (${combinedInvoices.length})` },
               { value: 'paid', label: 'Paid' },
               { value: 'pending', label: 'Pending' },
               { value: 'refunded', label: 'Refunded' },
@@ -87,7 +117,7 @@ Support: support@aether.dev | https://aether.dev
           <Table>
             <THead>
               <TR>
-                <TH className="pl-4">Invoice ID</TH>
+                <TH className="pl-4">Invoice / Order ID</TH>
                 <TH>Date</TH>
                 <TH>Description</TH>
                 <TH>Amount</TH>

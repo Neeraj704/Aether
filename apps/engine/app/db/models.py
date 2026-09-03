@@ -176,3 +176,47 @@ class LiveEquityPointModel(Base):
 
     session = relationship("LiveSessionModel", back_populates="equity_points")
 
+class SubscriptionModel(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
+    plan = Column(String, nullable=False, default="free")
+    status = Column(String, nullable=False, default="active")
+    razorpay_subscription_id = Column(Text, nullable=True)
+    razorpay_customer_id = Column(Text, nullable=True)
+    current_period_end = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+class CreditWalletModel(Base):
+    __tablename__ = "credit_wallets"
+
+    user_id = Column(UUID(as_uuid=True), primary_key=True, nullable=False)
+    balance = Column(Numeric, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+class CreditTransactionModel(Base):
+    __tablename__ = "credit_transactions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    amount = Column(Numeric, nullable=False)
+    reason = Column(Text, nullable=False)
+    razorpay_payment_id = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+class PaymentModel(Base):
+    __tablename__ = "payments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    razorpay_order_id = Column(Text, nullable=False, index=True)
+    razorpay_payment_id = Column(Text, nullable=True)
+    razorpay_signature = Column(Text, nullable=True)
+    amount = Column(Numeric, nullable=False)
+    currency = Column(String, nullable=False, default="INR")
+    kind = Column(String, nullable=False)  # 'subscription', 'credit_topup'
+    status = Column(String, nullable=False, default="created")  # 'created', 'paid', 'failed'
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+

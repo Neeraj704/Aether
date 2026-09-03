@@ -5,7 +5,7 @@ from sqlalchemy import select
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from .config import settings
-from .routers import health, validate, backtest, live
+from .routers import health, validate, backtest, live, billing
 from .db.session import AsyncSessionLocal
 from .db.models import LiveSessionModel
 from .engine.live_runner import set_scheduler, register_bot_job
@@ -69,6 +69,7 @@ app.include_router(health.router)
 app.include_router(validate.router)
 app.include_router(backtest.router)
 app.include_router(live.router)
+app.include_router(billing.router)
 
 @app.get("/health")
 def root_health():

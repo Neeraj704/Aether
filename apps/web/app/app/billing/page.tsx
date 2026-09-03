@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { Check } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Check, Loader2 } from 'lucide-react'
 import { useSession, toast } from '@/lib/store'
 import { useWorkspace } from '@/lib/workspace-store'
 import { TierBadge } from '@/components/ui/badge'
@@ -10,7 +10,8 @@ import { PLANS } from '@/mock/data'
 import type { PlanTier } from '@/mock/layers'
 import { BillingNav } from '@/components/billing/billing-nav'
 import { PlanComparisonMatrix } from '@/components/billing/plan-comparison'
-import { cn, formatINR } from '@/lib/utils'
+import { cn, formatDate, formatINR } from '@/lib/utils'
+import { getBillingState, startCheckout, type BillingState } from '@/lib/billing'
 
 export default function BillingPlansPage() {
   const plan = useSession((s) => s.plan)
@@ -19,22 +20,62 @@ export default function BillingPlansPage() {
   const pushNotification = useWorkspace((s) => s.pushNotification)
 
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly')
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null)
+  const [billingState, setBillingState] = useState<BillingState | null>(null)
 
-  const handlePlanChange = (targetPlan: PlanTier) => {
-    setPlan(targetPlan)
-    pushActivity({
-      kind: 'payment',
-      title: `Switched plan to ${targetPlan.toUpperCase()}`,
-      detail: `Workspace subscription updated to ${targetPlan} tier`,
-      href: '/app/billing',
+  useEffect(() => {
+    getBillingState().then((res) => {
+      if (res) {
+        setBillingState(res)
+        if (res.plan) setPlan(res.plan)
+      }
     })
-    pushNotification({
-      kind: 'payment',
-      title: `Plan upgraded · ${targetPlan.toUpperCase()}`,
-      body: `Your workspace subscription has been updated to ${targetPlan.toUpperCase()}.`,
-      href: '/app/billing',
-    })
-    toast.success('Plan Updated', `Your workspace is now on the ${targetPlan.toUpperCase()} plan.`)
+  }, [setPlan])
+
+  const handlePlanChange = async (targetPlan: PlanTier) => {
+    if (targetPlan === 'free') {
+      // Downgrade confirmation
+      setPlan('free')
+      toast.success('Plan Changed', 'Your subscription will downgrade to Free at the end of the billing period.')
+      return
+    }
+
+    setLoadingPlan(targetPlan)
+    try {
+      await startCheckout({
+        kind: 'subscription',
+        plan: targetPlan,
+        cycle: billingCycle,
+        onSuccess: (newState) => {
+          setBillingState(newState)
+          setPlan(newState.plan)
+          pushActivity({
+            kind: 'payment',
+            title: `Upgraded to ${targetPlan.toUpperCase()} Plan`,
+            detail: `Workspace subscription updated to ${targetPlan} tier (${billingCycle})`,
+            href: '/app/billing',
+          })
+          pushNotification({
+            kind: 'payment',
+            title: `Plan upgraded · ${targetPlan.toUpperCase()}`,
+            body: `Your workspace subscription has been updated to ${targetPlan.toUpperCase()}.`,
+            href: '/app/billing',
+          })
+          toast.success('Plan Upgraded!', `Welcome to AETHER ${targetPlan.toUpperCase()}.`)
+        },
+        onError: (err) => {
+          if (!err.message?.includes('cancelled')) {
+            toast.error('Payment Failed', err.message || 'Could not complete subscription upgrade.')
+          }
+        },
+      })
+    } catch (err: any) {
+      if (!err.message?.includes('cancelled')) {
+        toast.error('Checkout Error', err.message || 'Unable to launch checkout.')
+      }
+    } finally {
+      setLoadingPlan(null)
+    }
   }
 
   const subscriptionPlans = PLANS.filter((p) => p.id !== 'payg')
@@ -53,6 +94,11 @@ export default function BillingPlansPage() {
           <div className="flex flex-col text-right">
             <span className="text-[11px] text-muted-foreground uppercase font-semibold">Active Plan</span>
             <span className="text-sm font-bold capitalize text-brand">{plan} Tier</span>
+            {billingState?.currentPeriodEnd && (
+              <span className="text-[10px] text-muted-foreground">
+                Renews {formatDate(billingState.currentPeriodEnd)}
+              </span>
+            )}
           </div>
           <TierBadge tier={plan} size="lg" />
         </div>
@@ -95,6 +141,7 @@ export default function BillingPlansPage() {
           {subscriptionPlans.map((p) => {
             const isCurrent = plan === p.id
             const price = billingCycle === 'annual' ? Math.round(p.annual / 12) : p.monthly
+            const isLoading = loadingPlan === p.id
 
             return (
               <div
@@ -144,9 +191,18 @@ export default function BillingPlansPage() {
                     <PillButton
                       onClick={() => handlePlanChange(p.id as PlanTier)}
                       variant={p.id === 'pro' ? 'primary' : 'secondary'}
-                      className="w-full justify-center"
+                      disabled={Boolean(loadingPlan)}
+                      className="w-full justify-center gap-2"
                     >
-                      {p.id === 'free' ? 'Downgrade to Free' : `Upgrade to ${p.name}`}
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="size-4 animate-spin" /> Processing...
+                        </>
+                      ) : p.id === 'free' ? (
+                        'Downgrade to Free'
+                      ) : (
+                        `Upgrade to ${p.name}`
+                      )}
                     </PillButton>
                   )}
                 </div>

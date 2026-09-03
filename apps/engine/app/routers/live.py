@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..deps import get_current_user_id
 from ..db.session import get_db
-from ..db.models import BotModel, LiveSessionModel, LiveTradeModel, LiveEquityPointModel
+from ..db.models import BotModel, LiveSessionModel, LiveTradeModel, LiveEquityPointModel, SubscriptionModel
 from ..schemas.graph import BotGraph
 from ..graph.validate import validate_bot_graph
 from ..engine.live_runner import (
@@ -79,6 +79,42 @@ async def start_live_session(
         raise HTTPException(
             status_code=400,
             detail=f"Cannot promote bot to live: graph validation failed. Reasons: {'; '.join(error_msgs)}",
+        )
+
+    # 2.5 Check plan entitlements for concurrent live bots
+    sub_res = await db.execute(
+        select(SubscriptionModel).where(SubscriptionModel.user_id == user_uuid)
+    )
+    sub = sub_res.scalars().first()
+    user_plan = (sub.plan if sub and sub.status == "active" else "free").lower()
+
+    LIVE_PLAN_LIMITS = {
+        "free": 0,
+        "starter": 1,
+        "pro": 5,
+        "elite": 5,
+    }
+    max_live_bots = LIVE_PLAN_LIMITS.get(user_plan, 0)
+
+    # Query active running sessions for this user
+    active_res = await db.execute(
+        select(LiveSessionModel.id).where(
+            LiveSessionModel.user_id == user_uuid,
+            LiveSessionModel.status == "running",
+            LiveSessionModel.bot_id != bot_uuid,
+        )
+    )
+    running_count = len(active_res.scalars().all())
+
+    if running_count >= max_live_bots:
+        if max_live_bots == 0:
+            raise HTTPException(
+                status_code=403,
+                detail="Live trading requires an active Starter or Pro subscription. Please upgrade to run live bots.",
+            )
+        raise HTTPException(
+            status_code=403,
+            detail=f"Your {user_plan.capitalize()} plan limit ({max_live_bots} live bot{'s' if max_live_bots > 1 else ''}) has been reached. Please upgrade to Pro for up to 5 concurrent live bots.",
         )
 
     # 3. Create live session (enforces single active session via DB partial unique index)

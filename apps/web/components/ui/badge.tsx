@@ -16,6 +16,7 @@ const badgeVariants = cva(
         warning: 'border-warn/25 bg-warn/12 text-warn',
         locked: 'border-locked/25 bg-locked/12 text-locked',
         gold: 'border-gold/30 bg-gold/12 text-gold',
+        purple: 'border-purple-500/30 bg-purple-500/15 text-purple-400',
         outline: 'border-border bg-transparent text-muted-foreground',
       },
       size: {
@@ -78,6 +79,7 @@ const TIER_MAP: Record<PlanTier, { label: string; variant: VariantProps<typeof b
   free: { label: 'Free', variant: 'outline' },
   starter: { label: 'Starter', variant: 'brand' },
   pro: { label: 'Pro', variant: 'gold' },
+  elite: { label: 'Elite', variant: 'purple' },
 }
 
 export function TierBadge({

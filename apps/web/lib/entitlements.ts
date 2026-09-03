@@ -1,18 +1,18 @@
 import { COMPONENT_MAP, type ComponentDef, type PlanTier } from '@/mock/layers'
 
-export const TIER_RANK: Record<PlanTier, number> = { free: 0, starter: 1, pro: 2 }
+export const TIER_RANK: Record<PlanTier, number> = { free: 0, starter: 1, pro: 2, elite: 3 }
 
 /** Node-count ceiling per plan, surfaced in the Builder header and paywalls. */
-export const NODE_LIMIT: Record<PlanTier, number> = { free: 8, starter: 25, pro: Infinity }
+export const NODE_LIMIT: Record<PlanTier, number> = { free: 8, starter: 25, pro: Infinity, elite: Infinity }
 
 /** Concurrent live bots allowed per plan. */
-export const LIVE_LIMIT: Record<PlanTier, number> = { free: 0, starter: 1, pro: 5 }
+export const LIVE_LIMIT: Record<PlanTier, number> = { free: 0, starter: 1, pro: 5, elite: 10 }
 
 /** Monthly simulation credit grant per plan. */
-export const CREDIT_GRANT: Record<PlanTier, number> = { free: 20, starter: 120, pro: 400 }
+export const CREDIT_GRANT: Record<PlanTier, number> = { free: 20, starter: 120, pro: 400, elite: 1000 }
 
 /** Monthly backtest simulation runs allowed per plan. */
-export const MONTHLY_BACKTEST_LIMIT: Record<PlanTier, number> = { free: 10, starter: 150, pro: Infinity }
+export const MONTHLY_BACKTEST_LIMIT: Record<PlanTier, number> = { free: 10, starter: 150, pro: Infinity, elite: Infinity }
 
 export interface Access {
   plan: PlanTier

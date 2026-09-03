@@ -210,13 +210,6 @@ async def verify_payment(
             payload.razorpay_signature,
         )
 
-    # In test environments with simulated sandbox checkout signatures, allow if test prefix matches
-    if not valid and (
-        payload.razorpay_order_id.startswith("order_test_") or
-        settings.RAZORPAY_KEY_ID.startswith("rzp_test_")
-    ):
-        valid = True
-
     if not valid:
         payment.status = "failed"
         await db.commit()

@@ -7,7 +7,7 @@ export type PortType =
   | 'ExecutionOrder'
   | 'TradeOutcome'
 
-export type PlanTier = 'free' | 'starter' | 'pro'
+export type PlanTier = 'free' | 'starter' | 'pro' | 'elite'
 
 export type LayerId =
   | 'data'
@@ -2234,6 +2234,7 @@ export const TIER_LABEL: Record<PlanTier, string> = {
   free: 'Free',
   starter: 'Starter',
   pro: 'Pro',
+  elite: 'Elite',
 }
 
 /** Structural rules surfaced by the Validate button. */

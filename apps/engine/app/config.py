@@ -1,8 +1,14 @@
 import os
 from typing import List
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load from engine root .env or cwd .env
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(dotenv_path=_env_path)
+else:
+    load_dotenv()
 
 class Settings:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres")

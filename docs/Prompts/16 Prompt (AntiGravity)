@@ -1,0 +1,108 @@
+# AETHER — Phase 13: Billing, Entitlements & Razorpay Integration
+
+> Phase 12 verified clean — genuinely solid work, no corrections needed. Bounded, single-phase prompt. Do not touch auth, bots, live trading, or presets/marketplace — all done. Audit first, as always.
+
+## 0. Context
+
+`useSession.plan` (`lib/store.ts`) and `lib/entitlements.ts` currently gate features (paid preset publishing, component unlocks, plan-limited bot counts) off a **client-only, self-reported** plan string with no payment behind it. `/app/billing/*` (plans, credits, topup, history, payment-methods) is fully mock. This phase makes plan/credit state real, backend-enforced, and wires actual Razorpay checkout. This is the highest-risk phase so far — it involves money and must be server-verified, not client-trusted.
+
+**Critical rule:** the frontend must never be the source of truth for what plan a user has or how many credits they hold. Every entitlement check that currently reads `useSession.plan` client-side for anything consequential (blocking a paid action, not just UI display) must be re-verified server-side at the point of use.
+
+## 1. Audit first
+Read: `lib/entitlements.ts` (every check it does), `lib/store.ts` (`useSession.plan`/`credits`), `app/app/billing/**/*.tsx` (all 5 pages), `components/billing/plan-comparison.tsx`, `components/builder/unlock-dialog.tsx` (component-unlock gating), the publish wizard's Pro-tier check (Phase 12, Step 2 pricing — `plan !== 'pro'` gate), `docs/01 - Product Vision & Stratergy` pricing section for the actual plan tiers/prices/credit costs intended. Confirm Razorpay isn't already partially wired anywhere (`grep -rn razorpay`).
+
+## 2. Database — `0009_billing.sql`
+```sql
+create table public.subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  plan text not null default 'free' check (plan in ('free','pro','elite')),
+  status text not null default 'active' check (status in ('active','cancelled','past_due')),
+  razorpay_subscription_id text,
+  razorpay_customer_id text,
+  current_period_end timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id)
+);
+
+create table public.credit_wallets (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  balance numeric not null default 0,
+  updated_at timestamptz not null default now()
+);
+
+create table public.credit_transactions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  amount numeric not null,        -- positive = credit, negative = debit
+  reason text not null,            -- 'topup', 'live_tick', 'backtest_run', 'refund', etc.
+  razorpay_payment_id text,
+  created_at timestamptz not null default now()
+);
+
+create table public.payments (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  razorpay_order_id text not null,
+  razorpay_payment_id text,
+  razorpay_signature text,
+  amount numeric not null,
+  currency text not null default 'INR',
+  kind text not null check (kind in ('subscription','credit_topup')),
+  status text not null default 'created' check (status in ('created','paid','failed')),
+  created_at timestamptz not null default now()
+);
+
+alter table public.subscriptions enable row level security;
+alter table public.credit_wallets enable row level security;
+alter table public.credit_transactions enable row level security;
+alter table public.payments enable row level security;
+
+create policy "subscriptions read own" on public.subscriptions for select using (auth.uid() = user_id);
+create policy "wallets read own" on public.credit_wallets for select using (auth.uid() = user_id);
+create policy "transactions read own" on public.credit_transactions for select using (auth.uid() = user_id);
+create policy "payments read own" on public.payments for select using (auth.uid() = user_id);
+-- No insert/update/delete policies for any role except service_role (used exclusively by the FastAPI engine
+-- and the webhook handler) — all writes to money-related tables happen server-side only, never from the browser.
+```
+
+## 3. Where billing logic lives: the FastAPI engine, not Next.js API routes
+Payment verification requires a Razorpay **secret key**, which must never reach the browser bundle. Put all billing endpoints in the engine (`apps/engine/app/routers/billing.py`, new), using `service_role` Supabase access (same pattern already used for engine writes to `backtest_runs`/`live_sessions`), not the anon client.
+
+Add `razorpay` to `apps/engine/requirements.txt`. Add `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` to `apps/engine/.env.example`.
+
+### 3.1 `POST /billing/checkout` — body `{ kind: 'subscription'|'credit_topup', plan?: 'pro'|'elite', creditAmountInr?: number }`
+Server creates a Razorpay Order (`razorpay_client.order.create(...)`) for the correct amount (look up plan prices from a small server-side constant — mirror whatever `docs/01 - Product Vision & Stratergy` specifies; do not trust a client-supplied price), inserts a `payments` row with `status='created'`, and returns `{ orderId, amount, currency, keyId }` for the frontend to open Razorpay Checkout.
+
+### 3.2 `POST /billing/verify` — body `{ razorpay_order_id, razorpay_payment_id, razorpay_signature }`
+Verify the signature server-side using `razorpay.utils.verify_payment_signature` with the webhook/key secret — **this is the only trustworthy confirmation a payment succeeded; never trust the frontend's "success" callback alone.** On valid signature: update the `payments` row to `status='paid'`, then either upsert `subscriptions` (plan purchase) or insert a `credit_transactions` row + increment `credit_wallets.balance` (credit topup). Return the updated plan/balance.
+
+### 3.3 `POST /billing/webhook` (Razorpay server-to-server webhook, no user session — verify via `X-Razorpay-Signature` header against `RAZORPAY_WEBHOOK_SECRET`)
+Handles `payment.captured`, `subscription.charged`, `subscription.cancelled` events as the durable source of truth (client-side `/verify` is for immediate UX; the webhook is what actually must be trusted for state that affects money, since a user closing the tab after payment but before `/verify` fires must not lose their purchase). On `subscription.cancelled`, downgrade `subscriptions.plan` to `free` at `current_period_end`.
+
+### 3.4 `GET /billing/state` — returns `{ plan, status, creditBalance, transactions[], payments[] }` for the authenticated user. This becomes the single real source powering every billing page.
+
+## 4. Server-side entitlement enforcement
+Every place that currently only checks `useSession.plan` client-side before allowing a **consequential paid action** must also be checked server-side at the point of execution:
+- Publishing a paid preset (Phase 12's wizard, `plan !== 'pro'` gate) — add a real check in `publishPreset`'s flow: either add a plan check to a new/existing engine endpoint, or (simpler, given `publishPreset` currently writes directly via Supabase) enforce via a Postgres trigger/check on `marketplace_listings` insert that price > 0 requires the owner to have `subscriptions.plan != 'free'` — reuse the `security definer` function pattern already established in Phase 12's migration.
+- Component unlocks (`unlock-dialog.tsx`) — audit what this currently gates; if it's cosmetic-only (unlocking a node type for building, no money moved), client-side is acceptable — only add a server check if it currently also allows something like paid marketplace access.
+- Live trading start (`POST /bots/{bot_id}/live/start` from Phase 11) — if the product's plan tiers limit concurrent live bots (check `docs/01 - Product Vision & Stratergy`), add that count check here using `subscriptions.plan` fetched server-side, not the request body.
+
+## 5. Frontend wiring
+`apps/web/lib/billing.ts` (new): `getBillingState()`, `startCheckout(kind, opts)` (calls `/billing/checkout`, then opens Razorpay Checkout via their `checkout.js` script — load it once via `next/script`), `verifyPayment(...)` (called from Razorpay's `handler` callback).
+
+Rewire `/app/billing/plans`, `/app/billing/credits`, `/app/billing/topup`, `/app/billing/history` to real data via `getBillingState()`. `useSession.plan` becomes a post-verify cache write (same demotion pattern as every prior phase), refreshed from `getBillingState()` on `AppShell` mount so it reflects reality even if it changed from another device/the webhook.
+
+## 6. Non-goals
+No real payouts to creators (Phase 12's `revenue` tracking stays informational). No proration/refund UI. No multiple payment methods beyond Razorpay Checkout's default flow — `/app/billing/payment-methods` stays a read-only display of what Razorpay reports, not a custom card-vault.
+
+## 7. Acceptance checklist
+- [ ] A test-mode Razorpay payment (topup or plan) completes and `credit_wallets`/`subscriptions` update correctly, verified in Supabase — not just in the UI.
+- [ ] Tampering with the client-side amount before checkout (e.g., via devtools) does not change what's actually charged — server always recomputes from its own price table.
+- [ ] A payment whose client-side `/verify` call never fires (simulate by closing the tab) still lands correctly once the webhook arrives.
+- [ ] Publishing a paid preset while on the free plan is rejected server-side even if `useSession.plan` is stale/spoofed to `'pro'` in devtools.
+- [ ] No Razorpay secret key or webhook secret appears anywhere in the `apps/web` bundle (`grep` built output) — only `RAZORPAY_KEY_ID` (public) reaches the browser.
+
+## 8. What this phase does not finish
+Real money now moves, but there's still no creator payout mechanism, no proration, no dunning/retry flow for failed subscription renewals beyond what Razorpay's own webhook reports, and node/live-trading intelligence is unchanged (still rule-based).

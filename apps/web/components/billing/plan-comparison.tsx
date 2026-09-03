@@ -1,5 +1,6 @@
 'use client'
 
+import { Fragment } from 'react'
 import { Check, Minus } from 'lucide-react'
 import { PLAN_COMPARISON, PLANS } from '@/mock/data'
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
@@ -46,8 +47,8 @@ export function PlanComparisonMatrix({
           </THead>
           <TBody>
             {PLAN_COMPARISON.map((group) => (
-              <>
-                <TR key={group.group} className="bg-secondary/30">
+              <Fragment key={group.group}>
+                <TR className="bg-secondary/30">
                   <TD colSpan={5} className="pl-4 py-2 font-bold text-xs text-brand uppercase tracking-wider">
                     {group.group}
                   </TD>
@@ -61,7 +62,7 @@ export function PlanComparisonMatrix({
                     <TD className="text-center pr-4"><CellValue value={row.payg} /></TD>
                   </TR>
                 ))}
-              </>
+              </Fragment>
             ))}
           </TBody>
         </Table>

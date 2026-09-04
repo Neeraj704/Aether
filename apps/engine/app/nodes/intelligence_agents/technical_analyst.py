@@ -8,7 +8,9 @@ from ...llm.gateway import (
     log_llm_call,
     LlmSignalResult,
     get_llm_credit_cost,
+    redact_model_config,
 )
+from ...llm.key_vault import resolve_byok_key
 
 class TechnicalAnalystNode:
     component_id = "technical-agent"
@@ -127,9 +129,15 @@ class TechnicalAnalystNode:
 
         if use_llm:
             model_id = model_config.get("modelId", "")
-            custom_api_key = model_config.get("apiKey") or None
+            use_byok = bool(model_config.get("useByok", False))
+            custom_api_key = None
+            if use_byok:
+                custom_api_key = await resolve_byok_key(ctx.user_id, provider_id, ctx.db)
+
             cost = get_llm_credit_cost(provider_id, model_id, bool(custom_api_key))
             has_credits = await check_and_debit_credits(ctx.user_id, cost, ctx.db)
+            active_node_id = ctx.current_node_id or cfg.get("id", "technical-agent")
+
             if not has_credits:
                 llm_audit = {
                     "llm_status": "skipped_insufficient_credits",
@@ -144,7 +152,7 @@ class TechnicalAnalystNode:
                 )
                 await log_llm_call(
                     ctx=ctx,
-                    node_id=cfg.get("id", "technical-agent"),
+                    node_id=active_node_id,
                     component_id=self.component_id,
                     provider=provider_id,
                     model=model_id,
@@ -176,7 +184,7 @@ class TechnicalAnalystNode:
 
                 await log_llm_call(
                     ctx=ctx,
-                    node_id=cfg.get("id", "technical-agent"),
+                    node_id=active_node_id,
                     component_id=self.component_id,
                     provider=provider_id,
                     model=model_id,
@@ -202,6 +210,8 @@ class TechnicalAnalystNode:
                     }
                     # direction, confidence, rationale remain the deterministic baseline
 
+        sanitized_model_config = redact_model_config(model_config)
+
         return {
             "type": "Signal",
             "direction": direction,
@@ -210,7 +220,7 @@ class TechnicalAnalystNode:
             "rationale": rationale,
             "audit": {
                 "system_prompt": system_prompt,
-                "model_config": model_config,
+                "model_config": sanitized_model_config,
                 "applied_rule": applied_rule,
                 "deterministic_baseline": deterministic_baseline,
                 "input_features": {

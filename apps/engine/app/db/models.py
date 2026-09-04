@@ -240,3 +240,12 @@ class LlmCallLogModel(Base):
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
+class UserProviderKeyModel(Base):
+    __tablename__ = "user_provider_keys"
+
+    user_id = Column(UUID(as_uuid=True), primary_key=True, nullable=False)
+    provider_id = Column(Text, primary_key=True, nullable=False)
+    encrypted_key = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+

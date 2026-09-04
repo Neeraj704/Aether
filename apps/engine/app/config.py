@@ -19,10 +19,14 @@ class Settings:
     RAZORPAY_KEY_SECRET: str = os.getenv("RAZORPAY_KEY_SECRET", "mocksecret123")
     RAZORPAY_WEBHOOK_SECRET: str = os.getenv("RAZORPAY_WEBHOOK_SECRET", "mockwebhooksecret123")
     
+    # Server-managed keys. Never hardcode real values here — empty string forces a clear startup/runtime error instead of a silent leak.
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
-    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "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")
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", os.getenv("GEMINI_API_KEY", ""))
+    ALIBABA_API_KEY: str = os.getenv("ALIBABA_API_KEY", os.getenv("DASHSCOPE_API_KEY", ""))
+    BYOK_ENCRYPTION_KEY: str = os.getenv("BYOK_ENCRYPTION_KEY", "ZYmI28CQ19dgT9znLtpYlnyK2XYET-8hvHC8ZcdE6bE=")
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
     LLM_CALL_TIMEOUT_SECONDS: float = float(os.getenv("LLM_CALL_TIMEOUT_SECONDS", "12"))
 

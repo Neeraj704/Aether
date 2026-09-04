@@ -1,16 +1,19 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { PROVIDERS, type Provider } from '@/mock/models'
 import type { ModelSelection } from '@/mock/layers'
 import { Select } from '@/components/ui/select'
 import { SliderWithValue } from '@/components/ui/slider'
 import { Input, Field } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { PillButton } from '@/components/ui/pill-button'
-import { Check, X, Loader2, Server, Cpu, Key, Eye, EyeOff } from 'lucide-react'
+import { Check, X, Loader2, Server, Cpu, Key, AlertCircle, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/store'
+import { fetchUserProviderKeys, type ProviderKeyMeta } from '@/lib/provider-keys'
 
 interface ModelSelectFieldProps {
   value?: ModelSelection
@@ -24,6 +27,7 @@ export function ModelSelectField({
     modelId: 'openai/gpt-oss-120b',
     temperature: 0.4,
     maxTokens: 1024,
+    useByok: false,
   },
   onChange,
   disabled,
@@ -33,7 +37,33 @@ export function ModelSelectField({
 
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null)
-  const [showKey, setShowKey] = useState(false)
+  const [storedKeys, setStoredKeys] = useState<ProviderKeyMeta[]>([])
+  const [loadingKeys, setLoadingKeys] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    async function loadKeys() {
+      setLoadingKeys(true)
+      try {
+        const keys = await fetchUserProviderKeys()
+        if (active) {
+          setStoredKeys(keys)
+        }
+      } catch {
+        // Silently ignore if unauthenticated or network error
+      } finally {
+        if (active) setLoadingKeys(false)
+      }
+    }
+    loadKeys()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const hasStoredKey = storedKeys.some(
+    (k) => k.providerId.toLowerCase() === currentProvider.id.toLowerCase() && k.hasKey,
+  )
 
   const handleProviderSelect = (p: Provider) => {
     const defaultModel = p.models[0]?.id || (p.kind === 'local' ? 'llama3.1:8b' : '')
@@ -61,12 +91,11 @@ export function ModelSelectField({
     setTestResult(null)
   }
 
-  const handleApiKeyChange = (apiKey: string) => {
+  const handleByokToggle = (useByok: boolean) => {
     onChange({
       ...value,
-      apiKey,
+      useByok,
     })
-    setTestResult(null)
   }
 
   const handleTemperatureChange = (temperature: number) => {
@@ -92,16 +121,16 @@ export function ModelSelectField({
       if (hasModel) {
         setTestResult('success')
         toast.success(
-          'Inference Connection Verified',
-          value.apiKey?.trim()
-            ? `Successfully authenticated with custom key for ${value.modelId}.`
-            : `Successfully routed ${value.modelId} via Aether Server Gateway.`,
+          'Inference Configuration Verified',
+          value.useByok && hasStoredKey
+            ? `Verified routing via your stored ${currentProvider.name} API key (BYOK).`
+            : `Successfully configured ${value.modelId} via Aether Managed Gateway.`,
         )
       } else {
         setTestResult('error')
         toast.error('Connection Failed', 'Please specify a valid model tag or endpoint.')
       }
-    }, 900)
+    }, 600)
   }
 
   const activeModelMeta = currentProvider.models.find((m) => m.id === value.modelId)
@@ -233,55 +262,48 @@ export function ModelSelectField({
             </div>
           )}
 
-          {/* BYOK Custom API Key Input */}
-          <div className="rounded-xl border border-border bg-secondary/40 p-3 flex flex-col gap-2.5 mt-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                <Key className="size-3 text-brand" /> Custom Provider API Key (Optional)
-              </span>
-              <Badge variant={value.apiKey?.trim() ? 'brand' : 'neutral'} size="sm">
-                {value.apiKey?.trim() ? 'BYOK Active' : 'Aether Server Model Gateway'}
-              </Badge>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <Input
-                  type={showKey ? 'text' : 'password'}
-                  disabled={disabled}
-                  value={value.apiKey || ''}
-                  onChange={(e) => handleApiKeyChange(e.target.value)}
-                  placeholder={`Leave blank to use Aether server or enter ${currentProvider.name} key (sk-...)`}
-                  className="font-mono text-xs pr-9 h-8"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowKey(!showKey)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                  title={showKey ? 'Hide key' : 'Show key'}
-                >
-                  {showKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                </button>
+          {/* BYOK Toggle Card */}
+          <div className="rounded-xl border border-border bg-secondary/40 p-3.5 flex flex-col gap-3 mt-1">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Key className="size-3.5 text-brand" /> Use my own {currentProvider.name} API Key (BYOK)
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  Bypass platform credit metering by utilizing your securely vaulted API key.
+                </span>
               </div>
-
-              <PillButton
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={disabled || testing}
-                onClick={handleTestConnection}
-                className="gap-1 text-xs shrink-0 h-8"
-              >
-                {testing ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
-                Verify
-              </PillButton>
+              <Switch
+                checked={Boolean(value.useByok)}
+                onCheckedChange={handleByokToggle}
+                disabled={disabled}
+              />
             </div>
 
-            <span className="text-[11px] text-muted-foreground leading-relaxed">
-              {value.apiKey?.trim()
-                ? 'Direct client BYOK active. Requests bypass server model quota and billing.'
-                : 'No custom key entered. Uses Aether managed cluster tokens seamlessly with zero setup.'}
-            </span>
+            {value.useByok && !hasStoredKey && (
+              <div className="flex items-start gap-2 p-2.5 rounded-lg border border-warn/30 bg-warn/10 text-warn text-[11px] leading-relaxed">
+                <AlertCircle className="size-4 shrink-0 mt-0.5" />
+                <div className="flex flex-col gap-1">
+                  <span>
+                    No {currentProvider.name} key on file — add one in{' '}
+                    <Link
+                      href="/app/account/api-keys"
+                      className="underline font-semibold hover:text-foreground inline-flex items-center gap-0.5"
+                    >
+                      Account → API Keys <ExternalLink className="size-2.5 inline" />
+                    </Link>
+                    , or this node will fall back to Aether's managed gateway.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {value.useByok && hasStoredKey && (
+              <div className="flex items-center gap-2 text-[11px] text-profit font-medium">
+                <Check className="size-3.5" />
+                <span>Vaulted {currentProvider.name} key active. Free execution (0 credits charged).</span>
+              </div>
+            )}
           </div>
         </div>
       )}

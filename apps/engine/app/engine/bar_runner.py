@@ -58,6 +58,7 @@ async def run_one_bar(
     closed_trade = None
 
     for node, node_instance, merged_cfg in node_instances:
+        ctx.current_node_id = node.id
         output = await node_instance.run(ctx, merged_cfg)
         ctx.upstream_outputs[node.id] = output
         if isinstance(output, ClosedTrade):

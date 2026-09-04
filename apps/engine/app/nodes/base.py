@@ -42,6 +42,7 @@ class NodeContext:
         run_id: Optional[str] = None,
         live_session_id: Optional[str] = None,
         db: Optional[Any] = None,
+        current_node_id: Optional[str] = None,
     ):
         self.candle = candle
         self.portfolio = portfolio
@@ -53,6 +54,7 @@ class NodeContext:
         self.run_id = run_id
         self.live_session_id = live_session_id
         self.db = db
+        self.current_node_id = current_node_id
 
 class Node(Protocol):
     component_id: str

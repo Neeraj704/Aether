@@ -19,6 +19,7 @@ from ..db.models import (
     CreditTransactionModel,
     PaymentModel,
 )
+from ..billing.wallet import get_or_create_wallet
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
@@ -412,28 +413,7 @@ async def fetch_user_billing_state(user_uuid: uuid.UUID, db: AsyncSession) -> Di
         await db.commit()
 
     # 2. Wallet
-    res_wallet = await db.execute(
-        select(CreditWalletModel).where(CreditWalletModel.user_id == user_uuid)
-    )
-    wallet = res_wallet.scalars().first()
-    if not wallet:
-        wallet = CreditWalletModel(
-            user_id=user_uuid,
-            balance=240,  # default starting credits
-            updated_at=now,
-        )
-        db.add(wallet)
-        # Record initial grant transaction
-        tx = CreditTransactionModel(
-            id=uuid.uuid4(),
-            user_id=user_uuid,
-            amount=240,
-            reason="initial_grant",
-            razorpay_payment_id=None,
-            created_at=now,
-        )
-        db.add(tx)
-        await db.commit()
+    wallet = await get_or_create_wallet(user_uuid, db)
 
     # 3. Transactions
     res_tx = await db.execute(

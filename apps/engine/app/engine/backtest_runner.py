@@ -102,11 +102,16 @@ def benchmark_equity(config: BacktestConfig, candle: Any, first_close: float) ->
         return config.capital
     return config.capital * (current_close / first_close)
 
+# A "paper" backtest is meant to validate recent, LLM-assisted behavior on a realistic-but-bounded sample, not replay years of history at LLM cost.
+MAX_LLM_ELIGIBLE_BARS_PER_PAPER_RUN = 300
+
 def compute_metrics(
     trades: List[ClosedTrade],
     equity_curve: List[EquityPoint],
     initial_capital: float,
     exposure_pct: float = 0.0,
+    capped_to_bars: Optional[int] = None,
+    notes: Optional[str] = None,
 ) -> BacktestMetrics:
     if not equity_curve:
         return BacktestMetrics(
@@ -118,6 +123,8 @@ def compute_metrics(
             avgR=0.0,
             profitFactor=0.0,
             exposure=0.0,
+            cappedToBars=capped_to_bars,
+            notes=notes,
         )
 
     final_equity = equity_curve[-1].equity
@@ -175,6 +182,8 @@ def compute_metrics(
         avgR=round(avg_r, 2),
         profitFactor=round(profit_factor, 2),
         exposure=round(exposure_pct, 1),
+        cappedToBars=capped_to_bars,
+        notes=notes,
     )
 
 async def fetch_candles(
@@ -364,6 +373,8 @@ async def run_backtest(
         trades: List[ClosedTrade] = []
         equity_curve: List[EquityPoint] = []
         portfolio = Portfolio(cash=config.capital, seed=config.seed)
+        capped_bars: Optional[int] = None
+        paper_notes: Optional[str] = None
 
         # ----------------------------------------------------
         # 1. HISTORICAL SIMULATION (Standard in-sample replay)
@@ -378,8 +389,19 @@ async def run_backtest(
         # 2. PAPER TRADING SIMULATION (Latency & Spread Drag)
         # ----------------------------------------------------
         elif sim_type == "paper":
+            if len(candle_records) > MAX_LLM_ELIGIBLE_BARS_PER_PAPER_RUN:
+                paper_candle_records = candle_records[-MAX_LLM_ELIGIBLE_BARS_PER_PAPER_RUN:]
+                paper_full_df = full_df.iloc[-MAX_LLM_ELIGIBLE_BARS_PER_PAPER_RUN:].reset_index(drop=True)
+                capped_bars = MAX_LLM_ELIGIBLE_BARS_PER_PAPER_RUN
+                paper_notes = f"Paper simulation capped to most recent {MAX_LLM_ELIGIBLE_BARS_PER_PAPER_RUN} bars."
+            else:
+                paper_candle_records = candle_records
+                paper_full_df = full_df
+                capped_bars = None
+                paper_notes = None
+
             trades, equity_curve, portfolio = await simulate_historical_pass(
-                ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.45, queue_delay=1, seed_offset=17,
+                ordered_nodes, paper_candle_records, config, paper_full_df, slippage_multiplier=1.45, queue_delay=1, seed_offset=17,
                 mode="paper", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=db,
             )
 
@@ -472,7 +494,7 @@ async def run_backtest(
                 trades, equity_curve, portfolio = base_trades, base_eq, base_port
 
         exposure_pct = (portfolio.time_in_market_bars / max(1, portfolio.total_bars)) * 100.0 if portfolio.total_bars > 0 else 0.0
-        metrics = compute_metrics(trades, equity_curve, config.capital, exposure_pct)
+        metrics = compute_metrics(trades, equity_curve, config.capital, exposure_pct, capped_to_bars=capped_bars, notes=paper_notes)
 
         # Persist results to DB
         # 1. Update backtest_run row

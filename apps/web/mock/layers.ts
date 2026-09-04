@@ -167,7 +167,7 @@ export interface ModelSelection {
   providerId: string // 'groq' | 'openai' | 'anthropic' | 'google' | 'alibaba' | 'deepseek' | 'ollama'
   modelId: string // e.g. 'openai/gpt-oss-120b', 'gpt-5-mini', or free-typed 'llama3.1:8b'
   endpoint?: string // for 'ollama' - default http://localhost:11434
-  apiKey?: string // Optional custom user BYOK key
+  useByok?: boolean // Whether to resolve the user's stored custom key for this provider
   temperature: number
   maxTokens: number
 }

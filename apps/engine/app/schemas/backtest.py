@@ -29,6 +29,8 @@ class BacktestMetrics(BaseModel):
     avgR: float
     profitFactor: float
     exposure: float
+    cappedToBars: Optional[int] = None
+    notes: Optional[str] = None
 
 class LayerContribution(BaseModel):
     layer: str

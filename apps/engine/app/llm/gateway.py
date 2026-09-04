@@ -13,6 +13,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..db.models import CreditWalletModel, CreditTransactionModel, LlmCallLogModel
 from ..nodes.base import NodeContext
+from ..billing.wallet import get_or_create_wallet
+
+def redact_model_config(model_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Defensively strips any raw 'apiKey' material from model config dictionaries.
+    Ensures user secrets never leak into audit logs, execution traces, or persisted graphs.
+    """
+    if not isinstance(model_config, dict):
+        return {}
+    sanitized = dict(model_config)
+    sanitized.pop("apiKey", None)
+    return sanitized
 
 # Credit pricing catalog per model (providerId:modelId)
 # Mini/Fast tier: 1 credit
@@ -124,25 +136,7 @@ async def check_and_debit_credits(user_id: str, cost: int, db: AsyncSession) -> 
     now = datetime.now(timezone.utc)
 
     # 1. Ensure wallet exists (bootstrap with 240 credits if first access)
-    res = await db.execute(select(CreditWalletModel).where(CreditWalletModel.user_id == user_uuid))
-    wallet = res.scalars().first()
-    if not wallet:
-        wallet = CreditWalletModel(
-            user_id=user_uuid,
-            balance=240,
-            updated_at=now,
-        )
-        db.add(wallet)
-        tx_init = CreditTransactionModel(
-            id=uuid.uuid4(),
-            user_id=user_uuid,
-            amount=240,
-            reason="initial_grant",
-            razorpay_payment_id=None,
-            created_at=now,
-        )
-        db.add(tx_init)
-        await db.commit()
+    await get_or_create_wallet(user_uuid, db)
 
     # 2. Atomic check-and-debit via single UPDATE WHERE balance >= :cost
     stmt = (
@@ -328,6 +322,84 @@ async def _execute_provider_http_call(
             resp = await client.post(url, headers=headers, json=body)
             if resp.status_code != 200:
                 raise ValueError(f"DeepSeek API returned HTTP {resp.status_code}: {resp.text}")
+
+            res_json = resp.json()
+            usage = res_json.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens")
+            completion_tokens = usage.get("completion_tokens")
+            content = res_json["choices"][0]["message"]["content"]
+            parsed = json.loads(_clean_json_text(content))
+            return parsed, prompt_tokens, completion_tokens
+
+        elif provider_id == "google":
+            key = custom_api_key or settings.GOOGLE_API_KEY
+            if not key:
+                raise ValueError("GOOGLE_API_KEY is not configured on server")
+
+            model_slug = model_id or "gemini-flash"
+            # Normalize model name for Google Generative Language API
+            if model_slug.startswith("gemini-"):
+                model_name = model_slug
+            else:
+                model_name = "gemini-1.5-flash"
+
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
+            headers = {"Content-Type": "application/json"}
+            prompt_text = f"{system_prompt}\nCRITICAL: Respond with ONLY a raw valid JSON object.\n\nInput Data:\n{json.dumps(prompt_payload)}"
+            body = {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [{"text": prompt_text}],
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": temperature,
+                    "maxOutputTokens": max_tokens,
+                    "responseMimeType": "application/json",
+                },
+            }
+            resp = await client.post(url, headers=headers, json=body)
+            if resp.status_code != 200:
+                raise ValueError(f"Google Gemini API returned HTTP {resp.status_code}: {resp.text}")
+
+            res_json = resp.json()
+            usage = res_json.get("usageMetadata", {})
+            prompt_tokens = usage.get("promptTokenCount")
+            completion_tokens = usage.get("candidatesTokenCount")
+            candidates = res_json.get("candidates", [])
+            if not candidates or "content" not in candidates[0]:
+                raise ValueError(f"Google Gemini API returned unexpected response shape: {res_json}")
+            content = candidates[0]["content"]["parts"][0]["text"]
+            parsed = json.loads(_clean_json_text(content))
+            return parsed, prompt_tokens, completion_tokens
+
+        elif provider_id == "alibaba":
+            key = custom_api_key or settings.ALIBABA_API_KEY
+            if not key:
+                raise ValueError("ALIBABA_API_KEY is not configured on server")
+
+            url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            }
+            body = {
+                "model": model_id or "qwen-72b",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": f"{system_prompt}\nYou MUST respond ONLY with a valid JSON object matching the requested schema.",
+                    },
+                    {"role": "user", "content": json.dumps(prompt_payload)},
+                ],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "response_format": {"type": "json_object"},
+            }
+            resp = await client.post(url, headers=headers, json=body)
+            if resp.status_code != 200:
+                raise ValueError(f"Alibaba DashScope API returned HTTP {resp.status_code}: {resp.text}")
 
             res_json = resp.json()
             usage = res_json.get("usage", {})

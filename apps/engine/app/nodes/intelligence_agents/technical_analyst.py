@@ -1,6 +1,14 @@
 from typing import Any, Dict, Optional
 import json
 from ..base import NodeContext
+from ...llm.gateway import (
+    call_llm_for_signal,
+    check_and_debit_credits,
+    refund_credits,
+    log_llm_call,
+    LlmSignalResult,
+    get_llm_credit_cost,
+)
 
 class TechnicalAnalystNode:
     component_id = "technical-agent"
@@ -36,6 +44,13 @@ class TechnicalAnalystNode:
                     "reasoning": "Missing FeatureVector input from technical indicators layer.",
                     "applied_rule": "Default Flat (No Data)",
                     "model": cfg.get("model", {"providerId": "rule-engine", "modelId": "rsi-ema-momentum-v1"}),
+                    "deterministic_baseline": {
+                        "direction": "flat",
+                        "confidence": 0.0,
+                        "rationale": "No upstream feature vector available",
+                        "applied_rule": "Default Flat (No Data)",
+                    },
+                    "llm_status": "skipped_no_features",
                 }
             }
 
@@ -78,17 +93,114 @@ class TechnicalAnalystNode:
             )
             applied_rule = f"RSI_Overbought_Reversal (> {overbought:.0f}) + EMA_Down_Trend"
 
+        # Deterministic baseline recording
+        deterministic_baseline = {
+            "direction": direction,
+            "confidence": confidence,
+            "rationale": rationale,
+            "applied_rule": applied_rule,
+        }
+
         # Formatted Persona prompt & LLM context
         system_prompt = cfg.get(
             "systemPrompt",
             "You are a disciplined technical analyst. Given the feature vector, form a directional view based on price structure, momentum indicators, and volume trends."
         )
         model_config = cfg.get("model", {
-            "providerId": "openai",
-            "modelId": "gpt-5-mini",
+            "providerId": "groq",
+            "modelId": "openai/gpt-oss-120b",
             "temperature": 0.4,
             "maxTokens": 1024,
         })
+        provider_id = model_config.get("providerId", "groq")
+
+        use_llm = (
+            provider_id != "rule-engine"
+            and ctx.mode in ("paper", "live")
+            and ctx.db is not None
+            and ctx.user_id is not None
+        )
+
+        llm_audit: Dict[str, Any] = {
+            "llm_status": "skipped_mode" if ctx.mode not in ("paper", "live") else ("skipped_rule_engine" if provider_id == "rule-engine" else "skipped_no_context")
+        }
+
+        if use_llm:
+            model_id = model_config.get("modelId", "")
+            custom_api_key = model_config.get("apiKey") or None
+            cost = get_llm_credit_cost(provider_id, model_id, bool(custom_api_key))
+            has_credits = await check_and_debit_credits(ctx.user_id, cost, ctx.db)
+            if not has_credits:
+                llm_audit = {
+                    "llm_status": "skipped_insufficient_credits",
+                    "credits_required": cost,
+                }
+                skipped_result = LlmSignalResult(
+                    direction=direction,
+                    confidence=confidence,
+                    rationale=rationale,
+                    raw_status="skipped_insufficient_credits",
+                    error_message=f"Insufficient credits (required: {cost})",
+                )
+                await log_llm_call(
+                    ctx=ctx,
+                    node_id=cfg.get("id", "technical-agent"),
+                    component_id=self.component_id,
+                    provider=provider_id,
+                    model=model_id,
+                    result=skipped_result,
+                    credits_charged=0,
+                )
+            else:
+                feature_summary = {
+                    "close": current_close,
+                    "rsi": round(rsi, 2),
+                    "ema_fast": round(ema_fast, 2),
+                    "ema_slow": round(ema_slow, 2),
+                    "macd": round(macd, 2),
+                    "macd_signal": round(macd_signal, 2),
+                }
+                result = await call_llm_for_signal(
+                    provider_id=provider_id,
+                    model_id=model_id,
+                    system_prompt=system_prompt,
+                    feature_summary=feature_summary,
+                    deterministic_baseline={"direction": direction, "confidence": confidence, "rationale": rationale},
+                    temperature=float(model_config.get("temperature", 0.4)),
+                    max_tokens=int(model_config.get("maxTokens", 1024)),
+                    custom_api_key=custom_api_key,
+                )
+                actual_credits_charged = cost if result.raw_status == "ok" else 0
+                if result.raw_status != "ok" and cost > 0:
+                    await refund_credits(ctx.user_id, cost, ctx.db)
+
+                await log_llm_call(
+                    ctx=ctx,
+                    node_id=cfg.get("id", "technical-agent"),
+                    component_id=self.component_id,
+                    provider=provider_id,
+                    model=model_id,
+                    result=result,
+                    credits_charged=actual_credits_charged,
+                )
+                if result.raw_status == "ok":
+                    direction = result.direction
+                    confidence = result.confidence
+                    rationale = f"[LLM] {result.rationale}"
+                    llm_audit = {
+                        "llm_status": "ok",
+                        "llm_latency_ms": result.latency_ms,
+                        "credits_charged": actual_credits_charged,
+                        "prompt_tokens": result.prompt_tokens,
+                        "completion_tokens": result.completion_tokens,
+                    }
+                else:
+                    llm_audit = {
+                        "llm_status": result.raw_status,
+                        "llm_error": result.error_message,
+                        "credits_charged": actual_credits_charged,
+                    }
+                    # direction, confidence, rationale remain the deterministic baseline
 
         return {
             "type": "Signal",
@@ -100,6 +212,7 @@ class TechnicalAnalystNode:
                 "system_prompt": system_prompt,
                 "model_config": model_config,
                 "applied_rule": applied_rule,
+                "deterministic_baseline": deterministic_baseline,
                 "input_features": {
                     "rsi": round(rsi, 2),
                     "ema_fast": round(ema_fast, 2),
@@ -108,5 +221,6 @@ class TechnicalAnalystNode:
                     "macd_signal": round(macd_signal, 2),
                 },
                 "confidence_formula": "min(0.95, max(threshold, 0.70 + (delta_rsi * 0.01)))",
+                **llm_audit,
             }
         }

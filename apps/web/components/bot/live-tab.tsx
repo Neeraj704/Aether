@@ -24,6 +24,8 @@ import {
   ArrowDownRight,
   TrendingUp,
   TrendingDown,
+  Coins,
+  Calculator,
 } from 'lucide-react'
 import type { Bot } from '@/mock/data'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -32,7 +34,7 @@ import { PillButton, PillLink } from '@/components/ui/pill-button'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table'
-import { formatINR, formatPct, formatDate } from '@/lib/utils'
+import { cn, formatINR, formatPct, formatDate } from '@/lib/utils'
 import { useWorkspace } from '@/lib/workspace-store'
 import { toast } from '@/lib/store'
 import {
@@ -140,6 +142,28 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
   const isLive = bot.status === 'live' || liveState?.status === 'running'
   const isError = bot.status === 'error' || liveState?.status === 'error' || Boolean(session?.errorMessage)
   const hasSession = Boolean(session)
+
+  // Insufficient credits notification & fallback detection
+  const [hasNotifiedCredits, setHasNotifiedCredits] = useState(false)
+  const insufficientCreditsNode = useMemo(() => {
+    return steps.find((step: LiveNodeStep) => {
+      const out = step.output as any
+      return out?.audit?.llm_status === 'skipped_insufficient_credits' || (out?.audit?.credits_required > 0 && out?.audit?.llm_status === 'skipped_insufficient_credits')
+    })
+  }, [steps])
+
+  useEffect(() => {
+    if (insufficientCreditsNode && !hasNotifiedCredits) {
+      setHasNotifiedCredits(true)
+      toast.warn(
+        'AI Credits Depleted (0 Credits)',
+        `${insufficientCreditsNode.nodeName} has shifted to automated mathematical indicators (RSI/EMA/MACD). Top up credits to resume LLM reasoning.`,
+        { label: 'Top Up Credits', href: '/app/billing/topup' },
+      )
+    } else if (!insufficientCreditsNode && hasNotifiedCredits) {
+      setHasNotifiedCredits(false)
+    }
+  }, [insufficientCreditsNode, hasNotifiedCredits])
 
   // Trade Decision & DAG Flow Inspector State
   const [inspectTrade, setInspectTrade] = useState<TradeInspectionData | null>(null)
@@ -635,6 +659,42 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
               </span>
             </div>
 
+            {/* Insufficient Credits Global Live Banner */}
+            {insufficientCreditsNode && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-xl border border-amber-500/40 bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-transparent p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-sm"
+              >
+                <div className="flex items-start sm:items-center gap-3">
+                  <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0 mt-0.5 sm:mt-0 ring-1 ring-amber-500/30">
+                    <Coins className="size-4" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-amber-300 flex items-center gap-2 flex-wrap">
+                      <span>AI Reasoning Shifted to Mathematical Mode</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        0 Credits
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-amber-200/80 mt-0.5 leading-relaxed">
+                      {insufficientCreditsNode.nodeName} depleted its AI credits. The bot is safely executing on pure quantitative indicators (RSI, EMA, MACD) without interruption.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                  <PillLink
+                    href="/app/billing/topup"
+                    variant="primary"
+                    size="sm"
+                    className="h-7.5 px-3 text-xs gap-1.5 font-semibold bg-amber-500 hover:bg-amber-400 text-black shadow-sm"
+                  >
+                    <Zap className="size-3.5" /> Top Up Credits
+                  </PillLink>
+                </div>
+              </motion.div>
+            )}
+
             {steps.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border bg-secondary/20 p-6 text-center text-xs text-muted-foreground">
                 Waiting for strategy node execution step details...
@@ -643,30 +703,75 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {steps.map((step: LiveNodeStep) => {
                   const isExpanded = expandedNodeId === step.nodeId
+                  const outputAudit = (step.output as any)?.audit
+                  const isInsufficientCredits = outputAudit?.llm_status === 'skipped_insufficient_credits'
+                  const isLlmActive = outputAudit?.llm_status === 'ok'
+
                   return (
                     <div
                       key={step.nodeId}
-                      className="rounded-xl border border-border bg-card/60 p-3.5 flex flex-col justify-between gap-2 shadow-sm backdrop-blur-sm transition-all hover:border-brand/40"
+                      className={cn(
+                        'rounded-xl border p-3.5 flex flex-col justify-between gap-2.5 shadow-sm backdrop-blur-sm transition-all',
+                        isInsufficientCredits
+                          ? 'border-amber-500/50 bg-gradient-to-b from-amber-500/10 via-card/70 to-card/90 ring-1 ring-amber-500/20'
+                          : 'border-border bg-card/60 hover:border-brand/40',
+                      )}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex flex-col">
                           <span className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground">
                             {step.layer}
                           </span>
-                          <span className="font-semibold text-xs text-foreground">
+                          <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
                             {step.nodeName}
                           </span>
                         </div>
 
-                        {step.metricLabel && (
-                          <div className="flex items-center gap-1 font-mono text-[11px] font-bold text-brand bg-brand/10 border border-brand/20 px-2 py-0.5 rounded">
-                            <span className="text-[9px] text-muted-foreground font-normal uppercase">
-                              {step.metricLabel}:
-                            </span>
-                            <span>{step.metricValue}</span>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                          {isInsufficientCredits && (
+                            <Badge
+                              variant="warn"
+                              size="sm"
+                              className="gap-1 font-mono text-[9px] bg-amber-500/15 border-amber-500/30 text-amber-300"
+                            >
+                              <Calculator className="size-3 text-amber-400" />
+                              Math Fallback
+                            </Badge>
+                          )}
+                          {isLlmActive && (
+                            <Badge variant="brand" size="sm" className="gap-1 font-mono text-[9px]">
+                              <Zap className="size-3 text-brand" />
+                              LLM Active
+                            </Badge>
+                          )}
+                          {step.metricLabel && (
+                            <div className="flex items-center gap-1 font-mono text-[11px] font-bold text-brand bg-brand/10 border border-brand/20 px-2 py-0.5 rounded">
+                              <span className="text-[9px] text-muted-foreground font-normal uppercase">
+                                {step.metricLabel}:
+                              </span>
+                              <span>{step.metricValue}</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
+
+                      {/* Insufficient Credits Inline Notice */}
+                      {isInsufficientCredits && (
+                        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-300 font-medium">
+                          <div className="flex items-center gap-1.5">
+                            <Coins className="size-3.5 text-amber-400 shrink-0" />
+                            <span>Credits 0 · Automated Math Engine</span>
+                          </div>
+                          <PillLink
+                            href="/app/billing/topup"
+                            variant="primary"
+                            size="sm"
+                            className="h-5 px-2 text-[10px] bg-amber-500 hover:bg-amber-400 text-black font-semibold shrink-0"
+                          >
+                            Top Up
+                          </PillLink>
+                        </div>
+                      )}
 
                       <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed font-mono">
                         {step.summary || 'Executed cleanly.'}

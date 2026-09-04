@@ -220,3 +220,23 @@ class PaymentModel(Base):
     status = Column(String, nullable=False, default="created")  # 'created', 'paid', 'failed'
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
+class LlmCallLogModel(Base):
+    __tablename__ = "llm_call_log"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="cascade"), nullable=False, index=True)
+    run_id = Column(UUID(as_uuid=True), ForeignKey("backtest_runs.id", ondelete="cascade"), nullable=True, index=True)
+    live_session_id = Column(UUID(as_uuid=True), ForeignKey("live_sessions.id", ondelete="cascade"), nullable=True, index=True)
+    node_id = Column(Text, nullable=False)
+    component_id = Column(Text, nullable=False)
+    provider = Column(Text, nullable=False)
+    model = Column(Text, nullable=False)
+    status = Column(Text, nullable=False)
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    credits_charged = Column(Numeric, nullable=False, default=0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+

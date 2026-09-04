@@ -211,7 +211,7 @@ export const useSession = create<SessionState>()(
 /* Toast store — bottom-right glass stack                              */
 /* ------------------------------------------------------------------ */
 
-export type ToastKind = 'success' | 'error' | 'info' | 'unlock'
+export type ToastKind = 'success' | 'error' | 'info' | 'warn' | 'unlock'
 
 export interface Toast {
   id: string
@@ -246,6 +246,8 @@ export const toast = {
     useToasts.getState().push({ kind: 'error', title, description }),
   info: (title: string, description?: string) =>
     useToasts.getState().push({ kind: 'info', title, description }),
+  warn: (title: string, description?: string, action?: { label: string; href: string }) =>
+    useToasts.getState().push({ kind: 'warn', title, description, action }),
   unlock: (title: string, description?: string) =>
     useToasts.getState().push({ kind: 'unlock', title, description }),
 }

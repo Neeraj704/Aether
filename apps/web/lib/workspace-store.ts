@@ -94,9 +94,9 @@ export function defaultConfig(comp: ComponentDef): Record<string, unknown> {
   for (const f of allFields) {
     if (f.type === 'model-select') {
       config[f.key] = f.value || {
-        providerId: 'openai',
-        modelId: 'gpt-5-mini',
-        temperature: 0.7,
+        providerId: 'groq',
+        modelId: 'openai/gpt-oss-120b',
+        temperature: 0.4,
         maxTokens: 1024,
       }
     } else if (f.type === 'credential') {

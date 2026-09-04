@@ -1,0 +1,289 @@
+# AETHER — Phase 14: Real LLM Intelligence Layer (Technical Analyst Reference Implementation)
+
+> Bounded, single-phase prompt, same discipline as Phases 0–13 in `docs/Prompts/`. Do not expand scope beyond what is listed here. Presets/marketplace frontend completion, ML ensemble, RL, debate/consensus, OCULUS vision, ChromaDB memory, and every non-`technical-agent` intelligence node stay exactly as they are — still rule-based `UniversalNode` stubs. Audit first, as in every prior phase.
+
+---
+
+## 0. Context you must internalize first
+
+Phases 10–13 made auth, bot persistence, historical/paper/walk-forward/Monte-Carlo backtesting, the scheduled live paper-trading loop, and real Razorpay billing/credits all genuinely real. Read `docs/Full context.md` §9 and `docs/Prompt History.md` for how you got here.
+
+**The gap this phase closes:** every node in `apps/engine/app/nodes/` — including the flagship `TechnicalAnalystNode` (`apps/engine/app/nodes/intelligence_agents/technical_analyst.py`) — is pure Python rule logic (RSI/EMA threshold checks). Nothing in the engine has ever called an LLM. Yet:
+- The frontend's Deep Customization dialog (`components/builder/deep-customization-dialog.tsx`) already lets a user pick a provider/model/system prompt/temperature/max tokens for agent nodes (see `mock/models.ts`'s `PROVIDERS` and `mock/layers.ts`'s `ModelSelection` type).
+- `technical_analyst.py` already reads `cfg.get("model", {...})` and writes it into `audit.model_config` — it just never uses it to actually call anything.
+- The credit system you built in Phase 13 (`credit_wallets`, `credit_transactions`) exists specifically to be metered against something. Right now nothing debits credits for intelligence usage.
+
+**Your job:** build a real, provider-agnostic LLM gateway in the engine, wire it into exactly one node — `TechnicalAnalystNode` — end to end (config → real API call → structured signal → credit debit → audit trail → frontend display), and leave every other agent node untouched. This is the reference implementation later phases will copy for `sentiment-agent`, `macro-agent`, `flow-agent`, etc. Do not touch those other nodes in this phase.
+
+**Critical design constraint, decided for you — do not relitigate it:** LLM calls must **never** run during `historical` backtests. A 2-year, 15-minute-resolution historical backtest is ~70,000 bars; calling a real LLM on every bar would be prohibitively slow and expensive, and it violates the project's own stated rule ("Deterministic data first; LLM reasoning second" — `docs/Full context.md` §0, and the 4-stage validation pipeline in §9.1, which explicitly keeps Stage 1 historical backtesting to "deterministic features + ML ensemble only" and only introduces LLM reasoning at Stage 2, paper trading). Therefore:
+- `historical` and `walk-forward` and `monte-carlo` backtest types: `TechnicalAnalystNode` always uses its existing deterministic RSI/EMA rule path, unchanged, regardless of the node's configured model. Do not call the LLM gateway from these paths, ever.
+- `paper` backtest type and real scheduled `live` sessions (the only two places actual wall-clock time passes one bar at a time): if the node's configured `model.providerId` is not `"rule-engine"`, attempt a real LLM call; fall back to the deterministic rule on any failure.
+
+This mirrors the product's own 4-stage philosophy exactly — you are not inventing new behavior, you are finally implementing what `docs/Full context.md` already specifies.
+
+---
+
+## 1. Mandatory Step Zero: Audit before you touch anything
+
+Read and summarize (real vs. needs-building) before writing code:
+
+1. `apps/engine/app/nodes/base.py` — the current `NodeContext` dataclass/class. Note exactly which fields exist (`candle`, `portfolio`, `upstream_outputs`, `historical_window`) and which are missing (`mode`, `user_id`, `db`, `bot_id`, `run_id`/`live_session_id`) — you will add the missing ones.
+2. `apps/engine/app/engine/bar_runner.py` — `build_node_instances` and `run_one_bar`. Confirm both are the single choke point used by every runner (historical, paper, walk-forward, monte-carlo, live) and that adding new `NodeContext` fields here propagates everywhere without duplicating logic.
+3. `apps/engine/app/engine/backtest_runner.py` — how `run_one_bar` is called for each backtest `type` (`historical`, `paper`, `walk-forward`, `monte-carlo`). Confirm which call sites correspond to which `config.type`, since your mode-gating logic (Section 0) depends on passing the correct `mode` string through to `NodeContext`.
+4. `apps/engine/app/engine/live_runner.py` — `tick_bot`, and how it calls `run_one_bar`. This is the other call site that must pass `mode="live"`.
+5. `apps/engine/app/nodes/intelligence_agents/technical_analyst.py` — the full current deterministic logic. You are not deleting or rewriting this rule logic; you are keeping it as the fallback path and the `historical`/`walk-forward`/`monte-carlo` path, and adding a new branch on top of it.
+6. `apps/engine/app/routers/billing.py` — `CreditWalletModel`, `CreditTransactionModel`, and the exact pattern used to read/debit a wallet (reuse this pattern verbatim for LLM-call debits; do not invent a second way to touch `credit_wallets`).
+7. `apps/engine/app/db/models.py` — confirm there is no existing table for logging LLM calls.
+8. `apps/web/components/builder/deep-customization-dialog.tsx` and `mock/models.ts` — the exact `PROVIDERS` list and `ModelSelection` shape (`providerId`, `modelId`, `temperature`, `maxTokens`, possibly a `systemPrompt`/prompt-variables mechanism) the frontend already lets users configure. Your Pydantic config parsing on the engine side must accept this exact shape without requiring any frontend change.
+9. `apps/web/components/backtest/trade-flow-modal.tsx`, `apps/web/components/bot/trade-flow-modal.tsx`, and `apps/web/components/backtest/contribution-panel.tsx` — confirm exactly what shape of `audit`/`execution_flow` data these already render per node, per trade. Your new LLM-branch audit payload must be a superset of what the deterministic branch already returns — never remove existing audit fields, only add new ones (e.g. `llm_status`, `llm_latency_ms`, `deterministic_baseline`) — so these components keep rendering without modification.
+10. `apps/web/app/app/account/api-keys/page.tsx` — confirm this page is still fully mock (per Phase 10–13 pattern of leaving out-of-scope pages untouched). It stays mock this phase — no BYOK (bring-your-own-key). All LLM calls in this phase are billed against AETHER's own server-side API keys and metered via the existing credit wallet, not per-user keys.
+
+Produce a short "real vs. mock" note for each before proceeding.
+
+---
+
+## 2. Task 1 — Database: LLM call ledger
+
+New migration `supabase/migrations/0010_llm_calls.sql`:
+
+```sql
+create table public.llm_call_log (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  bot_id uuid not null references public.bots(id) on delete cascade,
+  run_id uuid references public.backtest_runs(id) on delete cascade,
+  live_session_id uuid references public.live_sessions(id) on delete cascade,
+  node_id text not null,
+  component_id text not null,
+  provider text not null,
+  model text not null,
+  status text not null check (status in ('ok','error','timeout','skipped_insufficient_credits','skipped_mode')),
+  prompt_tokens int,
+  completion_tokens int,
+  latency_ms int,
+  credits_charged numeric not null default 0,
+  error_message text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.llm_call_log enable row level security;
+
+create policy "llm_call_log readable by owner" on public.llm_call_log
+  for select using (auth.uid() = user_id);
+
+-- No insert/update/delete policy for anon/authenticated roles: only the engine's
+-- service-role connection writes here, exactly like backtest_runs/trades/live_sessions.
+
+create index llm_call_log_user_idx on public.llm_call_log(user_id);
+create index llm_call_log_bot_idx on public.llm_call_log(bot_id);
+create index llm_call_log_run_idx on public.llm_call_log(run_id);
+create index llm_call_log_session_idx on public.llm_call_log(live_session_id);
+```
+
+Add the matching `LlmCallLogModel` to `apps/engine/app/db/models.py`, following the exact column-naming and `Numeric`/`UUID`/`Text` type conventions already used for every other model in that file (do not introduce a different ORM style).
+
+---
+
+## 3. Task 2 — Extend `NodeContext` (behavior-preserving for every existing node)
+
+In `apps/engine/app/nodes/base.py`, add these fields to `NodeContext`, all with safe defaults so every node that doesn't use them (i.e. every node except `TechnicalAnalystNode` this phase) is completely unaffected:
+
+```python
+mode: str = "historical"          # "historical" | "paper" | "walk-forward" | "monte-carlo" | "live"
+user_id: Optional[str] = None
+bot_id: Optional[str] = None
+run_id: Optional[str] = None
+live_session_id: Optional[str] = None
+db: Optional[Any] = None          # AsyncSession, when available; None during pure in-memory historical simulation
+```
+
+Update `apps/engine/app/engine/bar_runner.py`'s `run_one_bar` signature to accept and forward these five values into the `NodeContext` it constructs (default them so existing call sites that don't pass them keep working unchanged).
+
+Update every call site:
+- `apps/engine/app/engine/backtest_runner.py`: pass `mode=config.type`, `user_id`, `bot_id`, `run_id` at every place `run_one_bar` is invoked, for all four backtest types. For `historical`/`walk-forward`/`monte-carlo`, `db` may remain `None` if the historical loop currently runs against an in-memory DataFrame — do not force a DB connection into the hot loop where one doesn't already exist; the LLM gateway will treat a `None` db by skipping any DB-dependent step (credit check/debit) and simply not calling the LLM at all for those modes anyway per Section 0's mode gate, so this is safe and intentional, not an oversight.
+- `apps/engine/app/engine/live_runner.py`: pass `mode="live"`, `user_id`, `bot_id`, `live_session_id`, and the live `db` session already in scope in `tick_bot`.
+- For the `paper` backtest type specifically: confirm (from your Step Zero audit) whether it already has a DB session available at the point `run_one_bar` is called. If not, thread one through from `backtest_runner.py`'s existing `run_backtest` background-task signature (which already has `db` per Phase 10) down to the per-bar loop — this is the one place you're allowed to add a new parameter through an existing call chain, since without it, `paper`-mode LLM calls (Section 0) have no way to check/debit credits or write to `llm_call_log`.
+
+Manually verify after this task: running an existing historical backtest produces byte-identical `metrics`/`trades`/`equity` output before and after this change. This task must be 100% behavior-preserving for every mode except the new LLM branch you add in Task 4.
+
+---
+
+## 4. Task 3 — The LLM Gateway
+
+New file `apps/engine/app/llm/__init__.py` (empty) and `apps/engine/app/llm/gateway.py`.
+
+### 4.1 Config additions
+
+`apps/engine/app/config.py` — add:
+```python
+OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
+LLM_CALL_TIMEOUT_SECONDS: float = float(os.getenv("LLM_CALL_TIMEOUT_SECONDS", "12"))
+```
+Mirror these three key vars into `apps/engine/.env.example` with placeholder values, same format as the existing Razorpay keys.
+
+Add `anthropic` and `openai` to `apps/engine/requirements.txt` if not already resolvable via `httpx` alone — **prefer calling each provider's plain REST endpoint via the existing `httpx` dependency instead of adding SDKs**, since the engine has no other SDK dependencies for external services (Razorpay is the one exception, and only because signature verification needs its exact HMAC implementation). Confirm the exact REST shapes:
+- OpenAI: `POST https://api.openai.com/v1/chat/completions`, `Authorization: Bearer {key}`, body includes `model`, `messages`, `temperature`, `max_tokens`, and `response_format: {"type": "json_object"}` to force valid JSON output.
+- Anthropic: `POST https://api.anthropic.com/v1/messages`, headers `x-api-key`, `anthropic-version: 2023-06-01`, body includes `model`, `max_tokens`, `temperature`, `system`, `messages`. Anthropic has no native JSON-mode flag at this API version — instruct the model in the system prompt to output *only* raw JSON matching the schema, no markdown fences, and parse defensively (Section 4.3).
+- DeepSeek: OpenAI-compatible endpoint (`https://api.deepseek.com/chat/completions`), same request/response shape as OpenAI — reuse the OpenAI request builder with a different base URL and key.
+
+Only implement these three providers, matching exactly the `PROVIDERS` constant you read from `mock/models.ts` in your audit. If `mock/models.ts` lists additional providers (e.g. a local Ollama option), add a fourth branch reusing the OpenAI-compatible request shape pointed at `OLLAMA_BASE_URL` (new env var, default `http://localhost:11434/v1`) with no API key header — but only if the audit confirms the frontend actually offers this option; do not add speculative providers the UI doesn't expose.
+
+### 4.2 Credit pricing
+
+Add a small server-side constant, same pattern as `PLAN_PRICES_INR` in `billing.py` — put it in `gateway.py`:
+```python
+LLM_CREDIT_COST: Dict[str, int] = {
+    # keyed by "{providerId}:{modelId}", falls back to DEFAULT_LLM_CREDIT_COST if not listed
+}
+DEFAULT_LLM_CREDIT_COST = 2
+```
+Populate specific entries only for models you find enumerated in `mock/models.ts` (e.g. a cheaper "-mini"/"-flash" tier at 1 credit, a frontier tier at 3–4 credits) — infer reasonable relative pricing from the model names, but do not invent exact numbers with false confidence; state your reasoning in a comment.
+
+### 4.3 Core function
+
+```python
+@dataclass
+class LlmSignalResult:
+    direction: str            # "long" | "short" | "flat"
+    confidence: float         # 0.0–1.0
+    rationale: str
+    prompt_tokens: Optional[int]
+    completion_tokens: Optional[int]
+    latency_ms: int
+    raw_status: str           # "ok" | "error" | "timeout"
+    error_message: Optional[str] = None
+
+async def call_llm_for_signal(
+    provider_id: str,
+    model_id: str,
+    system_prompt: str,
+    feature_summary: Dict[str, Any],
+    deterministic_baseline: Dict[str, Any],
+    temperature: float,
+    max_tokens: int,
+) -> LlmSignalResult:
+    ...
+```
+
+Behavior:
+1. Build a user message that gives the LLM the current `feature_summary` (RSI, EMAs, MACD, price, etc. — whatever `TechnicalAnalystNode` already computes) and the `deterministic_baseline` (the rule-based direction/confidence it would otherwise use), and instructs it to respond **only** with strict JSON: `{"direction": "long"|"short"|"flat", "confidence": <0.0-1.0>, "rationale": "<one or two sentences>"}`. State explicitly in the prompt that the deterministic baseline is provided as context, not as an instruction to merely repeat it — the LLM should form its own view, but its final direction still passes through the risk gate downstream exactly like every other signal, so there's no need to hedge on the model side.
+2. Dispatch to the correct provider's HTTP call based on `provider_id`, wrapped in `asyncio.wait_for(..., timeout=settings.LLM_CALL_TIMEOUT_SECONDS)`.
+3. Parse the response. Extract the text content, strip markdown code fences defensively (`` ```json `` / `` ``` ``) if present despite instructions, then `json.loads`. Validate `direction` is one of the three allowed literals and `confidence` is a float in `[0, 1]` — clamp confidence into range rather than rejecting on a minor out-of-range value, but reject (fall back) if `direction` is not one of the three valid values or JSON parsing fails entirely.
+4. On any exception (network error, timeout, non-2xx status, malformed JSON, invalid direction): return an `LlmSignalResult` with `raw_status="error"` or `"timeout"` and `error_message` set — never raise out of this function. The caller (`TechnicalAnalystNode`) always falls back to its deterministic result on anything other than `raw_status="ok"`.
+5. Never log the raw API key. Never include the API key in any exception message that could reach `error_message`/`llm_call_log`.
+
+### 4.4 Credit check-and-debit helper
+
+Also in `gateway.py`:
+```python
+async def check_and_debit_credits(user_id: str, cost: int, db: AsyncSession) -> bool:
+    """Returns True and debits `cost` credits atomically if the wallet has sufficient balance, else returns False without debiting."""
+```
+Implement this as a single `UPDATE credit_wallets SET balance = balance - :cost WHERE user_id = :uid AND balance >= :cost RETURNING balance` (or SQLAlchemy Core equivalent) so the check-and-debit is atomic at the database level and safe under concurrent live ticks — do not implement this as a separate `SELECT` followed by an `UPDATE`, which would race. If the wallet row doesn't exist yet for this user, treat balance as the same default-grant logic already in `billing.py`'s `fetch_user_billing_state` (240 credits) — reuse that function or factor its wallet-bootstrap logic into a shared helper so both billing.py and gateway.py call the same bootstrap path rather than duplicating the "create wallet with 240 credits" logic in two places.
+
+On successful debit, insert a `credit_transactions` row with `reason="llm_call"` and a negative `amount`, same pattern as every other wallet mutation in `billing.py`.
+
+---
+
+## 5. Task 4 — Wire `TechnicalAnalystNode`
+
+Modify `apps/engine/app/nodes/intelligence_agents/technical_analyst.py`. Keep every line of the existing deterministic RSI/EMA logic exactly as-is through to computing `direction`, `confidence`, `rationale`, `applied_rule` — this becomes your `deterministic_baseline`. After that point, add:
+
+```python
+model_config = cfg.get("model", {"providerId": "rule-engine", "modelId": "rsi-ema-momentum-v1", ...})
+provider_id = model_config.get("providerId", "rule-engine")
+
+use_llm = (
+    provider_id != "rule-engine"
+    and ctx.mode in ("paper", "live")
+    and ctx.db is not None
+    and ctx.user_id is not None
+)
+
+llm_audit = {"llm_status": "skipped_mode" if ctx.mode not in ("paper", "live") else "skipped_rule_engine"}
+
+if use_llm:
+    cost = LLM_CREDIT_COST.get(f"{provider_id}:{model_config.get('modelId','')}", DEFAULT_LLM_CREDIT_COST)
+    has_credits = await check_and_debit_credits(ctx.user_id, cost, ctx.db)
+    if not has_credits:
+        llm_audit = {"llm_status": "skipped_insufficient_credits", "credits_required": cost}
+    else:
+        result = await call_llm_for_signal(
+            provider_id, model_config.get("modelId", ""),
+            system_prompt, feature_summary=<the rsi/ema/macd dict already built>,
+            deterministic_baseline={"direction": direction, "confidence": confidence, "rationale": rationale},
+            temperature=model_config.get("temperature", 0.4),
+            max_tokens=model_config.get("maxTokens", 1024),
+        )
+        await log_llm_call(ctx, node_component_id="technical-agent", provider=provider_id,
+                            model=model_config.get("modelId",""), result=result, credits_charged=cost)
+        if result.raw_status == "ok":
+            direction, confidence, rationale = result.direction, result.confidence, f"[LLM] {result.rationale}"
+            llm_audit = {"llm_status": "ok", "llm_latency_ms": result.latency_ms, "credits_charged": cost}
+        else:
+            llm_audit = {"llm_status": result.raw_status, "llm_error": result.error_message, "credits_charged": cost}
+            # direction/confidence/rationale remain the deterministic baseline — fallback, not failure
+```
+
+`log_llm_call` is a small new helper (co-locate in `gateway.py`) that inserts one row into `llm_call_log` using `ctx.user_id`, `ctx.bot_id`, `ctx.run_id`, `ctx.live_session_id`, and commits via `ctx.db`. If the insert itself fails, swallow the exception and print a warning — a logging failure must never break the trading node's return value.
+
+The final returned dict must be the **existing** return shape with two additions merged into `audit`: `audit["deterministic_baseline"] = {direction, confidence, rationale, applied_rule}` (always present, so every trade's audit trail shows what the rule engine alone would have said — this directly serves the product's own "Attribution Opacity" goal from `docs/Full context.md` §1.2) and `audit[...]` spread of `llm_audit`. Do not rename or remove any existing top-level or `audit`-nested key — `trade-flow-modal.tsx`/`contribution-panel.tsx` must keep rendering without modification, per your Step Zero audit of those files.
+
+---
+
+## 6. Task 5 — Frontend: nothing structural, verify contract only
+
+Because this phase is additive-only to the `audit` payload:
+- Do **not** modify `deep-customization-dialog.tsx` — it already collects everything needed (`providerId`, `modelId`, `temperature`, `maxTokens`, system prompt).
+- Do **not** modify `trade-flow-modal.tsx` / `contribution-panel.tsx` structurally. If, and only if, your Step Zero audit shows these components render `audit` as a raw key-value dump (rather than a fixed set of named fields), the new `llm_status`/`llm_latency_ms`/`deterministic_baseline` fields will simply appear automatically — confirm this is the case. If instead they destructure a fixed set of expected audit keys and silently drop unknown ones, add the minimal rendering for `llm_status` (e.g. a small badge: "LLM confirmed" / "Rule-based fallback" / "Insufficient credits") without restyling anything else — this is the one narrow, justified UI touch in this phase.
+- Confirm in `apps/web/lib/billing.ts` / the billing pages that a credit debit from an LLM call (reason `"llm_call"`) shows up correctly in the existing transaction history list — it should, since `fetch_user_billing_state` already returns the 20 most recent `credit_transactions` rows regardless of `reason`, but verify no frontend code filters transactions to only `"topup"`/`"initial_grant"` reasons in a way that would hide `"llm_call"` rows.
+
+---
+
+## 7. Task 6 — Tests
+
+New `apps/engine/tests/test_llm_gateway.py`, following the existing test file conventions in `apps/engine/tests/test_billing.py` and `test_entitlements_enforcement.py` (same fixtures/mocking style — check whether they use `httpx_mock`/`respx`/manual monkeypatching and match it):
+
+- A successful mocked OpenAI-shaped response parses into a valid `LlmSignalResult` with `raw_status="ok"`.
+- A malformed-JSON response (e.g. wrapped in ```` ```json ```` fences, or with an invalid `direction` value like `"bullish"`) results in `raw_status="error"`, never an unhandled exception.
+- A simulated timeout (mock the HTTP call to hang past `LLM_CALL_TIMEOUT_SECONDS`) results in `raw_status="timeout"`, never an unhandled exception, within a bounded test time.
+- `check_and_debit_credits` correctly refuses to debit (returns `False`, wallet balance unchanged) when balance is insufficient, and correctly debits atomically when sufficient — verify by asserting the exact post-call balance, not just that it "changed."
+- Running `TechnicalAnalystNode.run(ctx, config)` with `ctx.mode="historical"` and a non-`"rule-engine"` model configured **never** attempts an HTTP call (mock/patch the HTTP client and assert it was not invoked) — this is the single most important test in this phase, since it's the enforcement of Section 0's cost/design constraint.
+- Running the same node with `ctx.mode="paper"` and a real (mocked) provider does attempt the call, and on failure falls back to a direction/confidence that exactly matches what the deterministic-only path would have produced for the same input candle/features.
+
+---
+
+## 8. Explicit non-goals for this phase
+
+Do **not**:
+- Touch `sentiment-agent`, `macro-agent`, `flow-agent`, `contrarian-agent`, `event-agent`, or any other `create_node_factory`-based node — they remain `UniversalNode` heuristic stubs. This phase proves the pattern on one node only.
+- Touch ML ensemble nodes (Layer IV), RL nodes (Layer V), debate/consensus nodes (Layer VI), confidence/calibration nodes (Layer VII beyond what already exists), or memory/learning nodes (Layers XI–XII).
+- Implement OCULUS or any vision/multimodal capability.
+- Implement BYOK (per-user API keys) or touch `/app/account/api-keys` — stays mock.
+- Call the LLM gateway from `historical`, `walk-forward`, or `monte-carlo` backtest modes under any configuration — this is a hard rule, not a default that a config flag can override in this phase.
+- Add Celery, Redis, or a job queue for LLM calls — inline `await` within the existing per-bar loop, matching the existing architecture's synchronous-per-bar-but-async-per-node model.
+- Change credit pricing for anything already metered (backtests remain free/plan-gated exactly as before — this phase only adds a new, separate credit sink for LLM calls specifically).
+- Modify `supabase/migrations/0001`–`0009` — only add `0010_llm_calls.sql`.
+
+---
+
+## 9. Acceptance checklist
+
+- [ ] A clean Python import check on `apps/engine` passes with no errors.
+- [ ] All new and existing tests in `apps/engine/tests/` pass, including the new `test_llm_gateway.py`.
+- [ ] Running an existing historical backtest before and after this change produces byte-identical `metrics`/`trades`/`equity` output for the same bot/config (spot-check at least one bot).
+- [ ] Configuring the Technical Analyst node with `providerId: "openai"` and starting a live session (or running a `paper`-type backtest) with a valid `OPENAI_API_KEY` set produces at least one `llm_call_log` row with `status='ok'` and a non-null `latency_ms`, verified directly in Supabase.
+- [ ] The same setup with an invalid/missing API key produces a `llm_call_log` row with `status='error'`, and the resulting trade signal matches what the deterministic rule alone would have produced (graceful fallback, not a crashed run).
+- [ ] Depleting a test user's credit balance to zero, then triggering an LLM-eligible node tick, produces a `llm_call_log` row with `status='skipped_insufficient_credits'`, no wallet debit occurs, and the node still returns a valid deterministic signal.
+- [ ] A successful LLM call debits exactly the expected number of credits from `credit_wallets.balance`, with a matching `credit_transactions` row (`reason='llm_call'`), and this shows up in `/app/billing/history` in the UI without any frontend code change.
+- [ ] Setting the Technical Analyst node's model to `"rule-engine"` (the default) never triggers a network call to any LLM provider, in any mode, verified by mocking/monitoring outbound HTTP calls during a test run.
+- [ ] No `OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`DEEPSEEK_API_KEY` value appears anywhere in the `apps/web` bundle, in `apps/engine` git history, or in any log line (`grep` the built frontend output and recent commits).
+- [ ] The existing Trade Flow Modal / Contribution Panel continue to render trade audit trails without visual regression for trades produced by nodes that never touched the LLM gateway (i.e. every existing historical backtest's trades still display exactly as before).
+
+---
+
+## 10. What this phase deliberately does not finish
+
+After this phase: one agent node (Technical Analyst) can make real, credit-metered LLM calls during paper/live trading only, with full audit logging and graceful degradation. The other four intelligence-agent stubs, the entire ML ensemble, RL, debate/consensus, confidence calibration beyond the existing gate, OCULUS vision, and the ChromaDB memory/reflection system from `docs/Full context.md` §9 remain exactly as they were: either rule-based heuristics or entirely unbuilt. State that plainly in your summary. The next phase in this sequence should replicate this exact gateway/credit/audit pattern for the remaining Layer III agent nodes before attempting anything from Layer IV upward — do not skip ahead to ML/RL/debate in a single future prompt; that violates the same bounded-scope discipline this document follows.

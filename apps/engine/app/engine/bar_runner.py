@@ -32,6 +32,12 @@ async def run_one_bar(
     portfolio: Any,
     return_context: bool = False,
     historical_window: Optional[Any] = None,
+    mode: str = "historical",
+    user_id: Optional[str] = None,
+    bot_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    live_session_id: Optional[str] = None,
+    db: Optional[Any] = None,
 ) -> Any:
     """
     Runs one bar through the compiled node pipeline against a portfolio.
@@ -42,6 +48,12 @@ async def run_one_bar(
         portfolio=portfolio,
         upstream_outputs={},
         historical_window=historical_window,
+        mode=mode,
+        user_id=user_id,
+        bot_id=bot_id,
+        run_id=run_id,
+        live_session_id=live_session_id,
+        db=db,
     )
     closed_trade = None
 

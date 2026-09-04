@@ -36,11 +36,23 @@ class NodeContext:
         portfolio: Any,
         upstream_outputs: Dict[str, Any],
         historical_window: Optional[Any] = None,
+        mode: str = "historical",
+        user_id: Optional[str] = None,
+        bot_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        live_session_id: Optional[str] = None,
+        db: Optional[Any] = None,
     ):
         self.candle = candle
         self.portfolio = portfolio
         self.upstream_outputs = upstream_outputs
         self.historical_window = historical_window
+        self.mode = mode
+        self.user_id = user_id
+        self.bot_id = bot_id
+        self.run_id = run_id
+        self.live_session_id = live_session_id
+        self.db = db
 
 class Node(Protocol):
     component_id: str

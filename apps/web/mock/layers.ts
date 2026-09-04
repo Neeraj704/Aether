@@ -164,8 +164,8 @@ export function layerIndex(id: LayerId) {
 }
 
 export interface ModelSelection {
-  providerId: string // 'openai' | 'anthropic' | 'google' | 'alibaba' | 'deepseek' | 'ollama'
-  modelId: string // e.g. 'gpt-5-mini', or free-typed 'llama3.1:8b'
+  providerId: string // 'groq' | 'openai' | 'anthropic' | 'google' | 'alibaba' | 'deepseek' | 'ollama'
+  modelId: string // e.g. 'openai/gpt-oss-120b', 'gpt-5-mini', or free-typed 'llama3.1:8b'
   endpoint?: string // for 'ollama' - default http://localhost:11434
   apiKey?: string // Optional custom user BYOK key
   temperature: number
@@ -715,7 +715,7 @@ export const COMPONENTS: ComponentDef[] = [
         key: 'model',
         label: 'Intelligence Model',
         type: 'model-select',
-        value: { providerId: 'openai', modelId: 'gpt-5-mini', temperature: 0.4, maxTokens: 1024 },
+        value: { providerId: 'groq', modelId: 'openai/gpt-oss-120b', temperature: 0.4, maxTokens: 1024 },
       },
       {
         key: 'systemPrompt',

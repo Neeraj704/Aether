@@ -10,6 +10,7 @@ const ICONS: Record<ToastKind, typeof Info> = {
   success: CheckCircle2,
   error: TriangleAlert,
   info: Info,
+  warn: TriangleAlert,
   unlock: Sparkles,
 }
 
@@ -17,6 +18,7 @@ const ACCENTS: Record<ToastKind, string> = {
   success: 'text-profit',
   error: 'text-loss',
   info: 'text-brand',
+  warn: 'text-amber-400',
   unlock: 'text-gold',
 }
 

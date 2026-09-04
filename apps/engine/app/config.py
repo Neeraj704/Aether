@@ -19,6 +19,13 @@ class Settings:
     RAZORPAY_KEY_SECRET: str = os.getenv("RAZORPAY_KEY_SECRET", "mocksecret123")
     RAZORPAY_WEBHOOK_SECRET: str = os.getenv("RAZORPAY_WEBHOOK_SECRET", "mockwebhooksecret123")
     
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "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")
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    LLM_CALL_TIMEOUT_SECONDS: float = float(os.getenv("LLM_CALL_TIMEOUT_SECONDS", "12"))
+
     ALLOWED_ORIGINS_RAW: str = os.getenv(
         "ALLOWED_ORIGINS", 
         "http://localhost:3000,http://127.0.0.1:3000"

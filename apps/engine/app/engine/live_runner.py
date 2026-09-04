@@ -288,7 +288,14 @@ async def evaluate_live_snapshot(bot_id: str, bot_graph_dict: dict, symbol: str 
         dummy_portfolio = Portfolio(cash=100000.0)
         node_instances = build_node_instances(ordered_nodes)
         closed_trade, current_eq, ctx = await run_one_bar(
-            node_instances, candle, dummy_portfolio, return_context=True, historical_window=recent_df
+            node_instances,
+            candle,
+            dummy_portfolio,
+            return_context=True,
+            historical_window=recent_df,
+            mode="live",
+            bot_id=str(bot_id),
+            db=session,
         )
 
         steps = build_node_step_summaries(node_instances, ctx.upstream_outputs, candle, bot_id)
@@ -392,7 +399,16 @@ async def tick_bot(bot_id: str, session: Optional[AsyncSession] = None):
         # 5. Build node instances and execute bar
         node_instances = build_node_instances(ordered_nodes)
         closed_trade, current_equity, ctx = await run_one_bar(
-            node_instances, candle, portfolio, return_context=True, historical_window=recent_df
+            node_instances,
+            candle,
+            portfolio,
+            return_context=True,
+            historical_window=recent_df,
+            mode="live",
+            user_id=str(live_session.user_id),
+            bot_id=str(live_session.bot_id),
+            live_session_id=str(live_session.id),
+            db=session,
         )
 
         # Generate node step inspection details & logs

@@ -20,9 +20,9 @@ interface ModelSelectFieldProps {
 
 export function ModelSelectField({
   value = {
-    providerId: 'openai',
-    modelId: 'gpt-5-mini',
-    temperature: 0.7,
+    providerId: 'groq',
+    modelId: 'openai/gpt-oss-120b',
+    temperature: 0.4,
     maxTokens: 1024,
   },
   onChange,
@@ -118,7 +118,7 @@ export function ModelSelectField({
         <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
           <Cpu className="size-3.5 text-brand" /> LLM Reasoning Provider
         </span>
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-1.5">
           {PROVIDERS.map((p) => {
             const isSelected = p.id === currentProvider.id
             return (

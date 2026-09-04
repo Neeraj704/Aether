@@ -259,6 +259,11 @@ async def simulate_historical_pass(
     slippage_multiplier: float = 1.0,
     queue_delay: int = 0,
     seed_offset: int = 0,
+    mode: str = "historical",
+    user_id: Optional[str] = None,
+    bot_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    db: Optional[Any] = None,
 ) -> tuple[List[ClosedTrade], List[EquityPoint], Portfolio]:
     portfolio = Portfolio(cash=config.capital, seed=config.seed + seed_offset)
     equity_curve: List[EquityPoint] = []
@@ -280,7 +285,16 @@ async def simulate_historical_pass(
         if idx % 300 == 0:
             await asyncio.sleep(0)
 
-        closed_trade, current_eq = await run_one_bar(node_instances, candle, portfolio)
+        closed_trade, current_eq = await run_one_bar(
+            node_instances,
+            candle,
+            portfolio,
+            mode=mode,
+            user_id=user_id,
+            bot_id=bot_id,
+            run_id=run_id,
+            db=db,
+        )
         if closed_trade is not None:
             trades.append(closed_trade)
 
@@ -305,7 +319,12 @@ async def run_backtest(
     db: AsyncSession,
 ):
     try:
-        # Mark running
+        # Mark running and fetch run record to get user_id & bot_id
+        run_res = await db.execute(select(BacktestRunModel).where(BacktestRunModel.id == uuid.UUID(run_id)))
+        run_model = run_res.scalars().first()
+        user_id_str = str(run_model.user_id) if run_model and run_model.user_id else None
+        bot_id_str = str(run_model.bot_id) if run_model and run_model.bot_id else None
+
         await db.execute(
             update(BacktestRunModel)
             .where(BacktestRunModel.id == uuid.UUID(run_id))
@@ -351,7 +370,8 @@ async def run_backtest(
         # ----------------------------------------------------
         if sim_type == "historical":
             trades, equity_curve, portfolio = await simulate_historical_pass(
-                ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.0
+                ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.0,
+                mode="historical", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=None,
             )
 
         # ----------------------------------------------------
@@ -359,7 +379,8 @@ async def run_backtest(
         # ----------------------------------------------------
         elif sim_type == "paper":
             trades, equity_curve, portfolio = await simulate_historical_pass(
-                ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.45, queue_delay=1, seed_offset=17
+                ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.45, queue_delay=1, seed_offset=17,
+                mode="paper", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=db,
             )
 
         # ----------------------------------------------------
@@ -398,7 +419,8 @@ async def run_backtest(
                             type="walk-forward",
                         )
                         f_trades, f_eq, f_port = await simulate_historical_pass(
-                            ordered_nodes, test_records, fold_cfg, test_df, slippage_multiplier=1.15, seed_offset=f * 50
+                            ordered_nodes, test_records, fold_cfg, test_df, slippage_multiplier=1.15, seed_offset=f * 50,
+                            mode="walk-forward", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=None,
                         )
                         all_trades.extend(f_trades)
                         all_equity.extend(f_eq)
@@ -410,7 +432,8 @@ async def run_backtest(
                 portfolio.equity = running_cap
             else:
                 trades, equity_curve, portfolio = await simulate_historical_pass(
-                    ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.2
+                    ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.2,
+                    mode="walk-forward", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=None,
                 )
 
         # ----------------------------------------------------
@@ -418,7 +441,8 @@ async def run_backtest(
         # ----------------------------------------------------
         elif sim_type == "monte-carlo":
             base_trades, base_eq, base_port = await simulate_historical_pass(
-                ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.0
+                ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.0,
+                mode="monte-carlo", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=None,
             )
             np.random.seed(config.seed)
             if base_trades:

@@ -30,8 +30,8 @@ class LlmAgentNode:
         self.config = config or {}
 
     def find_upstream(self, ctx: NodeContext, output_type: str) -> Optional[dict]:
-        """Helper to find the first upstream output matching a given type."""
-        for out in ctx.upstream_outputs.values():
+        """Helper to find the most recent upstream output matching a given type."""
+        for out in reversed(list(ctx.upstream_outputs.values())):
             if isinstance(out, dict) and out.get("type") == output_type:
                 return out
         return None
@@ -73,7 +73,7 @@ class LlmAgentNode:
             "providerId": self.default_provider_id,
             "modelId": self.default_model_id,
             "temperature": 0.4,
-            "maxTokens": 1024,
+            "maxTokens": 250,
         })
         provider_id = model_config.get("providerId", self.default_provider_id)
 
@@ -101,10 +101,22 @@ class LlmAgentNode:
             use_byok = bool(model_config.get("useByok", False))
             custom_api_key = await resolve_byok_key(ctx.user_id, provider_id, ctx.db) if use_byok else None
             cost = get_llm_credit_cost(provider_id, model_id, bool(custom_api_key))
-            has_credits = await check_and_debit_credits(ctx.user_id, cost, ctx.db)
+            has_credits = True if custom_api_key else await check_and_debit_credits(ctx.user_id, cost, ctx.db)
+
+            if custom_api_key:
+                if len(custom_api_key) > 8:
+                    key_preview = f"{custom_api_key[:6]}...{custom_api_key[-4:]} (len: {len(custom_api_key)}, source: user_vault_byok)"
+                else:
+                    key_preview = f"{custom_api_key} (source: user_vault_byok)"
+            else:
+                key_preview = "using server managed key" if not use_byok else "no vaulted key found (fell back to server managed key)"
 
             if not has_credits:
-                llm_audit = {"llm_status": "skipped_insufficient_credits", "credits_required": cost}
+                llm_audit = {
+                    "llm_status": "skipped_insufficient_credits",
+                    "credits_required": cost,
+                    "byok_key_used": key_preview,
+                }
                 skipped_result = LlmSignalResult(
                     direction=direction,
                     confidence=confidence,
@@ -123,6 +135,10 @@ class LlmAgentNode:
                 )
             else:
                 feature_summary = self.build_feature_summary(ctx, cfg, current_close)
+                user_max_tokens = int(model_config.get("maxTokens", 1024))
+                is_reasoning_model = any(k in model_id.lower() for k in ("compound", "r1", "oss", "reasoning", "deep"))
+                api_max_tokens = max(512 if is_reasoning_model else 256, min(8192, max(128, user_max_tokens)))
+
                 result = await call_llm_for_signal(
                     provider_id=provider_id,
                     model_id=model_id,
@@ -130,7 +146,7 @@ class LlmAgentNode:
                     feature_summary=feature_summary,
                     deterministic_baseline={"direction": direction, "confidence": confidence, "rationale": rationale},
                     temperature=float(model_config.get("temperature", 0.4)),
-                    max_tokens=int(model_config.get("maxTokens", 1024)),
+                    max_tokens=api_max_tokens,
                     custom_api_key=custom_api_key,
                 )
                 actual_credits_charged = cost if result.raw_status == "ok" else 0
@@ -157,12 +173,14 @@ class LlmAgentNode:
                         "credits_charged": actual_credits_charged,
                         "prompt_tokens": result.prompt_tokens,
                         "completion_tokens": result.completion_tokens,
+                        "byok_key_used": key_preview,
                     }
                 else:
                     llm_audit = {
                         "llm_status": result.raw_status,
                         "llm_error": result.error_message,
                         "credits_charged": actual_credits_charged,
+                        "byok_key_used": key_preview,
                     }
 
         sanitized_model_config = redact_model_config(model_config)

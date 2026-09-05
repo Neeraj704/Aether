@@ -57,18 +57,6 @@ async def fetch_latest_candle(symbol: str = "BTCUSDT", interval: str = "15m", se
         "volume": float(k[5]),
     }
 
-    if session is not None:
-        try:
-            stmt = pg_insert(CandleModel).values([candle])
-            stmt = stmt.on_conflict_do_nothing(
-                index_elements=["symbol", "resolution", "open_time"]
-            )
-            await session.execute(stmt)
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
-            print(f"[Candle Ingest] Notice on candle upsert: {e}")
-
     return candle
 
 async def fetch_recent_candles_df(symbol: str = "BTCUSDT", interval: str = "1m", limit: int = 60) -> Optional[Any]:

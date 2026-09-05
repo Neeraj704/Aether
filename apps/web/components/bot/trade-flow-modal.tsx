@@ -129,7 +129,69 @@ export function TradeFlowModal({ open, onOpenChange, trade }: TradeFlowModalProp
   if (!trade) return null
 
   const ef = trade.executionFlow || {}
-  const rawSteps: any[] = Array.isArray(ef.steps) ? ef.steps : Array.isArray(ef.flow) ? ef.flow : []
+  let rawSteps: any[] = Array.isArray(ef.steps) ? ef.steps : Array.isArray(ef.flow) ? ef.flow : []
+
+  // If rawSteps is empty, dynamically construct from trade.rawPosition.upstream_outputs
+  if (rawSteps.length === 0 && trade.rawPosition?.upstream_outputs) {
+    const upstream = trade.rawPosition.upstream_outputs
+    let idx = 1
+    for (const [nodeId, out] of Object.entries(upstream)) {
+      const outObj = out as any
+      const outType = outObj?.type || ''
+      let layer = 'logic'
+      let nodeName = nodeId
+      let comp = `Executed ${nodeId}`
+
+      if (outType === 'MarketData') {
+        layer = 'data'
+        nodeName = nodeId.includes('orderbook') ? 'Orderbook Depth Feed' : 'OHLCV Price Feed'
+        comp = `Ingested real-time market data for ${outObj?.symbol || trade.symbol}`
+      } else if (outType === 'NewsFeed') {
+        layer = 'data'
+        nodeName = 'Live News & Narrative Stream'
+        comp = `Ingested ${outObj?.articleCount || 0} news headlines (sentiment score ${outObj?.sentimentScore || 0})`
+      } else if (outType === 'FeatureVector') {
+        layer = 'features'
+        nodeName = nodeId.includes('regime') ? 'Market Regime Tagger' : 'Technical Indicators'
+        comp = `Computed technical features: RSI=${Number(outObj?.rsi || 0).toFixed(1)}, Fast EMA=$${Number(outObj?.ema_fast || 0).toLocaleString()}`
+      } else if (outType === 'Signal') {
+        if (nodeId.includes('gbdt') || nodeId.includes('forecast')) {
+          layer = 'ml'
+          nodeName = 'GBDT Gradient Boosting Forecast'
+        } else if (nodeId.includes('contrarian')) {
+          layer = 'agents'
+          nodeName = 'Contrarian Trap Detector'
+        } else if (nodeId.includes('flow')) {
+          layer = 'agents'
+          nodeName = 'Order Flow Imbalance Agent'
+        } else if (nodeId.includes('sentiment')) {
+          layer = 'agents'
+          nodeName = 'Market Sentiment Agent'
+        } else if (nodeId.includes('agreement') || nodeId.includes('consensus')) {
+          layer = 'agents'
+          nodeName = 'Multi-Agent Consensus (Agreement Score)'
+        } else {
+          layer = 'agents'
+          nodeName = outObj?.agentName || 'Technical Analyst Agent'
+        }
+        comp = outObj?.rationale || `Signal: ${String(outObj?.direction || 'neutral').toUpperCase()} (${Math.round(Number(outObj?.confidence || 0.5) * 100)}% conviction)`
+      } else if (outType === 'RiskDecision') {
+        layer = 'risk'
+        nodeName = 'Institutional Risk Gate'
+        comp = outObj?.reason || 'Verified risk thresholds and allocated capital'
+      }
+
+      rawSteps.push({
+        stepIndex: idx++,
+        layer,
+        nodeId,
+        nodeName,
+        status: 'completed',
+        computation: comp,
+        output: outObj,
+      })
+    }
+  }
 
   // Extract candle/features/signal/risk from executionFlow steps if missing directly on trade
   const candleStep = rawSteps.find((s) => s.nodeId === 'ohlcv-feed' || s.layer === 'data' || s.type === 'candle')
@@ -172,7 +234,7 @@ export function TradeFlowModal({ open, onOpenChange, trade }: TradeFlowModalProp
       features: featuresData,
       signal: signalData,
       riskDecision: riskData,
-      executionFlow: ef,
+      executionFlow: ef.steps ? ef : { steps: rawSteps },
       rawPosition: trade.rawPosition,
     }
     navigator.clipboard.writeText(JSON.stringify(fullAudit, null, 2))
@@ -181,7 +243,7 @@ export function TradeFlowModal({ open, onOpenChange, trade }: TradeFlowModalProp
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const nodeCount = rawSteps.length > 0 ? rawSteps.length : 5
+  const nodeCount = rawSteps.length > 0 ? rawSteps.length : 1
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

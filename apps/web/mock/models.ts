@@ -24,6 +24,7 @@ export const PROVIDERS: Provider[] = [
       { id: 'openai/gpt-oss-20b', label: 'GPT OSS 20B', contextWindow: '131K', speed: 'fast', costTier: 'low' },
       { id: 'groq/compound', label: 'Groq Compound (Agentic)', contextWindow: '131K', speed: 'fast', costTier: 'low' },
       { id: 'groq/compound-mini', label: 'Groq Compound Mini', contextWindow: '131K', speed: 'fast', costTier: 'low' },
+      { id: 'qwen/qwen3.8-27b', label: 'Qwen 3.8 27B', contextWindow: '131K', speed: 'fast', costTier: 'low' },
       { id: 'qwen/qwen3.6-27b', label: 'Qwen 3.6 27B', contextWindow: '131K', speed: 'fast', costTier: 'low' },
     ],
   },

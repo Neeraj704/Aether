@@ -64,12 +64,28 @@ export function StatusBadge({
   const { label, variant } = STATUS_MAP[status]
   return (
     <Badge variant={variant} size={size} className={className}>
-      {status === 'live' ? (
-        <span className="relative flex size-1.5">
-          <span className="absolute inset-0 animate-ping rounded-full bg-profit opacity-75" />
-          <span className="relative size-1.5 rounded-full bg-profit" />
+      {status === 'live' && (
+        <span className="relative flex size-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex size-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
         </span>
-      ) : null}
+      )}
+      {status === 'error' && (
+        <span className="relative flex size-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+          <span className="relative inline-flex size-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]" />
+        </span>
+      )}
+      {status === 'paused' && (
+        <span className="relative flex size-2">
+          <span className="relative inline-flex size-2 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]" />
+        </span>
+      )}
+      {status === 'backtested' && (
+        <span className="relative flex size-2">
+          <span className="relative inline-flex size-2 rounded-full bg-cyan-400" />
+        </span>
+      )}
       {label}
     </Badge>
   )

@@ -39,10 +39,12 @@ class UniversalNode:
 
         upstream = ctx.upstream_outputs
 
-        # Find upstream objects if available
-        features = next((v for v in upstream.values() if isinstance(v, dict) and v.get("type") == "FeatureVector"), {})
-        signal = next((v for v in upstream.values() if isinstance(v, dict) and v.get("type") == "Signal"), None)
-        risk = next((v for v in upstream.values() if isinstance(v, dict) and v.get("type") == "RiskDecision"), None)
+        # Find upstream objects if available (from most immediate predecessor)
+        upstream_list = list(reversed(list(upstream.values())))
+        features = next((v for v in upstream_list if isinstance(v, dict) and v.get("type") == "FeatureVector"), {})
+        active_signals = [v for v in upstream_list if isinstance(v, dict) and v.get("type") == "Signal" and v.get("direction") in ("long", "short")]
+        signal = active_signals[0] if active_signals else next((v for v in upstream_list if isinstance(v, dict) and v.get("type") == "Signal"), None)
+        risk = next((v for v in upstream_list if isinstance(v, dict) and v.get("type") == "RiskDecision"), None)
 
         rsi = float(features.get("rsi", 50.0))
         ema_fast = float(features.get("ema_fast", current_close))
@@ -62,7 +64,7 @@ class UniversalNode:
                 "close": current_close,
                 "volume": current_volume,
                 "depthLevels": cfg.get("levels", 10),
-                "sentimentScore": 0.65 if rsi < 40 else (-0.65 if rsi > 60 else 0.0),
+                "sentimentScore": 0.45 if (ema_fast > ema_slow and rsi > 52) else (-0.45 if (ema_fast < ema_slow and rsi < 48) else 0.0),
                 "blackoutActive": False,
             }
 
@@ -71,7 +73,13 @@ class UniversalNode:
         # ----------------------------------------------------
         elif self.layer == "features":
             zscore = (current_close - ema_slow) / max(0.1, abs(ema_fast - ema_slow) + 1.0)
-            regime = "Trend" if abs(ema_fast - ema_slow) > current_close * 0.01 else "Chop"
+            if ema_fast > ema_slow * 1.002 and rsi >= 50:
+                regime = "BullTrend"
+            elif ema_fast < ema_slow * 0.998 and rsi <= 50:
+                regime = "BearTrend"
+            else:
+                regime = "Chop"
+
             return {
                 "type": "FeatureVector",
                 "rsi": rsi,
@@ -89,14 +97,26 @@ class UniversalNode:
         # ----------------------------------------------------
         elif self.layer == "agents":
             threshold = float(cfg.get("confidenceThreshold", 0.65))
-            if rsi < 35:
+            macd = float(features.get("macd", 0.0))
+            macd_signal = float(features.get("macd_signal", 0.0))
+            regime = features.get("regime", "Chop")
+
+            if (regime == "BullTrend" or ema_fast > ema_slow * 1.002) and 46 <= rsi <= 68 and macd > macd_signal:
                 direction = "long"
-                conf = min(0.95, max(threshold, 0.70 + (35 - rsi) * 0.01))
-                rationale = f"{self.name}: Bullish momentum conviction ({conf:.0%}) based on oversold metrics."
-            elif rsi > 65:
+                conf = min(0.92, max(threshold, 0.72 + (rsi - 46) * 0.008))
+                rationale = f"{self.name}: Bullish trend momentum ({conf:.0%}) aligned with moving averages."
+            elif (regime == "BearTrend" or ema_fast < ema_slow * 0.998) and 32 <= rsi <= 54 and macd < macd_signal:
                 direction = "short"
-                conf = min(0.95, max(threshold, 0.70 + (rsi - 65) * 0.01))
-                rationale = f"{self.name}: Bearish momentum conviction ({conf:.0%}) based on overbought resistance."
+                conf = min(0.92, max(threshold, 0.72 + (54 - rsi) * 0.008))
+                rationale = f"{self.name}: Bearish trend momentum ({conf:.0%}) aligned with moving averages."
+            elif rsi < 28:
+                direction = "long"
+                conf = min(0.95, max(threshold, 0.75 + (28 - rsi) * 0.015))
+                rationale = f"{self.name}: Oversold support bounce ({conf:.0%}) at RSI {rsi:.1f}."
+            elif rsi > 72:
+                direction = "short"
+                conf = min(0.95, max(threshold, 0.75 + (rsi - 72) * 0.015))
+                rationale = f"{self.name}: Overbought resistance rejection ({conf:.0%}) at RSI {rsi:.1f}."
             else:
                 direction = "flat"
                 conf = 0.50
@@ -115,12 +135,32 @@ class UniversalNode:
         # Layer IV: ML Predictive Models
         # ----------------------------------------------------
         elif self.layer == "ml":
-            pred_return = 0.015 if rsi < 35 else (-0.015 if rsi > 65 else 0.0)
-            direction = "long" if pred_return > 0 else ("short" if pred_return < 0 else "flat")
+            regime = features.get("regime", "Chop")
+            if regime == "BullTrend" and rsi < 70:
+                pred_return = 0.018
+                direction = "long"
+                conf = 0.84
+            elif regime == "BearTrend" and rsi > 30:
+                pred_return = -0.018
+                direction = "short"
+                conf = 0.84
+            elif rsi < 28:
+                pred_return = 0.022
+                direction = "long"
+                conf = 0.88
+            elif rsi > 72:
+                pred_return = -0.022
+                direction = "short"
+                conf = 0.88
+            else:
+                pred_return = 0.0
+                direction = "flat"
+                conf = 0.50
+
             return {
                 "type": "Signal",
                 "direction": direction,
-                "confidence": 0.82 if direction != "flat" else 0.50,
+                "confidence": conf,
                 "price": current_close,
                 "predictedReturnPct": round(pred_return * 100, 2),
                 "rationale": f"{self.name} model forecast: {pred_return:+.2%} expected move over 12 bars.",
@@ -138,21 +178,66 @@ class UniversalNode:
             }
 
         # ----------------------------------------------------
-        # Layer VI: Debate & Consensus
+        # Layer VI & VII: Debate, Agreement Score & Consensus
         # ----------------------------------------------------
-        elif self.layer == "debate":
-            base_dir = signal.get("direction", "flat") if signal else "flat"
-            base_conf = signal.get("confidence", 0.5) if signal else 0.5
+        elif self.layer == "debate" or self.component_id == "agreement-score":
+            w_tech = float(cfg.get("weightTech", 0.35))
+            w_ml = float(cfg.get("weightMl", 0.35))
+            w_flow = float(cfg.get("weightFlow", 0.15))
+            w_sent = float(cfg.get("weightSentiment", 0.15))
+
+            # Extract specific upstream agent signals by node key/content
+            sig_tech = next((v for k, v in upstream.items() if "tech" in k and isinstance(v, dict) and v.get("type") == "Signal"), None)
+            sig_ml = next((v for k, v in upstream.items() if ("ml" in k or "gbdt" in k) and isinstance(v, dict) and v.get("type") == "Signal"), None)
+            sig_flow = next((v for k, v in upstream.items() if "flow" in k and isinstance(v, dict) and v.get("type") == "Signal"), None)
+            sig_sent = next((v for k, v in upstream.items() if "sentiment" in k and isinstance(v, dict) and v.get("type") == "Signal"), None)
+            sig_contra = next((v for k, v in upstream.items() if "contrarian" in k and isinstance(v, dict) and v.get("type") == "Signal"), None)
+
+            def score_sig(s):
+                if not s or s.get("direction") == "flat":
+                    return 0.0
+                conf = float(s.get("confidence", 0.5))
+                return conf if s.get("direction") == "long" else -conf
+
+            net_score = (
+                score_sig(sig_tech) * w_tech +
+                score_sig(sig_ml) * w_ml +
+                score_sig(sig_flow) * w_flow +
+                score_sig(sig_sent) * w_sent
+            )
+
+            # Contrarian trap dampener
+            if sig_contra and sig_contra.get("direction") in ("long", "short"):
+                contra_dir = sig_contra.get("direction")
+                if (net_score > 0 and contra_dir == "short") or (net_score < 0 and contra_dir == "long"):
+                    net_score *= 0.6
+
+            threshold = 0.28  # High conviction net directional consensus threshold
+
+            if net_score >= threshold:
+                base_dir = "long"
+                base_conf = round(min(0.95, 0.68 + net_score * 0.30), 2)
+                rationale = f"Consensus Agreement: High-conviction bullish consensus (+{net_score:.2f}, Conviction {base_conf:.0%})."
+            elif net_score <= -threshold:
+                base_dir = "short"
+                base_conf = round(min(0.95, 0.68 + abs(net_score) * 0.30), 2)
+                rationale = f"Consensus Agreement: High-conviction bearish consensus ({net_score:.2f}, Conviction {base_conf:.0%})."
+            else:
+                base_dir = "flat"
+                base_conf = 0.50
+                rationale = f"Consensus Agreement: Score {net_score:+.2f} within neutral deadband (No trade consensus)."
+
             return {
                 "type": "Signal",
                 "direction": base_dir,
-                "confidence": min(0.95, base_conf + 0.05),
+                "confidence": base_conf,
                 "price": current_close,
-                "rationale": f"Debate consensus reached: {base_dir.upper()} posture approved with moderator agreement 88%.",
+                "rationale": rationale,
+                "agentName": "Multi-Agent Consensus",
             }
 
         # ----------------------------------------------------
-        # Layer VII: Confidence & Calibration
+        # Layer VII: Confidence & Calibration (other nodes)
         # ----------------------------------------------------
         elif self.layer == "confidence":
             base_conf = signal.get("confidence", 0.5) if signal else 0.5

@@ -21,6 +21,8 @@ interface ModelSelectFieldProps {
   disabled?: boolean
 }
 
+let _cachedProviderKeys: ProviderKeyMeta[] | null = null
+
 export function ModelSelectField({
   value = {
     providerId: 'groq',
@@ -37,15 +39,16 @@ export function ModelSelectField({
 
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null)
-  const [storedKeys, setStoredKeys] = useState<ProviderKeyMeta[]>([])
-  const [loadingKeys, setLoadingKeys] = useState(false)
+  const [storedKeys, setStoredKeys] = useState<ProviderKeyMeta[]>(_cachedProviderKeys || [])
+  const [loadingKeys, setLoadingKeys] = useState(!_cachedProviderKeys)
 
   useEffect(() => {
     let active = true
     async function loadKeys() {
-      setLoadingKeys(true)
+      if (!_cachedProviderKeys) setLoadingKeys(true)
       try {
         const keys = await fetchUserProviderKeys()
+        _cachedProviderKeys = keys
         if (active) {
           setStoredKeys(keys)
         }
@@ -280,7 +283,14 @@ export function ModelSelectField({
               />
             </div>
 
-            {value.useByok && !hasStoredKey && (
+            {value.useByok && loadingKeys && (
+              <div className="flex items-center gap-2 p-2.5 rounded-lg border border-border bg-secondary/30 text-muted-foreground text-[11px]">
+                <Loader2 className="size-3.5 animate-spin text-brand" />
+                <span>Checking vaulted {currentProvider.name} key status...</span>
+              </div>
+            )}
+
+            {value.useByok && !loadingKeys && !hasStoredKey && (
               <div className="flex items-start gap-2 p-2.5 rounded-lg border border-warn/30 bg-warn/10 text-warn text-[11px] leading-relaxed">
                 <AlertCircle className="size-4 shrink-0 mt-0.5" />
                 <div className="flex flex-col gap-1">
@@ -298,7 +308,7 @@ export function ModelSelectField({
               </div>
             )}
 
-            {value.useByok && hasStoredKey && (
+            {value.useByok && !loadingKeys && hasStoredKey && (
               <div className="flex items-center gap-2 text-[11px] text-profit font-medium">
                 <Check className="size-3.5" />
                 <span>Vaulted {currentProvider.name} key active. Free execution (0 credits charged).</span>

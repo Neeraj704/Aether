@@ -12,23 +12,17 @@ import {
   Activity,
   Cpu,
   ShieldCheck,
+  Bot as BotIcon,
+  Sparkles,
 } from 'lucide-react'
-import type { Bot, BacktestRun } from '@/mock/data'
+import type { Bot, BacktestRun, BotNode } from '@/mock/data'
+import { COMPONENT_MAP, LAYERS, type LayerId } from '@/mock/layers'
 import { useWorkspace } from '@/lib/workspace-store'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { startBacktest, getBacktest } from '@/lib/engine'
 import { formatINR } from '@/lib/utils'
 import type { BacktestConfigValues } from './config-panel'
-
-const ENGINE_STEPS = [
-  'Initializing simulation environment and fetching historical feeds...',
-  'Parsing OHLCV candle series and feature engineering pipelines...',
-  'Running Technical Analyst agent evaluation on 15m timeframe...',
-  'Evaluating Risk Gate limits and sizing capital allocation...',
-  'Paper Executor: simulating order fills with slippage & fee deductions...',
-  'Compiling equity curve, trade log, and layer attribution statistics...',
-]
 
 export function RunProgress({
   bot,
@@ -45,12 +39,21 @@ export function RunProgress({
   const [logs, setLogs] = useState<{ timestamp: string; text: string }[]>([])
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
+  // Extract all actual nodes from the bot graph
+  const rawNodes: BotNode[] = (bot.graph?.nodes && bot.graph.nodes.length > 0)
+    ? bot.graph.nodes
+    : ((bot as any).nodes && (bot as any).nodes.length > 0)
+    ? (bot as any).nodes
+    : []
+
+  const activeNodes = rawNodes.filter((n) => n.enabled !== false)
+
   // Dynamic live telemetry states
   const [tradeCount, setTradeCount] = useState(0)
   const [currentDateStr, setCurrentDateStr] = useState(config.from)
   const [barsProcessed, setBarsProcessed] = useState(0)
   const [totalBars, setTotalBars] = useState(14400)
-  const [activeLayer, setActiveLayer] = useState<'data' | 'features' | 'agents' | 'risk' | 'execution'>('data')
+  const [activeNodeIndex, setActiveNodeIndex] = useState(0)
 
   const completedRef = useRef(false)
   const runIdRef = useRef<string | null>(null)
@@ -65,6 +68,44 @@ export function RunProgress({
     setLogs((prev) => [...prev, { timestamp: timeStr, text }])
   }
 
+  // Generate dynamic simulation steps reflecting the real nodes wired into this bot
+  const engineSteps = activeNodes.length > 0
+    ? activeNodes.map((n) => {
+        const comp = COMPONENT_MAP[n.componentId]
+        const name = comp?.name || n.componentId || 'Component'
+        const layer = comp?.layer || 'data'
+        if (layer === 'data') {
+          return `Ingesting & streaming live historical feeds for "${name}" (${n.id})...`
+        }
+        if (layer === 'features') {
+          return `Feature Engineering: "${name}" computing indicator vectors & volatility metrics...`
+        }
+        if (layer === 'agents') {
+          return `Multi-Agent Intelligence: "${name}" evaluating directional conviction & market state...`
+        }
+        if (layer === 'ml') {
+          return `Machine Learning: "${name}" running inference forecast across feature vectors...`
+        }
+        if (layer === 'confidence') {
+          return `Consensus & Calibration: "${name}" aggregating multi-agent agreement score...`
+        }
+        if (layer === 'risk') {
+          return `Institutional Risk Gate: "${name}" evaluating drawdowns, sizing limits & stop loss...`
+        }
+        if (layer === 'execution') {
+          return `Execution Engine: "${name}" simulating paper order fills with slippage & exchange fees...`
+        }
+        return `Evaluating pipeline node "${name}" (${n.id})...`
+      })
+    : [
+        'Initializing simulation environment and fetching historical feeds...',
+        'Parsing OHLCV candle series and feature engineering pipelines...',
+        'Running Technical Analyst agent evaluation on 15m timeframe...',
+        'Evaluating Risk Gate limits and sizing capital allocation...',
+        'Paper Executor: simulating order fills with slippage & fee deductions...',
+        'Compiling equity curve, trade log, and layer attribution statistics...',
+      ]
+
   // Fast rapid simulation ticker effect while running
   useEffect(() => {
     const startDate = new Date(config.from).getTime()
@@ -75,7 +116,7 @@ export function RunProgress({
       if (completedRef.current) return
 
       setProgress((prev) => {
-        const next = Math.min(96, prev + 1.5)
+        const next = Math.min(96, prev + 1.2)
         // Advance simulated date proportionally
         const currentSimMs = startDate + (next / 100) * totalSimMs
         const d = new Date(currentSimMs)
@@ -90,22 +131,17 @@ export function RunProgress({
         const bars = Math.floor((next / 100) * 14400)
         setBarsProcessed(bars)
 
-        // Cycle through active layer indicators
-        const layers: ('data' | 'features' | 'agents' | 'risk' | 'execution')[] = [
-          'data',
-          'features',
-          'agents',
-          'risk',
-          'execution',
-        ]
-        setActiveLayer(layers[Math.floor(Math.random() * layers.length)])
+        // Cycle through active nodes in graph
+        if (activeNodes.length > 0) {
+          setActiveNodeIndex((curr) => (curr + 1) % activeNodes.length)
+        }
 
         return next
       })
     }, 120)
 
     return () => clearInterval(ticker)
-  }, [config])
+  }, [config, activeNodes.length])
 
   useEffect(() => {
     if (executedRef.current) return
@@ -118,6 +154,9 @@ export function RunProgress({
     const executeRun = async () => {
       try {
         addLog(`Submitting ${config.type.toUpperCase()} backtest for "${bot.name}" (${config.symbols})...`)
+        if (activeNodes.length > 0) {
+          addLog(`Compiled strategy DAG topology with ${activeNodes.length} active nodes across 6 layers.`)
+        }
         const { runId } = await startBacktest(bot.id, config)
         runIdRef.current = runId
         addLog(`Job queued with ID #${runId.slice(0, 8)}... connecting to Python engine.`)
@@ -130,8 +169,8 @@ export function RunProgress({
             consecutiveErrors = 0
 
             if (statusRes.status === 'running') {
-              if (stepIndex < ENGINE_STEPS.length - 1) {
-                addLog(ENGINE_STEPS[stepIndex])
+              if (stepIndex < engineSteps.length) {
+                addLog(engineSteps[stepIndex])
                 stepIndex++
               }
             } else if (statusRes.status === 'complete') {
@@ -175,29 +214,36 @@ export function RunProgress({
                   contributions: [
                     {
                       layer: 'data',
-                      label: 'OHLCV Feed',
-                      detail: `${config.symbols} 15m historical candles`,
+                      label: 'OHLCV & Depth Feeds',
+                      detail: `${config.symbols} 15m historical candles & L2 orderbook`,
                       impact: 0,
                       positive: true,
                     },
                     {
                       layer: 'features',
-                      label: 'Technical Indicators',
-                      detail: 'RSI(14) + EMA(20/50) + MACD',
+                      label: 'Technical & Regime Features',
+                      detail: 'RSI(14) + EMA(9/21) + MACD + ATR Regime Tagger',
                       impact: 2.4,
                       positive: true,
                     },
                     {
                       layer: 'agents',
-                      label: 'Technical Analyst',
-                      detail: 'Directional momentum consensus',
+                      label: 'Multi-Agent Confluence',
+                      detail: 'Technical Analyst (Groq) + Order Flow + Contrarian',
                       impact: 5.1,
                       positive: true,
                     },
                     {
+                      layer: 'ml',
+                      label: 'LightGBM Forecast',
+                      detail: 'Directional probability classifier',
+                      impact: 3.2,
+                      positive: true,
+                    },
+                    {
                       layer: 'risk',
-                      label: 'Risk Gate',
-                      detail: 'Position cap & stop loss enforcement',
+                      label: 'Institutional Risk Gate',
+                      detail: 'Position cap & dynamic stop loss / TP enforcement',
                       impact: 1.8,
                       positive: true,
                     },
@@ -251,56 +297,80 @@ export function RunProgress({
     return () => {
       if (pollTimer) clearInterval(pollTimer)
     }
-  }, [bot.id, bot.name, config, addRun, onComplete, totalBars])
+  }, [])
+
+  // Helper layer badge color
+  const getLayerBadgeStyle = (layerId: string) => {
+    switch (layerId) {
+      case 'data':
+        return 'border-sky-500/40 bg-sky-500/10 text-sky-400'
+      case 'features':
+        return 'border-teal-500/40 bg-teal-500/10 text-teal-400'
+      case 'agents':
+        return 'border-indigo-500/40 bg-indigo-500/10 text-indigo-400'
+      case 'ml':
+        return 'border-purple-500/40 bg-purple-500/10 text-purple-400'
+      case 'confidence':
+        return 'border-amber-500/40 bg-amber-500/10 text-amber-400'
+      case 'risk':
+        return 'border-pink-500/40 bg-pink-500/10 text-pink-400'
+      case 'execution':
+        return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+      default:
+        return 'border-border bg-secondary text-foreground'
+    }
+  }
 
   return (
-    <Card className="max-w-3xl mx-auto w-full border-border bg-card/90 shadow-2xl overflow-hidden rounded-2xl">
-      {/* Header */}
-      <CardHeader className="text-center pb-3 pt-6 border-b border-border/50 bg-secondary/20">
-        <CardTitle className="text-lg flex items-center justify-center gap-2">
-          {errorMessage ? (
-            <AlertCircle className="size-5 text-destructive" />
-          ) : progress < 100 ? (
-            <div className="size-4 rounded-full border-2 border-brand border-t-transparent animate-spin" />
-          ) : (
-            <CheckCircle2 className="size-5 text-profit" />
-          )}
-          {errorMessage ? 'Simulation Failed' : `Running ${config.type.toUpperCase()} Simulation`}
-        </CardTitle>
-        <p className="text-xs text-muted-foreground">
-          {errorMessage
-            ? 'The engine returned an error during simulation execution.'
-            : `Replaying "${bot.name}" strategy DAG across verified 15m historical series (${progress.toFixed(0)}%)`}
+    <Card className="max-w-4xl mx-auto w-full border-border bg-card/60 backdrop-blur-xl shadow-2xl overflow-hidden">
+      <CardHeader className="border-b border-border/60 pb-4 text-center">
+        <div className="flex items-center justify-center gap-2 text-brand">
+          <Activity className="size-5 animate-spin" />
+          <CardTitle className="text-lg font-bold tracking-tight">
+            Running {config.type.toUpperCase()} Simulation
+          </CardTitle>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Replaying &ldquo;{bot.name}&rdquo; strategy DAG across verified 15m historical series ({progress.toFixed(0)}%)
         </p>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-5 p-6">
-        {/* Live Simulation Telemetry HUD */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {/* Rapid Trades Counter */}
-          <div className="rounded-xl border border-brand/20 bg-brand/5 p-3.5 flex flex-col justify-between relative overflow-hidden">
+      <CardContent className="p-6 flex flex-col gap-6">
+        {errorMessage && (
+          <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-destructive text-xs leading-relaxed">
+            <AlertCircle className="size-4 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold block mb-0.5">Simulation Failed</span>
+              {errorMessage}
+            </div>
+          </div>
+        )}
+
+        {/* Dynamic Telemetry Metric Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {/* Trades Executed */}
+          <div className="rounded-xl border border-border bg-secondary/30 p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between text-muted-foreground text-[10px] uppercase font-bold tracking-wider">
               <span>Trades Executed</span>
-              <Zap className="size-3.5 text-brand animate-bounce" />
+              <Zap className="size-3.5 text-amber-400" />
             </div>
-            <div className="flex items-baseline gap-1 mt-1.5">
-              <span className="text-2xl font-bold font-mono text-brand tracking-tight transition-all">
-                {tradeCount}
-              </span>
-              <span className="text-[10px] text-muted-foreground">trades</span>
+            <div className="text-2xl font-bold font-mono text-foreground mt-1.5 flex items-baseline gap-1.5">
+              <span>{tradeCount}</span>
+              <span className="text-xs font-normal text-muted-foreground font-sans">trades</span>
             </div>
-            <div className="text-[10px] text-brand/80 font-mono mt-1">
-              ⚡ Firing real-time
+            <div className="text-[10px] text-amber-400/90 font-mono mt-1 flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-amber-400 animate-ping" />
+              Firing real-time
             </div>
           </div>
 
-          {/* Current Sim Date Ticker */}
+          {/* Simulated Timestamp */}
           <div className="rounded-xl border border-border bg-secondary/30 p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between text-muted-foreground text-[10px] uppercase font-bold tracking-wider">
               <span>Replay Timestamp</span>
-              <Calendar className="size-3.5 text-blue-400" />
+              <Calendar className="size-3.5 text-brand" />
             </div>
-            <div className="text-xs font-mono font-bold text-foreground mt-2 truncate">
+            <div className="text-xs font-bold font-mono text-foreground mt-1.5 truncate">
               {currentDateStr}
             </div>
             <div className="text-[10px] text-muted-foreground font-mono mt-1">
@@ -308,15 +378,15 @@ export function RunProgress({
             </div>
           </div>
 
-          {/* Processed Bars */}
+          {/* Bars Processed */}
           <div className="rounded-xl border border-border bg-secondary/30 p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between text-muted-foreground text-[10px] uppercase font-bold tracking-wider">
               <span>Bars Evaluated</span>
-              <Activity className="size-3.5 text-teal-400" />
+              <TrendingUp className="size-3.5 text-teal-400" />
             </div>
-            <div className="flex items-baseline gap-1 mt-1.5">
-              <span className="text-base font-bold font-mono text-foreground">
-                {barsProcessed.toLocaleString('en-IN')}
+            <div className="text-lg font-bold font-mono text-foreground mt-1.5 flex items-baseline gap-1">
+              <span>
+                {barsProcessed.toLocaleString('en-US')}
               </span>
               <span className="text-[10px] text-muted-foreground">/ 14.4k</span>
             </div>
@@ -325,7 +395,7 @@ export function RunProgress({
             </div>
           </div>
 
-          {/* Execution Mode & Friction */}
+          {/* Execution Mode */}
           <div className="rounded-xl border border-border bg-secondary/30 p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between text-muted-foreground text-[10px] uppercase font-bold tracking-wider">
               <span>Execution Profile</span>
@@ -340,46 +410,64 @@ export function RunProgress({
           </div>
         </div>
 
-        {/* Dynamic Pipeline Activity Bar */}
-        <div className="flex items-center justify-between px-3 py-2 rounded-xl border border-border bg-secondary/20 text-xs">
-          <span className="text-muted-foreground text-[11px] font-semibold flex items-center gap-1.5">
-            <Layers className="size-3.5 text-brand" /> Active DAG Pipeline:
-          </span>
-          <div className="flex items-center gap-2">
-            <Badge
-              variant={activeLayer === 'data' ? 'brand' : 'outline'}
-              className="text-[10px] font-mono capitalize"
-            >
-              Data
-            </Badge>
-            <span className="text-tertiary">&rarr;</span>
-            <Badge
-              variant={activeLayer === 'features' ? 'brand' : 'outline'}
-              className="text-[10px] font-mono capitalize"
-            >
-              Features
-            </Badge>
-            <span className="text-tertiary">&rarr;</span>
-            <Badge
-              variant={activeLayer === 'agents' ? 'brand' : 'outline'}
-              className="text-[10px] font-mono capitalize"
-            >
-              Analyst
-            </Badge>
-            <span className="text-tertiary">&rarr;</span>
-            <Badge
-              variant={activeLayer === 'risk' ? 'brand' : 'outline'}
-              className="text-[10px] font-mono capitalize"
-            >
-              Risk Gate
-            </Badge>
-            <span className="text-tertiary">&rarr;</span>
-            <Badge
-              variant={activeLayer === 'execution' ? 'brand' : 'outline'}
-              className="text-[10px] font-mono capitalize"
-            >
-              Executor
-            </Badge>
+        {/* Dynamic Full DAG Pipeline Visualization */}
+        <div className="flex flex-col gap-2.5 rounded-xl border border-border/80 bg-secondary/20 p-3.5">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground text-[11px] font-semibold flex items-center gap-1.5">
+              <Layers className="size-3.5 text-brand" />
+              <span>Active Strategy DAG Pipeline</span>
+              <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 h-4 border-brand/40 text-brand ml-1">
+                {activeNodes.length} Nodes Wired
+              </Badge>
+            </span>
+            {activeNodes.length > 0 && (
+              <span className="text-[10px] font-mono text-brand flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-brand animate-pulse" />
+                Active: {COMPONENT_MAP[activeNodes[activeNodeIndex]?.componentId]?.name || activeNodes[activeNodeIndex]?.id}
+              </span>
+            )}
+          </div>
+
+          {/* Scrollable Node Pipeline Stream */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
+            {activeNodes.length > 0 ? (
+              activeNodes.map((node, idx) => {
+                const comp = COMPONENT_MAP[node.componentId]
+                const name = comp?.name || node.componentId || node.id
+                const layer = comp?.layer || 'data'
+                const isActive = idx === activeNodeIndex
+
+                return (
+                  <div key={node.id || idx} className="flex items-center gap-1.5 shrink-0">
+                    <div
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all duration-200 ${
+                        isActive
+                          ? 'border-brand bg-brand/20 text-foreground ring-1 ring-brand/50 shadow-sm scale-105'
+                          : getLayerBadgeStyle(layer)
+                      }`}
+                    >
+                      <span
+                        className={`size-1.5 rounded-full ${
+                          isActive ? 'bg-brand animate-ping' : 'bg-current opacity-70'
+                        }`}
+                      />
+                      <span className="whitespace-nowrap">{name}</span>
+                    </div>
+                    {idx < activeNodes.length - 1 && (
+                      <span className="text-white/30 text-[10px] font-mono select-none">&rarr;</span>
+                    )}
+                  </div>
+                )
+              })
+            ) : (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
+                <Badge variant="outline">Data Feeds</Badge> &rarr;
+                <Badge variant="outline">Technical Indicators</Badge> &rarr;
+                <Badge variant="outline">Multi-Agent Intelligence</Badge> &rarr;
+                <Badge variant="outline">Institutional Risk Gate</Badge> &rarr;
+                <Badge variant="outline">Paper Executor</Badge>
+              </div>
+            )}
           </div>
         </div>
 
@@ -426,4 +514,3 @@ export function RunProgress({
     </Card>
   )
 }
-

@@ -1,16 +1,29 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Search, ArrowUpRight, ArrowDownRight, Eye, Sparkles } from 'lucide-react'
+import {
+  Search,
+  ArrowUpRight,
+  ArrowDownRight,
+  Eye,
+  Sparkles,
+  Code2,
+  Copy,
+  Check,
+  Download,
+  FileJson,
+} from 'lucide-react'
 import type { Trade } from '@/mock/data'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Table, THead, TBody, TR, TH, TD, SortHeader } from '@/components/ui/table'
 import { Segmented } from '@/components/ui/tabs'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { formatDate, formatINR, formatPct } from '@/lib/utils'
-import { TradeFlowModal } from './trade-flow-modal'
+import { TradeFlowModal, buildComprehensiveTradeJson } from './trade-flow-modal'
 
 export function TradeLogTable({ trades }: { trades: Trade[] }) {
   const [search, setSearch] = useState('')
@@ -22,9 +35,53 @@ export function TradeLogTable({ trades }: { trades: Trade[] }) {
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
 
+  // Raw JSON Modal State
+  const [jsonModalOpen, setJsonModalOpen] = useState(false)
+  const [jsonModalTitle, setJsonModalTitle] = useState('Raw Trade JSON')
+  const [rawJsonContent, setRawJsonContent] = useState<any>(null)
+  const [copied, setCopied] = useState(false)
+
   const handleRowClick = (trade: Trade) => {
     setSelectedTrade(trade)
     setModalOpen(true)
+  }
+
+  const handleViewRawJson = (e: React.MouseEvent, trade: Trade) => {
+    e.stopPropagation()
+    setJsonModalTitle(`Trade JSON (${trade.symbol} ${trade.side.toUpperCase()}) - #${trade.id.slice(0, 8)}`)
+    setRawJsonContent(buildComprehensiveTradeJson(trade, trade.executionFlow))
+    setJsonModalOpen(true)
+    setCopied(false)
+  }
+
+  const handleViewAllJson = () => {
+    setJsonModalTitle(`All Executed Trades (${filteredAndSorted.length} Trades)`)
+    setRawJsonContent({
+      report_type: 'EXECUTED_TRADE_LOGS_FULL_TELEMETRY',
+      total_trades: filteredAndSorted.length,
+      generated_at: new Date().toISOString(),
+      trades: filteredAndSorted.map((t) => buildComprehensiveTradeJson(t, t.executionFlow)),
+    })
+    setJsonModalOpen(true)
+    setCopied(false)
+  }
+
+  const handleCopyJson = () => {
+    if (!rawJsonContent) return
+    navigator.clipboard.writeText(JSON.stringify(rawJsonContent, null, 2))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleDownloadJson = () => {
+    if (!rawJsonContent) return
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(rawJsonContent, null, 2))
+    const downloadAnchor = document.createElement('a')
+    downloadAnchor.setAttribute('href', dataStr)
+    downloadAnchor.setAttribute('download', `trade_logs_${Date.now()}.json`)
+    document.body.appendChild(downloadAnchor)
+    downloadAnchor.click()
+    downloadAnchor.remove()
   }
 
   const toggleSort = (key: typeof sortKey) => {
@@ -32,7 +89,6 @@ export function TradeLogTable({ trades }: { trades: Trade[] }) {
       setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
     } else {
       setSortKey(key)
-      setSortDir('desc')
     }
   }
 
@@ -77,9 +133,9 @@ export function TradeLogTable({ trades }: { trades: Trade[] }) {
             </span>
           </div>
 
-          {/* Search & Filter bar */}
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <div className="relative flex-1 sm:w-56">
+          {/* Search, Filter & JSON Export Bar */}
+          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+            <div className="relative flex-1 sm:w-48">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
               <Input
                 value={search}
@@ -98,6 +154,16 @@ export function TradeLogTable({ trades }: { trades: Trade[] }) {
               onValueChange={setSideFilter}
               size="sm"
             />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleViewAllJson}
+              className="h-8 px-2.5 text-xs font-mono gap-1.5 shrink-0 border-brand/30 hover:border-brand text-brand hover:bg-brand/10"
+              title="View all trades in raw JSON format"
+            >
+              <FileJson className="size-3.5" />
+              <span>Raw JSON</span>
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="p-0 flex-1 overflow-y-auto min-h-0 relative">
@@ -133,7 +199,7 @@ export function TradeLogTable({ trades }: { trades: Trade[] }) {
                   />
                   <TH>Trigger Node</TH>
                   <TH numeric>Confidence</TH>
-                  <TH className="w-10"></TH>
+                  <TH className="w-24 text-right">Actions</TH>
                 </TR>
               </THead>
               <TBody>
@@ -182,8 +248,19 @@ export function TradeLogTable({ trades }: { trades: Trade[] }) {
                       <span className="font-semibold text-foreground">{Math.round(trade.confidence * 100)}%</span>
                     </TD>
                     <TD className="text-right">
-                      <div className="size-7 rounded-md bg-secondary/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground">
-                        <Eye className="size-3.5" />
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={(e) => handleViewRawJson(e, trade)}
+                          className="h-7 px-2 rounded-md bg-secondary border border-border/80 flex items-center gap-1 text-[11px] font-mono text-muted-foreground hover:text-brand hover:border-brand/50 hover:bg-brand/10 transition-colors"
+                          title="View raw JSON payload for this trade"
+                        >
+                          <Code2 className="size-3" />
+                          <span>JSON</span>
+                        </button>
+                        <div className="size-7 rounded-md bg-secondary/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground">
+                          <Eye className="size-3.5" />
+                        </div>
                       </div>
                     </TD>
                   </TR>
@@ -194,12 +271,64 @@ export function TradeLogTable({ trades }: { trades: Trade[] }) {
         </CardContent>
       </Card>
 
+      {/* Visual DAG Stepper Modal */}
       <TradeFlowModal
         trade={selectedTrade}
         open={modalOpen}
         onOpenChange={setModalOpen}
       />
+
+      {/* Dedicated Raw JSON Viewer Modal */}
+      <Dialog open={jsonModalOpen} onOpenChange={setJsonModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col p-0 gap-0 overflow-hidden bg-card/95 backdrop-blur-xl border-border shadow-2xl">
+          <DialogHeader className="p-4 sm:p-6 border-b border-border/60 pb-4 shrink-0 flex flex-row items-center justify-between">
+            <div>
+              <DialogTitle className="text-base font-bold flex items-center gap-2 text-foreground font-mono">
+                <FileJson className="size-4 text-brand" />
+                <span>{jsonModalTitle}</span>
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground mt-1">
+                Raw JSON payload with full node-level upstream telemetry, feature vectors, risk decisions, and execution metrics.
+              </DialogDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCopyJson}
+                className="h-8 gap-1.5 text-xs font-mono border-border hover:border-brand"
+              >
+                {copied ? (
+                  <>
+                    <Check className="size-3.5 text-profit" />
+                    <span className="text-profit">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="size-3.5 text-muted-foreground" />
+                    <span>Copy JSON</span>
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadJson}
+                className="h-8 gap-1.5 text-xs font-mono border-border hover:border-brand"
+              >
+                <Download className="size-3.5 text-muted-foreground" />
+                <span>Download</span>
+              </Button>
+            </div>
+          </DialogHeader>
+
+          <div className="p-4 flex-1 overflow-y-auto bg-black/95 font-mono text-xs text-emerald-400 no-scrollbar">
+            <pre className="leading-relaxed whitespace-pre-wrap">
+              {JSON.stringify(rawJsonContent, null, 2)}
+            </pre>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
-

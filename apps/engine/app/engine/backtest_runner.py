@@ -37,6 +37,7 @@ class Portfolio:
         entry_time: Any,
         stop_price: Optional[float] = None,
         confidence: float = 0.75,
+        target_price: Optional[float] = None,
     ):
         cost = size * entry_price
         self.cash -= cost
@@ -47,6 +48,7 @@ class Portfolio:
             "entry_time": entry_time,
             "stop_price": stop_price,
             "confidence": confidence,
+            "target_price": target_price,
         }
 
     def update_unrealized(self, current_price: float):
@@ -190,23 +192,35 @@ async def fetch_candles(
     from_date_str: str,
     to_date_str: str,
     db: AsyncSession,
-) -> List[CandleModel]:
+) -> tuple[pd.DataFrame, list]:
     symbols = [s.strip().upper() for s in symbols_str.split(",") if s.strip()]
     primary_symbol = symbols[0] if symbols else "BTCUSDT"
 
     # Normalize dates
     try:
         from_dt = datetime.fromisoformat(from_date_str.replace("Z", "+00:00"))
+        if from_dt.tzinfo is None:
+            from_dt = from_dt.replace(tzinfo=timezone.utc)
     except Exception:
         from_dt = datetime(2023, 1, 1, tzinfo=timezone.utc)
 
     try:
         to_dt = datetime.fromisoformat(to_date_str.replace("Z", "+00:00"))
+        if to_dt.tzinfo is None:
+            to_dt = to_dt.replace(tzinfo=timezone.utc)
     except Exception:
         to_dt = datetime(2027, 12, 31, tzinfo=timezone.utc)
 
     query = (
-        select(CandleModel)
+        select(
+            CandleModel.open_time,
+            CandleModel.open,
+            CandleModel.high,
+            CandleModel.low,
+            CandleModel.close,
+            CandleModel.volume,
+            CandleModel.symbol,
+        )
         .where(
             CandleModel.symbol == primary_symbol,
             CandleModel.open_time >= from_dt,
@@ -215,26 +229,84 @@ async def fetch_candles(
         .order_by(CandleModel.open_time.asc())
     )
     result = await db.execute(query)
-    candles = list(result.scalars().all())
+    rows = result.all()
 
     # Fallback: if no candles match exact date range, fetch available candles for symbol
-    if not candles:
+    if not rows:
         fallback_query = (
-            select(CandleModel)
+            select(
+                CandleModel.open_time,
+                CandleModel.open,
+                CandleModel.high,
+                CandleModel.low,
+                CandleModel.close,
+                CandleModel.volume,
+                CandleModel.symbol,
+            )
             .where(CandleModel.symbol == primary_symbol)
             .order_by(CandleModel.open_time.desc())
             .limit(14400)
         )
         fb_result = await db.execute(fallback_query)
-        fb_candles = list(fb_result.scalars().all())
-        if fb_candles:
-            candles = list(reversed(fb_candles))
+        fb_rows = fb_result.all()
+        if fb_rows:
+            rows = list(reversed(fb_rows))
 
-    return candles
+    if not rows:
+        from ..data.binance_ingest import fetch_binance_klines_api
+        try:
+            klines = await fetch_binance_klines_api(symbol=primary_symbol, interval="15m", limit=1000)
+            if klines and len(klines) > 10:
+                binance_rows = []
+                for k in klines:
+                    open_ts = int(k[0])
+                    open_time = datetime.fromtimestamp(open_ts / 1000.0, tz=timezone.utc)
+                    binance_rows.append((
+                        open_time,
+                        float(k[1]),
+                        float(k[2]),
+                        float(k[3]),
+                        float(k[4]),
+                        float(k[5]),
+                        primary_symbol,
+                    ))
+                rows = binance_rows
+        except Exception as e:
+            print(f"[Backtest Runner] Notice on fetching fallback candles from Binance: {e}")
+
+    if not rows:
+        return pd.DataFrame(), []
+
+    raw_df = pd.DataFrame(rows, columns=["open_time", "open", "high", "low", "close", "volume", "symbol"])
+    raw_df["open_time"] = pd.to_datetime(raw_df["open_time"], utc=True)
+    raw_df["open"] = raw_df["open"].astype(float)
+    raw_df["high"] = raw_df["high"].astype(float)
+    raw_df["low"] = raw_df["low"].astype(float)
+    raw_df["close"] = raw_df["close"].astype(float)
+    raw_df["volume"] = raw_df["volume"].astype(float)
+    raw_df.set_index("open_time", inplace=True)
+
+    # Resample 1m data to 15m strategy bars
+    if len(raw_df) > 100:
+        resampled_df = raw_df.resample("15min").agg({
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last",
+            "volume": "sum",
+            "symbol": "first",
+        }).dropna().reset_index()
+    else:
+        resampled_df = raw_df.reset_index()
+
+    return prepare_indicators_dataframe(resampled_df)
 
 def prepare_indicators_dataframe(full_df: pd.DataFrame) -> tuple[pd.DataFrame, list]:
     df = full_df.copy()
     close_series = df["close"].astype(float)
+    high_series = df["high"].astype(float) if "high" in df.columns else close_series
+    low_series = df["low"].astype(float) if "low" in df.columns else close_series
+    volume_series = df["volume"].astype(float) if "volume" in df.columns else pd.Series(1000.0, index=df.index)
     
     # RSI (14)
     delta = close_series.diff()
@@ -255,6 +327,37 @@ def prepare_indicators_dataframe(full_df: pd.DataFrame) -> tuple[pd.DataFrame, l
     macd_series = ema12 - ema26
     df["_macd"] = macd_series
     df["_macd_signal"] = macd_series.ewm(span=9, adjust=False).mean()
+    
+    # ATR (14) & ATR Pct
+    prev_close = close_series.shift(1).fillna(close_series)
+    tr1 = high_series - low_series
+    tr2 = (high_series - prev_close).abs()
+    tr3 = (low_series - prev_close).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    df["_atr_14"] = tr.rolling(window=14, min_periods=1).mean()
+    df["_atr_pct"] = (df["_atr_14"] / close_series.replace(0, np.nan)).fillna(0.0)
+    
+    # Bollinger Bands & width
+    bb_mid = close_series.rolling(window=20, min_periods=1).mean()
+    bb_std = close_series.rolling(window=20, min_periods=1).std(ddof=0).fillna(0)
+    bb_range = (bb_mid + 2 * bb_std) - (bb_mid - 2 * bb_std)
+    df["_bb_width"] = (bb_range / bb_mid.replace(0, np.nan)).fillna(0.0)
+    
+    # Volume Z-score
+    vol_mean = volume_series.rolling(window=20, min_periods=1).mean()
+    vol_std = volume_series.rolling(window=20, min_periods=1).std(ddof=0).fillna(1.0).replace(0, 1.0)
+    df["_volume_zscore"] = ((volume_series - vol_mean) / vol_std).fillna(0.0)
+    
+    # ROC (5, 10, 20)
+    df["_roc_5"] = close_series.pct_change(5).fillna(0.0)
+    df["_roc_10"] = close_series.pct_change(10).fillna(0.0)
+    df["_roc_20"] = close_series.pct_change(20).fillna(0.0)
+    
+    # Lag returns
+    ret = close_series.pct_change(1).fillna(0.0)
+    df["_ret_lag_1"] = ret.shift(1).fillna(0.0)
+    df["_ret_lag_2"] = ret.shift(2).fillna(0.0)
+    df["_ret_lag_3"] = ret.shift(3).fillna(0.0)
     
     records = df.to_dict("records")
     return df, records
@@ -347,9 +450,9 @@ async def run_backtest(
         await db.commit()
 
         ordered_nodes = compile_graph(bot_graph)
-        candles = await fetch_candles(config.symbols, config.from_, config.to, db)
+        full_df, candle_records = await fetch_candles(config.symbols, config.from_, config.to, db)
 
-        if not candles:
+        if not candle_records:
             err = f"No candle data found for {config.symbols}. Please verify the Binance historical data feed."
             await db.execute(
                 update(BacktestRunModel)
@@ -358,21 +461,6 @@ async def run_backtest(
             )
             await db.commit()
             return
-
-        candle_dicts = [
-            {
-                "open_time": c.open_time,
-                "open": float(c.open),
-                "high": float(c.high),
-                "low": float(c.low),
-                "close": float(c.close),
-                "volume": float(c.volume),
-                "symbol": getattr(c, "symbol", config.symbols),
-            }
-            for c in candles
-        ]
-        full_df = pd.DataFrame(candle_dicts)
-        full_df, candle_records = prepare_indicators_dataframe(full_df)
         sim_type = config.type or "historical"
 
         # Upfront cache fetch for macro events (used across all backtest simulation modes)
@@ -386,8 +474,8 @@ async def run_backtest(
         # Upfront cache fetch for news items (used for zero-lookahead backtest replay)
         news_items_cache = []
         try:
-            t0 = candle_dicts[0]["open_time"] if candle_dicts else datetime(2023, 1, 1, tzinfo=timezone.utc)
-            t1 = candle_dicts[-1]["open_time"] if candle_dicts else datetime(2027, 12, 31, tzinfo=timezone.utc)
+            t0 = candle_records[0]["open_time"] if candle_records else datetime(2023, 1, 1, tzinfo=timezone.utc)
+            t1 = candle_records[-1]["open_time"] if candle_records else datetime(2027, 12, 31, tzinfo=timezone.utc)
             if hasattr(t0, "tzinfo") and t0.tzinfo is None:
                 t0 = t0.replace(tzinfo=timezone.utc)
             if hasattr(t1, "tzinfo") and t1.tzinfo is None:

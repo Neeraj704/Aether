@@ -16,9 +16,9 @@ class PaperExecutorNode:
         """
         cfg = {**self.config, **config}
         
-        # Look for upstream RiskDecision
+        # Look for upstream RiskDecision (most immediate predecessor)
         decision = None
-        for out in ctx.upstream_outputs.values():
+        for out in reversed(list(ctx.upstream_outputs.values())):
             if isinstance(out, dict) and out.get("type") == "RiskDecision":
                 decision = out
                 break
@@ -48,11 +48,32 @@ class PaperExecutorNode:
         # 1. Check existing position stop-loss or opposing exit
         if portfolio.has_position():
             pos = portfolio.position
+            pos["bars_held"] = pos.get("bars_held", 0) + 1
             should_close = False
             exit_reason = ""
 
-            # Check stop loss
-            if pos["side"] == "long" and pos.get("stop_price") is not None and candle_low <= pos["stop_price"]:
+            # Dynamic ATR trailing stop once trade moves into profit:
+            # When trade gains >= 1.5%, trail stop behind the high/low by 1.2%
+            if pos["side"] == "long" and candle_high >= pos["entry_price"] * 1.015:
+                trail_stop = candle_high * 0.988
+                if pos.get("stop_price") is None or trail_stop > pos["stop_price"]:
+                    pos["stop_price"] = trail_stop
+            elif pos["side"] == "short" and candle_low <= pos["entry_price"] * 0.985:
+                trail_stop = candle_low * 1.012
+                if pos.get("stop_price") is None or trail_stop < pos["stop_price"]:
+                    pos["stop_price"] = trail_stop
+
+            # 1a. Check Take Profit Target
+            if pos["side"] == "long" and pos.get("target_price") is not None and candle_high >= pos["target_price"]:
+                should_close = True
+                exit_price = pos["target_price"]
+                exit_reason = f"Take Profit Target Hit @ ₹{pos['target_price']:,.2f} (High reached ₹{candle_high:,.2f})"
+            elif pos["side"] == "short" and pos.get("target_price") is not None and candle_low <= pos["target_price"]:
+                should_close = True
+                exit_price = pos["target_price"]
+                exit_reason = f"Take Profit Target Hit @ ₹{pos['target_price']:,.2f} (Low reached ₹{candle_low:,.2f})"
+            # 1b. Check Stop Loss
+            elif pos["side"] == "long" and pos.get("stop_price") is not None and candle_low <= pos["stop_price"]:
                 should_close = True
                 exit_price = pos["stop_price"]
                 exit_reason = f"Stop Loss Triggered @ ₹{pos['stop_price']:,.2f} (Low hit ₹{candle_low:,.2f})"
@@ -60,8 +81,13 @@ class PaperExecutorNode:
                 should_close = True
                 exit_price = pos["stop_price"]
                 exit_reason = f"Stop Loss Triggered @ ₹{pos['stop_price']:,.2f} (High hit ₹{candle_high:,.2f})"
-            # Check opposing signal
-            elif decision and decision.get("approved") and decision.get("direction") != pos["side"]:
+            # 1c. Check opposing signal (only exit on high-conviction opposing reversal or after minimum bars held)
+            elif (
+                decision
+                and decision.get("approved")
+                and decision.get("direction") != pos["side"]
+                and (pos.get("bars_held", 0) >= 3 or float(decision.get("confidence", 0.0)) >= 0.75)
+            ):
                 should_close = True
                 exit_price = fill_price(
                     candle_close,
@@ -73,7 +99,7 @@ class PaperExecutorNode:
                     slippage_override,
                     fees_bps,
                 )
-                exit_reason = f"Opposing Signal Reversal ({decision.get('direction').upper()})"
+                exit_reason = f"Opposing Signal Reversal ({decision.get('direction').upper()} @ {decision.get('confidence', 0.0):.0%})"
 
             if should_close:
                 # Calculate PnL
@@ -95,6 +121,144 @@ class PaperExecutorNode:
                 entry_features = pos.get("entry_features", {})
                 entry_signal = pos.get("entry_signal", {})
                 entry_risk = pos.get("entry_risk", {})
+                upstream_outputs = pos.get("upstream_outputs", {})
+
+                # Dynamically construct full execution flow steps across ALL nodes in the DAG
+                steps = []
+                step_idx = 1
+                for node_id, out in upstream_outputs.items():
+                    if not isinstance(out, dict):
+                        continue
+                    out_type = out.get("type", "")
+                    if out_type == "MarketData":
+                        layer = "data"
+                        node_name = "Orderbook Depth Feed" if ("imbalancePct" in out or "orderbook" in str(node_id).lower()) else "OHLCV Price Feed"
+                        computation = f"Ingested real-time market data for {out.get('symbol', symbol)}."
+                    elif out_type == "NewsFeed":
+                        layer = "data"
+                        node_name = "Live News & Narrative Stream"
+                        computation = f"Ingested {out.get('articleCount', 0)} articles (sentiment score {out.get('sentimentScore', 0.0):+.2f})."
+                    elif out_type == "FeatureVector":
+                        layer = "features"
+                        node_name = "Market Regime Tagger" if ("regime" in str(node_id).lower() or "regime-tagger" in str(node_id).lower()) else "Technical Indicators"
+                        computation = f"Computed technical indicators: RSI={out.get('rsi', 0.0):.1f}, Fast EMA=${out.get('ema_fast', 0.0):,.2f}, Regime={out.get('regime', 'Normal')}."
+                    elif out_type == "Signal":
+                        if "gbdt" in str(node_id).lower() or "forecast" in str(node_id).lower():
+                            layer = "ml"
+                            node_name = "GBDT Gradient Boosting Forecast"
+                        elif "contrarian" in str(node_id).lower():
+                            layer = "agents"
+                            node_name = "Contrarian Trap Detector"
+                        elif "flow" in str(node_id).lower():
+                            layer = "agents"
+                            node_name = "Order Flow Imbalance Agent"
+                        elif "sentiment" in str(node_id).lower():
+                            layer = "agents"
+                            node_name = "Market Sentiment Agent"
+                        elif "agreement" in str(node_id).lower() or "consensus" in str(node_id).lower():
+                            layer = "agents"
+                            node_name = "Multi-Agent Consensus (Agreement Score)"
+                        else:
+                            layer = "agents"
+                            node_name = out.get("agentName") or out.get("triggerNode") or "Technical Analyst Agent"
+                        computation = out.get("rationale") or f"Signal direction: {out.get('direction', 'neutral').upper()} with {int(float(out.get('confidence', 0.5))*100)}% conviction."
+                    elif out_type == "RiskDecision":
+                        layer = "risk"
+                        node_name = "Institutional Risk Gate"
+                        computation = out.get("reason") or "Verified risk limits, drawdown envelope, and computed position sizing."
+                    else:
+                        layer = "logic"
+                        node_name = str(node_id)
+                        computation = f"Executed node computation for {node_id}."
+
+                    steps.append({
+                        "stepIndex": step_idx,
+                        "layer": layer,
+                        "nodeId": str(node_id),
+                        "nodeName": node_name,
+                        "status": "completed",
+                        "input": out.get("audit", {}).get("input_features") or out.get("inputs_received") or {},
+                        "computation": computation,
+                        "output": out,
+                    })
+                    step_idx += 1
+
+                # If upstream_outputs was empty (legacy fallback), construct core steps
+                if not steps:
+                    steps = [
+                        {
+                            "stepIndex": 1,
+                            "layer": "data",
+                            "nodeId": "ohlcv-feed",
+                            "nodeName": "OHLCV Price Feed",
+                            "status": "completed",
+                            "input": {"symbol": symbol, "timestamp": str(pos.get("entry_time"))},
+                            "computation": f"Ingested candle bar for {symbol}.",
+                            "output": entry_candle or {"close": entry_price},
+                        },
+                        {
+                            "stepIndex": 2,
+                            "layer": "features",
+                            "nodeId": "ta-indicators",
+                            "nodeName": "Technical Indicators",
+                            "status": "completed",
+                            "input": {"priceClose": entry_price},
+                            "computation": f"Calculated technical features for {symbol}.",
+                            "output": entry_features or {},
+                        },
+                        {
+                            "stepIndex": 3,
+                            "layer": "agents",
+                            "nodeId": "technical-agent",
+                            "nodeName": "Technical Analyst",
+                            "status": "completed",
+                            "input": {"features": entry_features},
+                            "computation": entry_signal.get("rationale", "Directional momentum evaluated."),
+                            "output": entry_signal or {"direction": pos["side"], "confidence": pos.get("confidence", 0.75)},
+                        },
+                        {
+                            "stepIndex": 4,
+                            "layer": "risk",
+                            "nodeId": "risk-gate",
+                            "nodeName": "Institutional Risk Gate",
+                            "status": "completed",
+                            "input": {"signal": pos["side"], "confidence": pos.get("confidence", 0.75)},
+                            "computation": entry_risk.get("reason", "Approved allocation limits."),
+                            "output": entry_risk or {"approved": True, "stopPrice": pos.get("stop_price")},
+                        },
+                    ]
+                    step_idx = 5
+
+                # Append execution broker step
+                steps.append({
+                    "stepIndex": step_idx,
+                    "layer": "execution",
+                    "nodeId": "paper-executor",
+                    "nodeName": "Paper Execution Broker",
+                    "status": "completed",
+                    "input": {
+                        "orderSide": pos["side"],
+                        "orderQty": round(size, 4),
+                        "fillModel": "Volume-scaled market impact slippage",
+                        "feesBps": fees_bps,
+                    },
+                    "computation": (
+                        f"Executed entry fill @ ₹{entry_price:,.2f}. "
+                        f"Closed position @ ₹{exit_price:,.2f} on condition: {exit_reason}. "
+                        f"Net P&L: ₹{net_pnl:,.2f} ({pnl_pct:+.2f}%)."
+                    ),
+                    "output": {
+                        "entryPrice": round(entry_price, 2),
+                        "exitPrice": round(exit_price, 2),
+                        "size": round(size, 4),
+                        "grossPnl": round(gross_pnl, 2),
+                        "netPnl": round(net_pnl, 2),
+                        "pnlPct": round(pnl_pct, 2),
+                        "feesPaid": round(fee_cost, 2),
+                        "exitReason": exit_reason,
+                        "status": "CLOSED",
+                    },
+                })
 
                 execution_flow = {
                     "tradeId": f"trade-{uuid.uuid4().hex[:8]}",
@@ -113,119 +277,11 @@ class PaperExecutorNode:
                         "feesPaid": round(fee_cost, 2),
                         "confidence": round(pos.get("confidence", 0.75), 2),
                     },
-                    "steps": [
-                        {
-                            "stepIndex": 1,
-                            "layer": "data",
-                            "nodeId": "ohlcv-feed",
-                            "nodeName": "OHLCV Price Feed",
-                            "status": "completed",
-                            "input": {
-                                "symbol": symbol,
-                                "resolution": "15m",
-                                "timestamp": str(pos["entry_time"]),
-                            },
-                            "computation": f"Ingested 15m candle bar for {getattr(candle, 'symbol', 'BTCUSDT')} with 200-bar rolling memory buffer.",
-                            "output": {
-                                "open": float(entry_candle.get("open", entry_price)),
-                                "high": float(entry_candle.get("high", entry_price)),
-                                "low": float(entry_candle.get("low", entry_price)),
-                                "close": float(entry_candle.get("close", entry_price)),
-                                "volume": float(entry_candle.get("volume", 1000.0)),
-                            },
-                        },
-                        {
-                            "stepIndex": 2,
-                            "layer": "features",
-                            "nodeId": "ta-indicators",
-                            "nodeName": "Technical Indicators",
-                            "status": "completed",
-                            "input": {
-                                "priceClose": float(entry_candle.get("close", entry_price)),
-                                "rsiPeriod": 14,
-                                "macdFast": 20,
-                                "macdSlow": 50,
-                            },
-                            "computation": (
-                                f"Calculated RSI(14)={entry_features.get('rsi', 50):.1f}, "
-                                f"EMA Fast={entry_features.get('ema_fast', entry_price):.2f}, "
-                                f"EMA Slow={entry_features.get('ema_slow', entry_price):.2f}, "
-                                f"MACD={entry_features.get('macd', 0):.2f}."
-                            ),
-                            "output": entry_features,
-                        },
-                        {
-                            "stepIndex": 3,
-                            "layer": "agents",
-                            "nodeId": "technical-agent",
-                            "nodeName": "Technical Analyst",
-                            "status": "completed",
-                            "input": {
-                                "features": entry_features,
-                                "model": entry_signal.get("audit", {}).get("model_config", {}),
-                                "systemPrompt": entry_signal.get("audit", {}).get("system_prompt", "Technical momentum analyst"),
-                            },
-                            "computation": (
-                                f"Evaluated directional criteria: {entry_signal.get('rationale', 'Signal generated')}. "
-                                f"Applied rule: {entry_signal.get('audit', {}).get('applied_rule', 'Momentum Reversion')}."
-                            ),
-                            "output": {
-                                "direction": pos["side"],
-                                "confidence": round(pos.get("confidence", 0.75), 2),
-                                "confidencePct": f"{round(pos.get('confidence', 0.75) * 100)}%",
-                                "rationale": entry_signal.get("rationale", f"{pos['side'].upper()} momentum triggered"),
-                            },
-                        },
-                        {
-                            "stepIndex": 4,
-                            "layer": "risk",
-                            "nodeId": "risk-gate",
-                            "nodeName": "Risk Gate",
-                            "status": "completed",
-                            "input": {
-                                "signal": pos["side"],
-                                "confidence": round(pos.get("confidence", 0.75), 2),
-                                "portfolioEquity": entry_risk.get("audit", {}).get("portfolio_equity", 100000.0),
-                                "maxPosPct": entry_risk.get("audit", {}).get("max_position_pct", 20.0),
-                            },
-                            "computation": (
-                                f"Validated risk threshold & computed position sizing: "
-                                f"{entry_risk.get('reason', 'Approved within capital allocation limits')}."
-                            ),
-                            "output": {
-                                "approved": True,
-                                "sizedQuantity": round(size, 4),
-                                "stopPrice": pos.get("stop_price"),
-                                "reason": entry_risk.get("reason", "Approved"),
-                            },
-                        },
-                        {
-                            "stepIndex": 5,
-                            "layer": "execution",
-                            "nodeId": "paper-executor",
-                            "nodeName": "Paper Executor",
-                            "status": "completed",
-                            "input": {
-                                "orderSide": pos["side"],
-                                "orderQty": round(size, 4),
-                                "fillModel": "Volume-scaled market impact slippage",
-                                "feesBps": fees_bps,
-                            },
-                            "computation": (
-                                f"Executed entry fill @ ₹{entry_price:,.2f}. "
-                                f"Closed position @ ₹{exit_price:,.2f} on condition: {exit_reason}. "
-                                f"Net P&L: ₹{net_pnl:,.2f} ({pnl_pct:+.2f}%)."
-                            ),
-                            "output": {
-                                "entryPrice": round(entry_price, 2),
-                                "exitPrice": round(exit_price, 2),
-                                "netPnl": round(net_pnl, 2),
-                                "pnlPct": round(pnl_pct, 2),
-                                "exitReason": exit_reason,
-                            },
-                        },
-                    ],
+                    "steps": steps,
                 }
+
+                entry_sig = pos.get("entry_signal", {})
+                trigger_name = entry_sig.get("agentName") or entry_sig.get("triggerNode") or entry_sig.get("trigger_node") or "Multi-Agent Consensus"
 
                 closed_trade = ClosedTrade(
                     id=execution_flow["tradeId"],
@@ -236,7 +292,7 @@ class PaperExecutorNode:
                     size=round(size, 4),
                     pnl=round(net_pnl, 2),
                     pnl_pct=round(pnl_pct, 2),
-                    trigger_node="Technical Analyst",
+                    trigger_node=trigger_name,
                     confidence=round(pos.get("confidence", 0.75), 2),
                     execution_flow=execution_flow,
                 )
@@ -284,6 +340,7 @@ class PaperExecutorNode:
                     entry_time=open_time.isoformat() if hasattr(open_time, "isoformat") else str(open_time),
                     stop_price=decision.get("stopPrice"),
                     confidence=decision.get("confidence", 0.75),
+                    target_price=decision.get("targetPrice"),
                 )
                 # Store audit trail context in position
                 portfolio.position["entry_candle"] = candle_snapshot
@@ -296,7 +353,7 @@ class PaperExecutorNode:
                 except Exception:
                     pass
 
-                if hasattr(ctx, "bot_id") and ctx.bot_id:
+                if hasattr(ctx, "bot_id") and ctx.bot_id and getattr(ctx, "mode", "historical") == "live":
                     from ...engine.live_runner import append_bot_log
                     append_bot_log(str(ctx.bot_id), "fill", f"ORDER FILLED: {side.upper()} {order_qty:,.4f} units @ ${executed_price:,.2f}")
 

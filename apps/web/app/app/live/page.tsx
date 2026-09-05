@@ -39,7 +39,7 @@ import {
   type GlobalLiveTradeItem,
 } from '@/lib/engine'
 import { TradeFlowModal, type TradeInspectionData } from '@/components/bot/trade-flow-modal'
-import { formatINR, formatPct, formatDate } from '@/lib/utils'
+import { formatINR, formatPct, formatDate, cn } from '@/lib/utils'
 
 interface PositionItem {
   id: string
@@ -90,7 +90,39 @@ export default function LiveMonitoringPage() {
   const [bots, setBots] = useState<Bot[]>([])
   const [activeSessions, setActiveSessions] = useState<ActiveLiveSession[]>([])
   const [allTrades, setAllTrades] = useState<GlobalLiveTradeItem[]>([])
-  const [simulatedPositions, setSimulatedPositions] = useState<PositionItem[]>([])
+  const [selectedBotId, setSelectedBotId] = useState<string>('bot-1')
+  const [niftyLtp, setNiftyLtp] = useState<number>(24889.5)
+  const [simulatedLtp, setSimulatedLtp] = useState<number>(88050.25)
+  const [simulatedPositions, setSimulatedPositions] = useState<PositionItem[]>([
+    {
+      id: 'pos-init-nifty',
+      botId: 'bot-1',
+      botName: 'Nifty Momentum v4',
+      symbol: 'NIFTY50',
+      side: 'long',
+      size: 50,
+      entryPrice: 24820.5,
+      stopPrice: 24650.0,
+      confidence: 0.89,
+      currentLtp: 24889.5,
+      unrealizedPnl: 3450.0,
+      unrealizedPnlPct: 2.78,
+    },
+    {
+      id: 'pos-init-btc',
+      botId: 'bot-2',
+      botName: 'First bot',
+      symbol: 'BTCUSDT',
+      side: 'short',
+      size: 0.2415,
+      entryPrice: 88240.0,
+      stopPrice: 89400.0,
+      confidence: 0.81,
+      currentLtp: 88050.25,
+      unrealizedPnl: 45.82,
+      unrealizedPnlPct: 0.21,
+    },
+  ])
   const [inspectTrade, setInspectTrade] = useState<TradeInspectionData | null>(null)
   const [tradeModalOpen, setTradeModalOpen] = useState(false)
   const [detailedStates, setDetailedStates] = useState<Record<string, LiveStateResponse>>({})
@@ -100,7 +132,7 @@ export default function LiveMonitoringPage() {
   const [soundOn, setSoundOn] = useState(true)
   const [loading, setLoading] = useState(false)
   const [simSpeed, setSimSpeed] = useState<'1x' | '5x' | '15x' | '60x'>('1x')
-  const [simulatedLtp, setSimulatedLtp] = useState<number>(88050.25)
+  const [showDemoControls, setShowDemoControls] = useState<boolean>(false)
   const [logFilter, setLogFilter] = useState<string>('all')
   const [logs, setLogs] = useState<AuditLog[]>([
     {
@@ -111,6 +143,29 @@ export default function LiveMonitoringPage() {
       text: 'AETHER Live Engine heartbeat OK — Multi-resolution paper loops active.',
     },
   ])
+
+  // Ctrl+Shift+D shortcut listener to toggle demo simulation controls deck
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+        e.preventDefault()
+        setShowDemoControls((prev) => {
+          const next = !prev
+          setTimeout(() => {
+            if (next) {
+              toast.success('Simulation Deck Unlocked', 'Developer live test controls visible. Press Ctrl+Shift+D to hide.')
+            } else {
+              toast.info('Simulation Deck Hidden', 'Press Ctrl+Shift+D to reveal developer test controls.')
+            }
+          }, 0)
+          return next
+        })
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   // 1. Fetch real bots from Supabase / mock on mount
   useEffect(() => {
@@ -201,28 +256,34 @@ export default function LiveMonitoringPage() {
 
     const intervalMs = simSpeed === '60x' ? 800 : simSpeed === '15x' ? 1800 : 3500
     const timer = setInterval(() => {
-      // Small random price walk
-      const delta = (Math.random() - 0.48) * 45
-      setSimulatedLtp((prev) => {
-        const nextPrice = Number((prev + delta).toFixed(2))
-        // Update simulated positions unrealized pnl
-        setSimulatedPositions((positions) =>
-          positions.map((pos) => {
-            const isLong = pos.side === 'long'
-            const uPnl = isLong
-              ? (nextPrice - pos.entryPrice) * pos.size
-              : (pos.entryPrice - nextPrice) * pos.size
-            const uPnlPct = (uPnl / (pos.entryPrice * pos.size)) * 100
-            return {
-              ...pos,
-              currentLtp: nextPrice,
-              unrealizedPnl: uPnl,
-              unrealizedPnlPct: uPnlPct,
-            }
-          }),
-        )
-        return nextPrice
-      })
+      // Walk BTC price
+      const deltaBtc = (Math.random() - 0.48) * 45
+      const nextBtc = Number((simulatedLtp + deltaBtc).toFixed(2))
+      setSimulatedLtp(nextBtc)
+
+      // Walk NIFTY price
+      const deltaNifty = (Math.random() - 0.48) * 12
+      const nextNifty = Number((niftyLtp + deltaNifty).toFixed(2))
+      setNiftyLtp(nextNifty)
+
+      // Update simulated positions unrealized pnl
+      setSimulatedPositions((positions) =>
+        positions.map((pos) => {
+          const isNifty = pos.symbol.includes('NIFTY')
+          const currentPrice = isNifty ? nextNifty : nextBtc
+          const isLong = pos.side === 'long'
+          const uPnl = isLong
+            ? (currentPrice - pos.entryPrice) * pos.size
+            : (pos.entryPrice - currentPrice) * pos.size
+          const uPnlPct = (uPnl / (pos.entryPrice * pos.size)) * 100
+          return {
+            ...pos,
+            currentLtp: currentPrice,
+            unrealizedPnl: uPnl,
+            unrealizedPnlPct: uPnlPct,
+          }
+        }),
+      )
 
       // Add a simulation tick log
       setLogs((prev) => [
@@ -231,14 +292,14 @@ export default function LiveMonitoringPage() {
           time: new Date().toLocaleTimeString(),
           type: 'signal',
           bot: 'Sim-Engine',
-          text: `[${simSpeed}] Bar closed at $${simulatedLtp.toFixed(2)}. Features extracted: RSI 49.2, EMA Fast $88,040.`,
+          text: `[${simSpeed}] Bar closed — NIFTY50 @ ₹${nextNifty.toFixed(2)}, BTCUSDT @ $${nextBtc.toFixed(2)}. Features extracted: RSI 54.2, SuperTrend BULLISH.`,
         },
         ...prev.slice(0, 49),
       ])
     }, intervalMs)
 
     return () => clearInterval(timer)
-  }, [simSpeed, isStreaming, simulatedLtp])
+  }, [simSpeed, isStreaming, simulatedLtp, niftyLtp])
 
   // Manual interactive triggers for demo presentation
   const handleForceTick = () => {
@@ -258,21 +319,23 @@ export default function LiveMonitoringPage() {
   }
 
   const handleSimulateTrade = (side: 'long' | 'short') => {
-    const activeBot = bots[0] || { id: 'bot-1', name: 'First bot' }
-    const entryP = simulatedLtp
-    const size = side === 'long' ? 0.25 : 0.2415
-    const stopP = side === 'long' ? entryP * 0.985 : entryP * 1.015
+    const targetBot = bots.find((b) => b.id === selectedBotId) || bots[0] || { id: 'bot-1', name: 'Nifty Momentum v4' }
+    const isNifty = targetBot.id.includes('nifty') || targetBot.id === 'bot-1' || targetBot.name.includes('Nifty')
+    const symbol = isNifty ? 'NIFTY50' : 'BTCUSDT'
+    const entryP = isNifty ? niftyLtp : simulatedLtp
+    const size = isNifty ? 50 : 0.25
+    const stopP = side === 'long' ? entryP * 0.99 : entryP * 1.01
 
     const newPos: PositionItem = {
       id: `pos-${Date.now()}`,
-      botId: activeBot.id,
-      botName: activeBot.name,
-      symbol: 'BTCUSDT',
+      botId: targetBot.id,
+      botName: targetBot.name,
+      symbol,
       side,
       size,
       entryPrice: entryP,
       stopPrice: stopP,
-      confidence: 0.82,
+      confidence: 0.88,
       currentLtp: entryP,
       unrealizedPnl: 0,
       unrealizedPnlPct: 0,
@@ -280,35 +343,43 @@ export default function LiveMonitoringPage() {
 
     setSimulatedPositions((prev) => [newPos, ...prev])
     if (soundOn) playFillChime()
-    toast.success(`Simulated ${side.toUpperCase()} Entry Fill`, `Filled ${size} BTCUSDT @ ${formatINR(entryP)}`)
+    toast.success(
+      `Simulated ${side.toUpperCase()} Entry Fill`,
+      `Filled ${size} ${symbol} @ ${isNifty ? `₹${entryP.toLocaleString('en-IN')}` : `$${entryP.toLocaleString()}`}`,
+    )
 
     setLogs((prev) => [
       {
         id: `log-fill-${Date.now()}`,
         time: new Date().toLocaleTimeString(),
         type: 'fill',
-        bot: activeBot.name,
-        text: `ORDER FILLED: ${side.toUpperCase()} ${size} BTCUSDT @ $${entryP.toFixed(2)} (Conviction: 82%).`,
+        bot: targetBot.name,
+        text: `ORDER FILLED: ${side.toUpperCase()} ${size} ${symbol} @ ${isNifty ? `₹${entryP.toFixed(2)}` : `$${entryP.toFixed(2)}`} (Conviction: 88%).`,
       },
       ...prev,
     ])
   }
 
   const handleInjectVolatility = (direction: 'pump' | 'dump') => {
-    const shift = direction === 'pump' ? 1.025 : 0.975
-    const nextLtp = Number((simulatedLtp * shift).toFixed(2))
-    setSimulatedLtp(nextLtp)
+    const shift = direction === 'pump' ? 1.02 : 0.98
+    const nextBtc = Number((simulatedLtp * (direction === 'pump' ? 1.025 : 0.975)).toFixed(2))
+    const nextNifty = Number((niftyLtp * shift).toFixed(2))
+
+    setSimulatedLtp(nextBtc)
+    setNiftyLtp(nextNifty)
 
     setSimulatedPositions((positions) =>
       positions.map((pos) => {
+        const isNifty = pos.symbol.includes('NIFTY')
+        const nextPrice = isNifty ? nextNifty : nextBtc
         const isLong = pos.side === 'long'
         const uPnl = isLong
-          ? (nextLtp - pos.entryPrice) * pos.size
-          : (pos.entryPrice - nextLtp) * pos.size
+          ? (nextPrice - pos.entryPrice) * pos.size
+          : (pos.entryPrice - nextPrice) * pos.size
         const uPnlPct = (uPnl / (pos.entryPrice * pos.size)) * 100
         return {
           ...pos,
-          currentLtp: nextLtp,
+          currentLtp: nextPrice,
           unrealizedPnl: uPnl,
           unrealizedPnlPct: uPnlPct,
         }
@@ -317,8 +388,8 @@ export default function LiveMonitoringPage() {
 
     if (soundOn) playFillChime()
     toast.warn(
-      `Market Volatility Injected (${direction === 'pump' ? '+2.5%' : '-2.5%'})`,
-      `BTCUSDT price shifted to $${nextLtp.toLocaleString()}. Dynamic risk gates evaluated.`,
+      `Market Volatility Injected (${direction === 'pump' ? '+2.0%' : '-2.0%'})`,
+      `NIFTY50 @ ₹${nextNifty.toLocaleString('en-IN')} | BTCUSDT @ $${nextBtc.toLocaleString()}. Dynamic risk gates evaluated.`,
     )
 
     setLogs((prev) => [
@@ -327,7 +398,7 @@ export default function LiveMonitoringPage() {
         time: new Date().toLocaleTimeString(),
         type: 'warn',
         bot: 'Market Shock Engine',
-        text: `VOLATILITY EVENT: BTCUSDT price moved to $${nextLtp.toFixed(2)} (${direction === 'pump' ? '+2.5%' : '-2.5%'}). Trailing stops active.`,
+        text: `VOLATILITY EVENT: NIFTY50 ₹${nextNifty.toFixed(2)}, BTCUSDT $${nextBtc.toFixed(2)} (${direction === 'pump' ? '+2.0%' : '-2.0%'}). Trailing stops active.`,
       },
       ...prev,
     ])
@@ -830,101 +901,135 @@ export default function LiveMonitoringPage() {
         </div>
       </div>
 
-      {/* Interactive Simulation & Test Controls Deck */}
-      <div className="rounded-xl border border-brand/30 bg-gradient-to-r from-brand/10 via-card to-card p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm backdrop-blur-sm">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <Zap className="size-4 text-brand animate-pulse" />
-            <span className="text-xs font-bold uppercase tracking-wider text-foreground">
-              Demo Simulation &amp; Live Test Controls
-            </span>
-            <Badge variant="brand" size="sm" className="font-mono text-[9px]">
-              Hackathon Deck
-            </Badge>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            Test strategy loops, simulate live fills, adjust tick speed, and inject market volatility in real time.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap w-full md:w-auto justify-start md:justify-end">
-          {/* Speed Multiplier */}
-          <div className="flex items-center bg-secondary/80 border border-border rounded-lg p-0.5 gap-0.5 text-[11px]">
-            <span className="px-2 text-[10px] font-mono text-tertiary uppercase">Speed:</span>
-            {(['1x', '5x', '15x', '60x'] as const).map((spd) => (
-              <button
-                key={spd}
-                type="button"
-                onClick={() => {
-                  setSimSpeed(spd)
-                  toast.info(`Simulation Speed: ${spd}`, spd === '1x' ? 'Real-time live scheduler loop' : `Accelerated bar evaluation at ${spd}`)
-                }}
-                className={`h-6 px-2 rounded-md font-mono text-[10px] font-semibold transition-colors cursor-pointer ${
-                  simSpeed === spd
-                    ? 'bg-brand text-brand-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {spd}
-              </button>
-            ))}
-          </div>
-
-          {/* Force Tick Button */}
-          <button
-            type="button"
-            onClick={handleForceTick}
-            className="h-7.5 px-2.5 rounded-lg border border-border bg-secondary hover:bg-secondary/80 text-xs font-semibold text-foreground flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Force immediate evaluation of DAG nodes on next closed bar"
+      {/* Interactive Simulation & Test Controls Deck (Revealed only via Ctrl+Shift+D) */}
+      <AnimatePresence>
+        {showDemoControls && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, y: -8 }}
+            animate={{ opacity: 1, height: 'auto', y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
           >
-            <Zap className="size-3.5 text-brand" />
-            <span>Force Tick</span>
-          </button>
+            <div className="rounded-xl border border-brand/30 bg-gradient-to-r from-brand/10 via-card to-card p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm backdrop-blur-sm">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <Zap className="size-4 text-brand animate-pulse" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-foreground">
+                    Demo Simulation &amp; Live Test Controls
+                  </span>
+                  <Badge variant="brand" size="sm" className="font-mono text-[9px]">
+                    Ctrl+Shift+D
+                  </Badge>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Developer simulation deck: Test strategy loops, simulate live fills, adjust tick speed, and inject market volatility.
+                </p>
+              </div>
 
-          {/* Test Long */}
-          <button
-            type="button"
-            onClick={() => handleSimulateTrade('long')}
-            className="h-7.5 px-2.5 rounded-lg border border-profit/30 bg-profit/10 hover:bg-profit/20 text-xs font-semibold text-profit flex items-center gap-1 transition-colors cursor-pointer"
-            title="Simulate immediate LONG market fill"
-          >
-            <ArrowUpRight className="size-3.5" />
-            <span>Test Long</span>
-          </button>
+              <div className="flex items-center gap-2 flex-wrap w-full md:w-auto justify-start md:justify-end">
+                {/* Target Bot Selector */}
+                <div className="flex items-center bg-secondary/80 border border-border rounded-lg px-2 py-1 gap-1.5 text-[11px]">
+                  <span className="text-[10px] font-mono text-tertiary uppercase">Target:</span>
+                  <select
+                    value={selectedBotId}
+                    onChange={(e) => setSelectedBotId(e.target.value)}
+                    className="bg-transparent text-xs font-semibold text-foreground focus:outline-none cursor-pointer max-w-[140px] truncate"
+                  >
+                    {bots.map((b) => (
+                      <option key={b.id} value={b.id} className="bg-card text-foreground">
+                        {b.name}
+                      </option>
+                    ))}
+                    {bots.length === 0 && (
+                      <>
+                        <option value="bot-1" className="bg-card text-foreground">Nifty Momentum v4</option>
+                        <option value="bot-2" className="bg-card text-foreground">First bot</option>
+                      </>
+                    )}
+                  </select>
+                </div>
 
-          {/* Test Short */}
-          <button
-            type="button"
-            onClick={() => handleSimulateTrade('short')}
-            className="h-7.5 px-2.5 rounded-lg border border-loss/30 bg-loss/10 hover:bg-loss/20 text-xs font-semibold text-loss flex items-center gap-1 transition-colors cursor-pointer"
-            title="Simulate immediate SHORT market fill"
-          >
-            <ArrowDownRight className="size-3.5" />
-            <span>Test Short</span>
-          </button>
+                {/* Speed Multiplier */}
+                <div className="flex items-center bg-secondary/80 border border-border rounded-lg p-0.5 gap-0.5 text-[11px]">
+                  <span className="px-2 text-[10px] font-mono text-tertiary uppercase">Speed:</span>
+                  {(['1x', '5x', '15x', '60x'] as const).map((spd) => (
+                    <button
+                      key={spd}
+                      type="button"
+                      onClick={() => {
+                        setSimSpeed(spd)
+                        toast.info(`Simulation Speed: ${spd}`, spd === '1x' ? 'Real-time live scheduler loop' : `Accelerated bar evaluation at ${spd}`)
+                      }}
+                      className={`h-6 px-2 rounded-md font-mono text-[10px] font-semibold transition-colors cursor-pointer ${
+                        simSpeed === spd
+                          ? 'bg-brand text-brand-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {spd}
+                    </button>
+                  ))}
+                </div>
 
-          {/* Volatility Shock */}
-          <button
-            type="button"
-            onClick={() => handleInjectVolatility(Math.random() > 0.5 ? 'pump' : 'dump')}
-            className="h-7.5 px-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-xs font-semibold text-amber-300 flex items-center gap-1 transition-colors cursor-pointer"
-            title="Inject market shock to test risk gates"
-          >
-            <Activity className="size-3.5 text-amber-400" />
-            <span>Inject Shock</span>
-          </button>
+                {/* Force Tick Button */}
+                <button
+                  type="button"
+                  onClick={handleForceTick}
+                  className="h-7.5 px-2.5 rounded-lg border border-border bg-secondary hover:bg-secondary/80 text-xs font-semibold text-foreground flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Force immediate evaluation of DAG nodes on next closed bar"
+                >
+                  <Zap className="size-3.5 text-brand" />
+                  <span>Force Tick</span>
+                </button>
 
-          {/* Reset Simulation */}
-          <button
-            type="button"
-            onClick={handleResetSimulation}
-            className="h-7.5 px-2 rounded-lg border border-border bg-secondary/50 hover:bg-secondary text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            title="Reset test simulation positions"
-          >
-            <RefreshCw className="size-3" />
-          </button>
-        </div>
-      </div>
+                {/* Test Long */}
+                <button
+                  type="button"
+                  onClick={() => handleSimulateTrade('long')}
+                  className="h-7.5 px-2.5 rounded-lg border border-profit/30 bg-profit/10 hover:bg-profit/20 text-xs font-semibold text-profit flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Simulate immediate LONG market fill"
+                >
+                  <ArrowUpRight className="size-3.5" />
+                  <span>Test Long</span>
+                </button>
+
+                {/* Test Short */}
+                <button
+                  type="button"
+                  onClick={() => handleSimulateTrade('short')}
+                  className="h-7.5 px-2.5 rounded-lg border border-loss/30 bg-loss/10 hover:bg-loss/20 text-xs font-semibold text-loss flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Simulate immediate SHORT market fill"
+                >
+                  <ArrowDownRight className="size-3.5" />
+                  <span>Test Short</span>
+                </button>
+
+                {/* Volatility Shock */}
+                <button
+                  type="button"
+                  onClick={() => handleInjectVolatility(Math.random() > 0.5 ? 'pump' : 'dump')}
+                  className="h-7.5 px-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-xs font-semibold text-amber-300 flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Inject market shock to test risk gates"
+                >
+                  <Activity className="size-3.5 text-amber-400" />
+                  <span>Inject Shock</span>
+                </button>
+
+                {/* Reset Simulation */}
+                <button
+                  type="button"
+                  onClick={handleResetSimulation}
+                  className="h-7.5 px-2 rounded-lg border border-border bg-secondary/50 hover:bg-secondary text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  title="Reset test simulation positions"
+                >
+                  <RefreshCw className="size-3" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Confirmation Modal for Emergency Stop */}
       {killConfirmed && (
@@ -1186,6 +1291,7 @@ export default function LiveMonitoringPage() {
                     const isLong = pos.side === 'long'
                     const uPnl = pos.unrealizedPnl || 0
                     const uPnlPct = pos.unrealizedPnlPct || 0
+                    const isNiftySym = pos.symbol.includes('NIFTY')
 
                     return (
                       <motion.tr
@@ -1197,7 +1303,13 @@ export default function LiveMonitoringPage() {
                         onClick={() => openPositionInspector(pos)}
                         className="hover:bg-secondary/30 transition-colors cursor-pointer group"
                       >
-                        <td className="p-3 pl-4 font-bold text-foreground group-hover:text-brand transition-colors">{pos.symbol}</td>
+                        <td className="p-3 pl-4 font-bold text-foreground group-hover:text-brand transition-colors flex items-center gap-2">
+                          <span className="relative flex size-2">
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                            <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+                          </span>
+                          {pos.symbol}
+                        </td>
                         <td className="p-3">
                           <Badge
                             variant={isLong ? 'profit' : 'loss'}
@@ -1211,18 +1323,30 @@ export default function LiveMonitoringPage() {
                         <td className="p-3 font-mono font-semibold text-foreground">
                           {pos.size < 1 ? pos.size.toFixed(4) : pos.size.toFixed(2)}
                         </td>
-                        <td className="p-3 font-mono">{formatINR(pos.entryPrice)}</td>
+                        <td className="p-3 font-mono">
+                          {isNiftySym
+                            ? formatINR(pos.entryPrice)
+                            : `$${pos.entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        </td>
                         <td className="p-3 font-mono font-semibold text-foreground">
-                          ${(pos.currentLtp || pos.entryPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {isNiftySym
+                            ? `₹${(pos.currentLtp || pos.entryPrice).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : `$${(pos.currentLtp || pos.entryPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </td>
                         <td className={`p-3 font-mono font-bold ${uPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
-                          {formatINR(uPnl, { signed: true })}
+                          {isNiftySym
+                            ? formatINR(uPnl, { signed: true })
+                            : `${uPnl >= 0 ? '+' : ''}$${uPnl.toFixed(2)}`}
                         </td>
                         <td className={`p-3 font-mono font-bold ${uPnlPct >= 0 ? 'text-profit' : 'text-loss'}`}>
                           {formatPct(uPnlPct)}
                         </td>
                         <td className="p-3 font-mono text-muted-foreground">
-                          {pos.stopPrice ? formatINR(pos.stopPrice) : 'None'}
+                          {pos.stopPrice
+                            ? (isNiftySym
+                                ? formatINR(pos.stopPrice)
+                                : `$${pos.stopPrice.toLocaleString()}`)
+                            : 'None'}
                         </td>
                         <td className="p-3 font-mono font-semibold text-brand">
                           {Math.round(pos.confidence * 100)}%

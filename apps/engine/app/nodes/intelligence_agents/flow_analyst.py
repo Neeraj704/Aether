@@ -9,8 +9,8 @@ class FlowAnalystNode(LlmAgentNode):
     Scales confidence according to data quality (real Level 2 order book vs OHLCV proxy).
     """
     component_id = "flow-agent"
-    default_provider_id = "deepseek"
-    default_model_id = "deepseek-v3"
+    default_provider_id = "groq"
+    default_model_id = "groq/compound-mini"
     default_system_prompt = (
         "You are an order-flow analyst. Given bid/ask volume imbalance data, form a "
         "directional view based on where real buying or selling pressure is concentrated. "

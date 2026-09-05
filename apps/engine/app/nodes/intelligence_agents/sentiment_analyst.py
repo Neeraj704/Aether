@@ -4,8 +4,8 @@ from .base import LlmAgentNode
 
 class SentimentAnalystNode(LlmAgentNode):
     component_id = "sentiment-agent"
-    default_provider_id = "anthropic"
-    default_model_id = "claude-sonnet"
+    default_provider_id = "groq"
+    default_model_id = "qwen/qwen3.8-27b"
     default_system_prompt = (
         "You are a disciplined sentiment analyst. Given aggregated social and news sentiment signal, "
         "form a directional view, weighing signal strength against potential noise or manipulation in social sentiment data."

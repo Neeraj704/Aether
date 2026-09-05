@@ -9,8 +9,8 @@ class ContrarianAgentNode(LlmAgentNode):
     Fades excessive conviction (confidence >= fadeThreshold) and defers to incoming view otherwise.
     """
     component_id = "contrarian-agent"
-    default_provider_id = "anthropic"
-    default_model_id = "claude-haiku"
+    default_provider_id = "groq"
+    default_model_id = "openai/gpt-oss-20b"
     default_system_prompt = (
         "You are a contrarian analyst. Your job is to identify when another agent's "
         "conviction may be overextended — excessive confidence is often a late-stage "

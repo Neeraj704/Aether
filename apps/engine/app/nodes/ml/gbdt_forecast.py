@@ -381,15 +381,35 @@ class GbdtForecastNode:
             calib_path      = row.get("calibration_path")
             cv_mcc          = float(row.get("cv_mcc_mean", 0.0) or 0.0)
             t_mcc           = float(row.get("test_mcc", 0.0) or 0.0)
+            feat_cols       = list(row.get("feature_columns") or [])
+            row_ver         = str(row.get("version", "unknown"))
+            row_acc         = row.get("accuracy")
         else:
-            artifact_path   = getattr(row, "artifact_path", "")
-            row_symbol      = getattr(row, "symbol", "")
-            row_resolution  = getattr(row, "resolution", "")
+            artifact_path   = str(getattr(row, "artifact_path", "") or "")
+            row_symbol      = str(getattr(row, "symbol", "") or "")
+            row_resolution  = str(getattr(row, "resolution", "") or "")
             primary_horizon = int(getattr(row, "horizon_bars", 12))
             is_disc         = bool(getattr(row, "is_discriminative", False))
             calib_path      = getattr(row, "calibration_path", None)
             cv_mcc          = float(getattr(row, "cv_mcc_mean", 0.0) or 0.0)
             t_mcc           = float(getattr(row, "test_mcc", 0.0) or 0.0)
+            feat_cols       = list(getattr(row, "feature_columns", None) or [])
+            row_ver         = str(getattr(row, "version", "unknown") or "unknown")
+            row_acc         = getattr(row, "accuracy", None)
+
+        self._model_data = {
+            "artifact_path": artifact_path,
+            "symbol": row_symbol,
+            "resolution": row_resolution,
+            "horizon_bars": primary_horizon,
+            "is_discriminative": is_disc,
+            "calibration_path": calib_path,
+            "cv_mcc_mean": cv_mcc,
+            "test_mcc": t_mcc,
+            "feature_columns": feat_cols,
+            "version": row_ver,
+            "accuracy": row_acc,
+        }
 
         self._is_discriminative = is_disc
         self._calibration_path  = calib_path
@@ -658,20 +678,13 @@ class GbdtForecastNode:
 
         optional_features = self._extract_optional_features(ctx)
 
-        if isinstance(self._model_row, dict):
-            feature_columns = list(self._model_row.get("feature_columns", []))
-            version         = self._model_row.get("version", "unknown")
-            primary_horizon = int(self._model_row.get("horizon_bars", 12))
-            row_symbol      = self._model_row.get("symbol", symbol)
-            row_resolution  = self._model_row.get("resolution", resolution)
-            accuracy        = self._model_row.get("accuracy")
-        else:
-            feature_columns = list(self._model_row.feature_columns or [])
-            version         = getattr(self._model_row, "version", "unknown")
-            primary_horizon = int(getattr(self._model_row, "horizon_bars", 12))
-            row_symbol      = getattr(self._model_row, "symbol", symbol)
-            row_resolution  = getattr(self._model_row, "resolution", resolution)
-            accuracy        = getattr(self._model_row, "accuracy", None)
+        m_data = getattr(self, "_model_data", {})
+        feature_columns = list(m_data.get("feature_columns") or [])
+        version         = str(m_data.get("version", "unknown"))
+        primary_horizon = int(m_data.get("horizon_bars", 12))
+        row_symbol      = str(m_data.get("symbol", symbol))
+        row_resolution  = str(m_data.get("resolution", resolution))
+        accuracy        = m_data.get("accuracy")
 
         # Fall back to the 7-column set if the model was trained pre-19.1 (feature_columns has 7 items)
         if not feature_columns:

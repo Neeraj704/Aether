@@ -303,7 +303,7 @@ async def evaluate_live_snapshot(bot_id: str, bot_graph_dict: dict, symbol: str 
             dummy_portfolio,
             return_context=True,
             historical_window=recent_df,
-            mode="live",
+            mode="inspection",
             bot_id=str(bot_id),
             db=session,
         )
@@ -389,9 +389,16 @@ async def tick_bot(bot_id: str, session: Optional[AsyncSession] = None):
 
         # Check if candle was already processed
         candle_open_time = candle["open_time"]
+        if isinstance(candle_open_time, str):
+            candle_open_time = datetime.fromisoformat(candle_open_time.replace("Z", "+00:00"))
+        if candle_open_time.tzinfo is None:
+            candle_open_time = candle_open_time.replace(tzinfo=timezone.utc)
+
         already_processed = False
         if live_session.last_bar_time:
             last_bt = live_session.last_bar_time
+            if isinstance(last_bt, str):
+                last_bt = datetime.fromisoformat(last_bt.replace("Z", "+00:00"))
             if last_bt.tzinfo is None:
                 last_bt = last_bt.replace(tzinfo=timezone.utc)
             if candle_open_time <= last_bt:
@@ -435,49 +442,57 @@ async def tick_bot(bot_id: str, session: Optional[AsyncSession] = None):
                 "low": candle.get("low"),
                 "close": candle.get("close"),
                 "volume": candle.get("volume"),
-                "openTime": candle.get("open_time").isoformat() if hasattr(candle.get("open_time"), "isoformat") else str(candle.get("open_time")),
+                "openTime": candle_open_time.isoformat(),
             },
             "steps": steps,
         })
 
-        # If this is a new closed bar, persist state
-        if not already_processed:
-            live_session.cash = portfolio.cash
-            live_session.equity = portfolio.equity
-            live_session.position = make_json_serializable(portfolio.position) if portfolio.position else None
-            live_session.peak_equity = portfolio.peak_equity
-            live_session.max_drawdown = portfolio.max_dd
-            live_session.last_bar_time = candle_open_time
+        # Persist portfolio state on EVERY tick so position updates are never dropped
+        live_session.cash = portfolio.cash
+        live_session.equity = portfolio.equity
+        live_session.position = make_json_serializable(portfolio.position) if portfolio.position else None
+        live_session.peak_equity = max(portfolio.peak_equity, portfolio.equity)
+        live_session.max_drawdown = portfolio.max_dd
 
-            equity_pt = LiveEquityPointModel(
+        if closed_trade:
+            trade_model = LiveTradeModel(
+                id=uuid.uuid4(),
                 live_session_id=live_session.id,
-                ts=candle_open_time,
-                equity=portfolio.equity,
-                drawdown=portfolio.current_drawdown(),
+                symbol=closed_trade.symbol,
+                side=closed_trade.side,
+                entry_time=closed_trade.entry_time if isinstance(closed_trade.entry_time, datetime) else datetime.fromisoformat(str(closed_trade.entry_time).replace("Z", "+00:00")),
+                exit_time=closed_trade.exit_time if isinstance(closed_trade.exit_time, datetime) else datetime.fromisoformat(str(closed_trade.exit_time).replace("Z", "+00:00")),
+                size=closed_trade.size,
+                pnl=closed_trade.pnl,
+                pnl_pct=closed_trade.pnl_pct,
+                trigger_node=closed_trade.trigger_node,
+                confidence=closed_trade.confidence,
+                execution_flow=make_json_serializable(getattr(closed_trade, "execution_flow", {})),
             )
-            session.add(equity_pt)
+            session.add(trade_model)
+            append_bot_log(str(bot_id), "fill", f"ORDER CLOSED: {closed_trade.side.upper()} {closed_trade.symbol} P&L: ₹{closed_trade.pnl:+,.2f}")
 
-            if closed_trade:
-                trade_model = LiveTradeModel(
-                    id=uuid.uuid4(),
-                    live_session_id=live_session.id,
-                    symbol=closed_trade.symbol,
-                    side=closed_trade.side,
-                    entry_time=closed_trade.entry_time if isinstance(closed_trade.entry_time, datetime) else datetime.fromisoformat(str(closed_trade.entry_time).replace("Z", "+00:00")),
-                    exit_time=closed_trade.exit_time if isinstance(closed_trade.exit_time, datetime) else datetime.fromisoformat(str(closed_trade.exit_time).replace("Z", "+00:00")),
-                    size=closed_trade.size,
-                    pnl=closed_trade.pnl,
-                    pnl_pct=closed_trade.pnl_pct,
-                    trigger_node=closed_trade.trigger_node,
-                    confidence=closed_trade.confidence,
-                    execution_flow=make_json_serializable(getattr(closed_trade, "execution_flow", {})),
+        # If this is a new closed bar boundary, record equity point idempotently
+        if not already_processed:
+            live_session.last_bar_time = candle_open_time
+            eq_exists = await session.scalar(
+                select(LiveEquityPointModel.ts).where(
+                    LiveEquityPointModel.live_session_id == live_session.id,
+                    LiveEquityPointModel.ts == candle_open_time,
                 )
-                session.add(trade_model)
-                append_bot_log(str(bot_id), "fill", f"ORDER CLOSED: {closed_trade.side.upper()} {closed_trade.symbol} P&L: ₹{closed_trade.pnl:+,.2f}")
+            )
+            if not eq_exists:
+                equity_pt = LiveEquityPointModel(
+                    live_session_id=live_session.id,
+                    ts=candle_open_time,
+                    equity=portfolio.equity,
+                    drawdown=portfolio.current_drawdown(),
+                )
+                session.add(equity_pt)
 
-            await session.commit()
-            _bot_consecutive_errors[str(bot_id)] = 0
-            print(f"[Live Runner] Processed closed bar tick for bot {bot_id} ({resolution}). Equity: {portfolio.equity}")
+        await session.commit()
+        _bot_consecutive_errors[str(bot_id)] = 0
+        print(f"[Live Runner] Processed live tick for bot {bot_id} ({resolution}). Equity: {portfolio.equity} | Position: {portfolio.position.get('side') if portfolio.position else 'FLAT'}")
 
     except Exception as e:
         if isinstance(e, asyncio.CancelledError):

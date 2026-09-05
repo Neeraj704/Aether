@@ -8,6 +8,7 @@ import {
   Play,
   Pause,
   Zap,
+  ZapOff,
   AlertTriangle,
   Square,
   RefreshCw,
@@ -127,9 +128,31 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null)
   const [logFilter, setLogFilter] = useState<string>('all')
   const [simSpeed, setSimSpeed] = useState<'1x' | '5x' | '15x' | '60x'>('1x')
+  const [showDemoControls, setShowDemoControls] = useState<boolean>(false)
   const [soundOn, setSoundOn] = useState(true)
   const [simPosition, setSimPosition] = useState<any | null>(null)
   const [simPriceDelta, setSimPriceDelta] = useState<number>(0)
+
+  // Ctrl+Shift+D shortcut listener to toggle demo simulation controls deck
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+        e.preventDefault()
+        setShowDemoControls((prev) => {
+          const next = !prev
+          if (next) {
+            toast.success('Simulation Deck Unlocked', 'Developer live test controls visible. Press Ctrl+Shift+D to hide.')
+          } else {
+            toast.info('Simulation Deck Hidden', 'Press Ctrl+Shift+D to reveal developer test controls.')
+          }
+          return next
+        })
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   // Start Modal State
   const [startModalOpen, setStartModalOpen] = useState(false)
@@ -243,6 +266,104 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
 
   const openPositionInspector = () => {
     if (!activePosition) return
+
+    // Build complete dynamic execution flow across all bot nodes
+    let flowSteps: any[] = []
+    const upstream = activePosition.upstream_outputs || {}
+    const evalSteps = evaluation?.steps || []
+
+    if (evalSteps.length > 0) {
+      flowSteps = evalSteps.map((s, idx) => ({
+        stepIndex: idx + 1,
+        layer: s.layer || 'logic',
+        nodeId: s.nodeId || s.componentId,
+        nodeName: s.nodeName || s.componentId,
+        status: 'completed',
+        computation: s.summary || `Evaluated ${s.nodeName || s.componentId}`,
+        output: s.output,
+        metricLabel: s.metricLabel,
+        metricValue: s.metricValue,
+      }))
+    } else if (Object.keys(upstream).length > 0) {
+      let idx = 1
+      for (const [nodeId, out] of Object.entries(upstream)) {
+        const outObj = out as any
+        const outType = outObj?.type || ''
+        let layer = 'logic'
+        let nodeName = nodeId
+        let comp = `Executed ${nodeId}`
+
+        if (outType === 'MarketData') {
+          layer = 'data'
+          nodeName = nodeId.includes('orderbook') ? 'Orderbook Depth Feed' : 'OHLCV Price Feed'
+          comp = `Ingested market data for ${outObj?.symbol || 'BTCUSDT'}`
+        } else if (outType === 'NewsFeed') {
+          layer = 'data'
+          nodeName = 'Live News & Narrative Stream'
+          comp = `Ingested ${outObj?.articleCount || 0} news headlines (sentiment score ${outObj?.sentimentScore || 0})`
+        } else if (outType === 'FeatureVector') {
+          layer = 'features'
+          nodeName = nodeId.includes('regime') ? 'Market Regime Tagger' : 'Technical Indicators'
+          comp = `Computed technical features: RSI=${Number(outObj?.rsi || 0).toFixed(1)}, Fast EMA=$${Number(outObj?.ema_fast || 0).toLocaleString()}`
+        } else if (outType === 'Signal') {
+          if (nodeId.includes('gbdt') || nodeId.includes('forecast')) {
+            layer = 'ml'
+            nodeName = 'GBDT Gradient Boosting Forecast'
+          } else if (nodeId.includes('contrarian')) {
+            layer = 'agents'
+            nodeName = 'Contrarian Trap Detector'
+          } else if (nodeId.includes('flow')) {
+            layer = 'agents'
+            nodeName = 'Order Flow Imbalance Agent'
+          } else if (nodeId.includes('sentiment')) {
+            layer = 'agents'
+            nodeName = 'Market Sentiment Agent'
+          } else if (nodeId.includes('agreement') || nodeId.includes('consensus')) {
+            layer = 'agents'
+            nodeName = 'Multi-Agent Consensus (Agreement Score)'
+          } else {
+            layer = 'agents'
+            nodeName = outObj?.agentName || 'Technical Analyst Agent'
+          }
+          comp = outObj?.rationale || `Signal: ${String(outObj?.direction || 'neutral').toUpperCase()} (${Math.round(Number(outObj?.confidence || 0.5) * 100)}% conviction)`
+        } else if (outType === 'RiskDecision') {
+          layer = 'risk'
+          nodeName = 'Institutional Risk Gate'
+          comp = outObj?.reason || 'Verified risk thresholds and allocated capital'
+        }
+
+        flowSteps.push({
+          stepIndex: idx++,
+          layer,
+          nodeId,
+          nodeName,
+          status: 'completed',
+          computation: comp,
+          output: outObj,
+        })
+      }
+    }
+
+    // Append execution broker step for the active open contract
+    if (!flowSteps.some((s) => s.nodeId === 'paper-executor')) {
+      flowSteps.push({
+        stepIndex: flowSteps.length + 1,
+        layer: 'execution',
+        nodeId: 'paper-executor',
+        nodeName: 'Paper Execution Broker',
+        status: 'active',
+        computation: `Active position: ${String(activePosition.side || 'long').toUpperCase()} ${Number(activePosition.size || 0).toFixed(4)} units @ $${Number(activePosition.entry_price || activePosition.entryPrice || 0).toLocaleString()}`,
+        output: {
+          side: activePosition.side,
+          size: activePosition.size,
+          entryPrice: activePosition.entry_price || activePosition.entryPrice,
+          stopPrice: activePosition.stop_price || activePosition.stopPrice,
+          confidence: activePosition.confidence,
+          status: 'OPEN_CONTRACT',
+        },
+      })
+    }
+
     const tradeData: TradeInspectionData = {
       isOpenPosition: true,
       symbol: session?.symbol || activePosition.symbol || 'BTCUSDT',
@@ -257,6 +378,20 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
       entrySignal: activePosition.entry_signal,
       entryRisk: activePosition.entry_risk,
       rawPosition: activePosition,
+      executionFlow: {
+        tradeId: 'active-open-position',
+        symbol: session?.symbol || activePosition.symbol || 'BTCUSDT',
+        side: activePosition.side || 'long',
+        summary: {
+          entryTime: activePosition.entry_time || activePosition.entryTime || new Date().toISOString(),
+          entryPrice: activePosition.entry_price || activePosition.entryPrice || 0,
+          size: activePosition.size || 0,
+          stopPrice: activePosition.stop_price || activePosition.stopPrice,
+          confidence: activePosition.confidence || 0.85,
+          status: 'OPEN',
+        },
+        steps: flowSteps,
+      },
     }
     setInspectTrade(tradeData)
     setTradeModalOpen(true)
@@ -767,127 +902,139 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
             </span>
           </div>
 
-          {/* Interactive Demo Simulation Controls Toolbar */}
-          <div className="rounded-xl border border-brand/30 bg-gradient-to-r from-brand/10 via-card/90 to-brand/5 p-3.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm backdrop-blur-sm">
-            <div className="flex items-center gap-2.5">
-              <div className="size-7 rounded-lg bg-brand/20 border border-brand/30 flex items-center justify-center text-brand">
-                <Zap className="size-4" />
-              </div>
-              <div>
-                <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                  Live Test Controls & Simulation Deck
-                  <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-brand/20 text-brand border border-brand/30">
-                    DEMO MODE
-                  </span>
-                </span>
-                <span className="text-[10px] text-muted-foreground block">
-                  Accelerate candle ticks, inject fills, simulate volatility shocks & test audio alerts
-                </span>
-              </div>
-            </div>
+          {/* Interactive Demo Simulation Controls Toolbar (Hidden by default, reveal via Ctrl+Shift+D) */}
+          <AnimatePresence>
+            {showDemoControls && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, y: -8 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                exit={{ opacity: 0, height: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="rounded-xl border border-brand/30 bg-gradient-to-r from-brand/10 via-card/90 to-brand/5 p-3.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm backdrop-blur-sm">
+                  <div className="flex items-center gap-2.5">
+                    <div className="size-7 rounded-lg bg-brand/20 border border-brand/30 flex items-center justify-center text-brand">
+                      <Zap className="size-4" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        Live Test Controls &amp; Simulation Deck
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-brand/20 text-brand border border-brand/30">
+                          Ctrl+Shift+D
+                        </span>
+                      </span>
+                      <span className="text-[10px] text-muted-foreground block">
+                        Developer simulation deck: Accelerate candle ticks, inject fills, simulate volatility shocks &amp; test audio alerts
+                      </span>
+                    </div>
+                  </div>
 
-            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-              {/* Speed Multipliers */}
-              <div className="flex items-center bg-secondary/80 rounded-lg p-0.5 border border-border">
-                {(['1x', '5x', '15x', '60x'] as const).map((spd) => (
-                  <button
-                    key={spd}
-                    type="button"
-                    onClick={() => {
-                      setSimSpeed(spd)
-                      toast.info(`Simulation Speed: ${spd}`, spd === '1x' ? 'Real-time 1m cadence' : `Accelerated ${spd} ticker simulation`)
-                    }}
-                    className={cn(
-                      'px-2 py-1 text-[10px] font-mono font-medium rounded transition-all cursor-pointer',
-                      simSpeed === spd
-                        ? 'bg-brand text-black font-bold shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground',
+                  <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                    {/* Speed Multipliers */}
+                    <div className="flex items-center bg-secondary/80 rounded-lg p-0.5 border border-border">
+                      {(['1x', '5x', '15x', '60x'] as const).map((spd) => (
+                        <button
+                          key={spd}
+                          type="button"
+                          onClick={() => {
+                            setSimSpeed(spd)
+                            toast.info(`Simulation Speed: ${spd}`, spd === '1x' ? 'Real-time 1m cadence' : `Accelerated ${spd} ticker simulation`)
+                          }}
+                          className={cn(
+                            'px-2 py-1 text-[10px] font-mono font-medium rounded transition-all cursor-pointer',
+                            simSpeed === spd
+                              ? 'bg-brand text-black font-bold shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          {spd}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Force Candle Tick */}
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={handleForceTick}
+                      className="h-7 text-[11px] gap-1 bg-card/80 border-border hover:border-brand/50 hover:text-brand"
+                      title="Force evaluate next candle now"
+                    >
+                      <Zap className="size-3 text-brand" />
+                      Force Tick
+                    </Button>
+
+                    {/* Sim Long Fill */}
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => handleSimFill('long')}
+                      className="h-7 text-[11px] gap-1 bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
+                      title="Simulate a long market order fill"
+                    >
+                      <ArrowUpRight className="size-3" />
+                      Test Long
+                    </Button>
+
+                    {/* Sim Short Fill */}
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => handleSimFill('short')}
+                      className="h-7 text-[11px] gap-1 bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20"
+                      title="Simulate a short market order fill"
+                    >
+                      <ArrowDownRight className="size-3" />
+                      Test Short
+                    </Button>
+
+                    {/* Volatility Shock */}
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={handleVolatilityShock}
+                      className="h-7 text-[11px] gap-1 bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20"
+                      title="Inject sudden +/- 2.5% market swing"
+                    >
+                      <Flame className="size-3 text-amber-400" />
+                      Shock
+                    </Button>
+
+                    {/* Audio Sound Toggle */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSoundOn(!soundOn)
+                        if (!soundOn) playFillChime()
+                      }}
+                      className={cn(
+                        'h-7 w-7 rounded-lg border flex items-center justify-center transition-colors cursor-pointer',
+                        soundOn
+                          ? 'bg-brand/15 border-brand/40 text-brand'
+                          : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground',
+                      )}
+                      title={soundOn ? 'Trade chime audio on' : 'Trade chime audio muted'}
+                    >
+                      {soundOn ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
+                    </button>
+
+                    {/* Close Sim Position if open */}
+                    {activePosition && (
+                      <Button
+                        size="xs"
+                        variant="destructive"
+                        onClick={handleCloseSimPosition}
+                        className="h-7 text-[10px] gap-1"
+                      >
+                        Close Position
+                      </Button>
                     )}
-                  >
-                    {spd}
-                  </button>
-                ))}
-              </div>
-
-              {/* Force Candle Tick */}
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={handleForceTick}
-                className="h-7 text-[11px] gap-1 bg-card/80 border-border hover:border-brand/50 hover:text-brand"
-                title="Force evaluate next candle now"
-              >
-                <Zap className="size-3 text-brand" />
-                Force Tick
-              </Button>
-
-              {/* Sim Long Fill */}
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() => handleSimFill('long')}
-                className="h-7 text-[11px] gap-1 bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
-                title="Simulate a long market order fill"
-              >
-                <ArrowUpRight className="size-3" />
-                Test Long
-              </Button>
-
-              {/* Sim Short Fill */}
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() => handleSimFill('short')}
-                className="h-7 text-[11px] gap-1 bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20"
-                title="Simulate a short market order fill"
-              >
-                <ArrowDownRight className="size-3" />
-                Test Short
-              </Button>
-
-              {/* Volatility Shock */}
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={handleVolatilityShock}
-                className="h-7 text-[11px] gap-1 bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20"
-                title="Inject sudden +/- 2.5% market swing"
-              >
-                <Flame className="size-3 text-amber-400" />
-                Shock
-              </Button>
-
-              {/* Audio Sound Toggle */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSoundOn(!soundOn)
-                  if (!soundOn) playFillChime()
-                }}
-                className={cn(
-                  'h-7 w-7 rounded-lg border flex items-center justify-center transition-colors cursor-pointer',
-                  soundOn
-                    ? 'bg-brand/15 border-brand/40 text-brand'
-                    : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground',
-                )}
-                title={soundOn ? 'Trade chime audio on' : 'Trade chime audio muted'}
-              >
-                {soundOn ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
-              </button>
-
-              {/* Close Sim Position if open */}
-              {activePosition && (
-                <Button
-                  size="xs"
-                  variant="destructive"
-                  onClick={handleCloseSimPosition}
-                  className="h-7 text-[10px] gap-1"
-                >
-                  Close Position
-                </Button>
-              )}
-            </div>
-          </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Metrics Overview Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
@@ -1017,8 +1164,14 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
                 {steps.map((step: LiveNodeStep) => {
                   const isExpanded = expandedNodeId === step.nodeId
                   const outputAudit = (step.output as any)?.audit
+                  const isLlmNode =
+                    step.layer === 'agents' ||
+                    ['technical-agent', 'sentiment-agent', 'flow-agent', 'contrarian-agent', 'macro-agent', 'event-agent'].includes(step.componentId) ||
+                    Boolean(outputAudit?.model_config) ||
+                    Boolean(outputAudit?.system_prompt)
                   const isInsufficientCredits = outputAudit?.llm_status === 'skipped_insufficient_credits'
-                  const isLlmActive = outputAudit?.llm_status === 'ok'
+                  const isLlmActive = isLlmNode && outputAudit?.llm_status === 'ok'
+                  const isLlmInactive = isLlmNode && !isLlmActive && !isInsufficientCredits
 
                   return (
                     <div
@@ -1052,9 +1205,20 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
                             </Badge>
                           )}
                           {isLlmActive && (
-                            <Badge variant="brand" size="sm" className="gap-1 font-mono text-[9px]">
+                            <Badge variant="brand" size="sm" className="gap-1 font-mono text-[9px] bg-brand/15 border-brand/30 text-brand">
                               <Zap className="size-3 text-brand" />
                               LLM Active
+                            </Badge>
+                          )}
+                          {isLlmInactive && (
+                            <Badge
+                              variant="neutral"
+                              size="sm"
+                              className="gap-1 font-mono text-[9px] bg-secondary/80 border-border text-muted-foreground"
+                              title={outputAudit?.llm_error || 'LLM reasoning inactive — using quantitative rules'}
+                            >
+                              <ZapOff className="size-3 text-muted-foreground" />
+                              LLM Inactive
                             </Badge>
                           )}
                           {step.metricLabel && (

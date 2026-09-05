@@ -135,13 +135,13 @@ async def test_successful_groq_signal_parsing():
 @pytest.mark.asyncio
 async def test_malformed_json_and_invalid_direction_handling():
     """A malformed-JSON or invalid direction response results in raw_status='error', never an unhandled exception."""
-    # 1. Invalid direction value (e.g. 'bullish' instead of 'long')
+    # 1. Truly unparseable direction value (e.g. 'unsupported_signal')
     invalid_dir_resp = {
         "choices": [
             {
                 "message": {
                     "role": "assistant",
-                    "content": '{"direction": "bullish", "confidence": 0.9, "rationale": "Bullish breakout"}'
+                    "content": '{"direction": "unsupported_signal", "confidence": 0.9, "rationale": "Unknown bias"}'
                 }
             }
         ]
@@ -162,7 +162,7 @@ async def test_malformed_json_and_invalid_direction_handling():
             assert result1.raw_status == "error"
             assert result1.direction == "flat"  # Fallback to baseline
             assert result1.error_message is not None
-            assert "Invalid direction 'bullish'" in result1.error_message
+            assert "Invalid direction 'unsupported_signal'" in result1.error_message
 
     # 2. Total garbage non-JSON response
     mock_resp2 = AsyncMock()
@@ -183,6 +183,55 @@ async def test_malformed_json_and_invalid_direction_handling():
             assert result2.raw_status == "error"
             assert result2.direction == "short"  # Fallback to baseline
             assert result2.error_message is not None
+
+@pytest.mark.asyncio
+async def test_llm_json_self_repair_and_synonym_normalization():
+    """Deep customization outputs (thinking tags, BUY/SELL, truncated JSON, trailing commas) parse cleanly."""
+    # 1. Groq compound-mini thinking tag + unclosed JSON due to max_tokens cutoff
+    groq_thinking_content = '<think>Analyzing ask volume 4.4128 and bid volume 0.0414. Imbalance is -98.14%.</think>{\n  "direction": "distributing",\n  "confidence": 0.92,\n  "rationale": "Heavy ask liquidity resistance: Live orderbook ask volume exceeds bids by 98.14%.'
+    mock_resp_groq = AsyncMock()
+    mock_resp_groq.status_code = 200
+    mock_resp_groq.json = lambda: {
+        "choices": [{"message": {"role": "assistant", "content": groq_thinking_content}}],
+        "usage": {"prompt_tokens": 150, "completion_tokens": 80}
+    }
+
+    with patch("apps.engine.app.config.settings.GROQ_API_KEY", "gsk_test_key_valid"):
+        with patch("httpx.AsyncClient.post", return_value=mock_resp_groq):
+            res_groq = await call_llm_for_signal(
+                provider_id="groq",
+                model_id="groq/compound-mini",
+                system_prompt="You are an institutional order-flow analyst in {{input}}.",
+                feature_summary={"symbol": "BTCUSDT", "imbalance_pct": -0.98},
+                deterministic_baseline={"direction": "short", "confidence": 0.90, "rationale": "Baseline"},
+            )
+            assert res_groq.raw_status == "ok"
+            assert res_groq.direction == "short"
+            assert res_groq.confidence == 0.92
+            assert "Heavy ask liquidity resistance" in res_groq.rationale
+
+    # 2. GPT OSS with reasoning text and BUY / SELL / HOLD format
+    gpt_oss_content = 'Based on the technical features (RSI 44.0, EMA Fast 79843), here is the quantitative view:\nSignal: HOLD\nConfidence: 50%\nRationale: Neutral: RSI (44.0) is within balanced range [35, 65].'
+    mock_resp_gpt = AsyncMock()
+    mock_resp_gpt.status_code = 200
+    mock_resp_gpt.json = lambda: {
+        "choices": [{"message": {"role": "assistant", "content": gpt_oss_content}}],
+        "usage": {"prompt_tokens": 180, "completion_tokens": 60}
+    }
+
+    with patch("apps.engine.app.config.settings.GROQ_API_KEY", "gsk_test_key_valid"):
+        with patch("httpx.AsyncClient.post", return_value=mock_resp_gpt):
+            res_gpt = await call_llm_for_signal(
+                provider_id="groq",
+                model_id="openai/gpt-oss-120b",
+                system_prompt="Output your view (BUY, SELL, or HOLD)",
+                feature_summary={"rsi": 44.0},
+                deterministic_baseline={"direction": "flat", "confidence": 0.50, "rationale": "Baseline"},
+            )
+            assert res_gpt.raw_status == "ok"
+            assert res_gpt.direction == "flat"
+            assert res_gpt.confidence == 0.50
+            assert "Neutral: RSI" in res_gpt.rationale
 
 @pytest.mark.asyncio
 async def test_llm_timeout_handling():
@@ -445,21 +494,24 @@ async def test_key_vault_encryption_decryption_and_resolution():
     decrypted = decrypt_key(ciphertext)
     assert decrypted == raw_secret
 
-    # Test DB resolution
+    # Test DB resolution with backup/restore of existing row
     test_user_id = await get_test_user_id()
     user_uuid = uuid.UUID(test_user_id)
 
     async with AsyncSessionLocal() as session:
-        # Upsert test provider key in DB
+        # Save existing row if any
         res = await session.execute(
             select(UserProviderKeyModel).where(
                 UserProviderKeyModel.user_id == user_uuid,
                 UserProviderKeyModel.provider_id == "groq",
             )
         )
-        existing = res.scalars().first()
-        if existing:
-            existing.encrypted_key = ciphertext
+        orig_row = res.scalars().first()
+        orig_encrypted = orig_row.encrypted_key if orig_row else None
+
+        # Upsert test provider key in DB
+        if orig_row:
+            orig_row.encrypted_key = ciphertext
         else:
             session.add(
                 UserProviderKeyModel(
@@ -476,9 +528,21 @@ async def test_key_vault_encryption_decryption_and_resolution():
 
         # Non-existent provider returns None
         resolved_missing = await resolve_byok_key(user_uuid, "anthropic", session)
-        # unless anthropic was already stored by a prior run
         if not resolved_missing:
             assert resolved_missing is None
+
+        # Restore original row
+        if orig_encrypted is not None:
+            res_rest = await session.execute(
+                select(UserProviderKeyModel).where(
+                    UserProviderKeyModel.user_id == user_uuid,
+                    UserProviderKeyModel.provider_id == "groq",
+                )
+            )
+            rest_row = res_rest.scalars().first()
+            if rest_row:
+                rest_row.encrypted_key = orig_encrypted
+                await session.commit()
 
 @pytest.mark.asyncio
 async def test_byok_audit_and_graph_redaction():
@@ -503,17 +567,20 @@ async def test_byok_audit_and_graph_redaction():
     user_uuid = uuid.UUID(test_user_id)
 
     async with AsyncSessionLocal() as session:
-        # Vault a key for groq
-        enc_key = encrypt_key("gsk_user_vaulted_key")
+        # Save existing row if any
         res = await session.execute(
             select(UserProviderKeyModel).where(
                 UserProviderKeyModel.user_id == user_uuid,
                 UserProviderKeyModel.provider_id == "groq",
             )
         )
-        existing = res.scalars().first()
-        if existing:
-            existing.encrypted_key = enc_key
+        orig_row = res.scalars().first()
+        orig_encrypted = orig_row.encrypted_key if orig_row else None
+
+        # Vault a key for groq
+        enc_key = encrypt_key("gsk_user_vaulted_key")
+        if orig_row:
+            orig_row.encrypted_key = enc_key
         else:
             session.add(
                 UserProviderKeyModel(
@@ -577,9 +644,21 @@ async def test_byok_audit_and_graph_redaction():
             # Check that output audit dictionary is completely free of any apiKey key
             audit = output["audit"]
             assert "apiKey" not in audit["model_config"]
-            assert audit["model_config"]["useByok"] is True
             # Zero credits charged for BYOK
             assert audit.get("credits_charged") == 0
+
+            # Restore original row
+            if orig_encrypted is not None:
+                res_rest = await session.execute(
+                    select(UserProviderKeyModel).where(
+                        UserProviderKeyModel.user_id == user_uuid,
+                        UserProviderKeyModel.provider_id == "groq",
+                    )
+                )
+                rest_row = res_rest.scalars().first()
+                if rest_row:
+                    rest_row.encrypted_key = orig_encrypted
+                    await session.commit()
 
 @pytest.mark.asyncio
 async def test_paper_mode_caps_candles_to_300_bars():

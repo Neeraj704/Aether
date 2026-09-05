@@ -235,31 +235,38 @@ export default function LiveMonitoringPage() {
   }
 
   const openClosedTradeInspector = (t: GlobalLiveTradeItem) => {
-    const flow = (t.executionFlow as any)?.flow || []
-    const candleNode = flow.find((f: any) => f.type === 'candle')
-    const featuresNode = flow.find((f: any) => f.type === 'features')
-    const signalNode = flow.find((f: any) => f.type === 'signal')
-    const riskNode = flow.find((f: any) => f.type === 'risk')
-    const fillNode = flow.find((f: any) => f.type === 'fill')
+    const ef = (t.executionFlow as any) || {}
+    const steps: any[] = Array.isArray(ef.steps) ? ef.steps : Array.isArray(ef.flow) ? ef.flow : []
+
+    const candleNode = steps.find((f: any) => f.nodeId === 'ohlcv-feed' || f.layer === 'data' || f.type === 'candle')
+    const featuresNode = steps.find((f: any) => f.nodeId === 'ta-indicators' || f.layer === 'features' || f.type === 'features')
+    const signalNode = steps.find((f: any) => f.layer === 'agents' || f.layer === 'models' || f.layer === 'ml' || f.layer === 'signal' || f.nodeId?.includes('agent') || f.nodeId?.includes('forecast') || f.type === 'signal')
+    const riskNode = steps.find((f: any) => f.nodeId === 'risk-gate' || f.layer === 'risk' || f.type === 'risk')
+    const fillNode = steps.find((f: any) => f.nodeId === 'paper-executor' || f.layer === 'execution' || f.type === 'fill')
+
+    const entryPrice = (t as any).entryPrice || (t as any).entry_price || ef.summary?.entryPrice || fillNode?.output?.entryPrice || candleNode?.output?.close || 0
+    const exitPrice = (t as any).exitPrice || (t as any).exit_price || ef.summary?.exitPrice || fillNode?.output?.exitPrice || 0
+    const stopPrice = (t as any).stopPrice || (t as any).stop_price || ef.summary?.stopPrice || riskNode?.output?.stopPrice || null
+    const size = t.size || ef.summary?.size || fillNode?.output?.size || riskNode?.output?.sizedQuantity || 0
 
     const tradeData: TradeInspectionData = {
       isOpenPosition: false,
-      symbol: t.symbol,
-      side: t.side,
-      size: t.size,
-      entryPrice: fillNode?.output?.entryPrice || 0,
-      exitPrice: fillNode?.output?.exitPrice || 0,
-      stopPrice: riskNode?.output?.stopPrice || null,
-      confidence: t.confidence,
-      entryTime: t.entryTime,
-      exitTime: t.exitTime,
-      pnl: t.pnl,
-      pnlPct: t.pnlPct,
-      triggerNode: t.triggerNode,
-      entryCandle: candleNode?.output,
-      entryFeatures: featuresNode?.output,
-      entrySignal: signalNode?.output,
-      entryRisk: riskNode?.output,
+      symbol: t.symbol || ef.symbol || 'BTCUSDT',
+      side: t.side || ef.side || 'long',
+      size: size,
+      entryPrice: entryPrice,
+      exitPrice: exitPrice,
+      stopPrice: stopPrice,
+      confidence: t.confidence || ef.summary?.confidence || signalNode?.output?.confidence || 0.75,
+      entryTime: t.entryTime || (t as any).entry_time || ef.summary?.entryTime || new Date().toISOString(),
+      exitTime: t.exitTime || (t as any).exit_time || ef.summary?.exitTime || null,
+      pnl: t.pnl ?? ef.summary?.netPnl ?? null,
+      pnlPct: t.pnlPct ?? ef.summary?.pnlPct ?? null,
+      triggerNode: t.triggerNode || signalNode?.nodeName || 'Signal Agent',
+      entryCandle: candleNode?.output || (t as any).entry_candle,
+      entryFeatures: featuresNode?.output || (t as any).entry_features,
+      entrySignal: signalNode?.output || (t as any).entry_signal,
+      entryRisk: riskNode?.output || (t as any).entry_risk,
       executionFlow: t.executionFlow,
     }
     setInspectTrade(tradeData)
@@ -680,9 +687,9 @@ export default function LiveMonitoringPage() {
           <span className="text-xs text-muted-foreground font-mono">{openPositions.length} Open Positions</span>
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <div className="overflow-x-auto overflow-y-auto max-h-[480px] rounded-xl border border-border bg-card shadow-sm">
           <table className="w-full text-left text-xs">
-            <thead className="border-b border-border bg-secondary/50 font-medium text-muted-foreground">
+            <thead className="sticky top-0 z-10 border-b border-border bg-card/95 font-medium text-muted-foreground backdrop-blur-sm">
               <tr>
                 <th className="p-3 pl-4">Symbol</th>
                 <th className="p-3">Side</th>
@@ -804,9 +811,9 @@ export default function LiveMonitoringPage() {
           <span className="text-xs text-muted-foreground font-mono">Across All User Bots</span>
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <div className="overflow-x-auto overflow-y-auto max-h-[480px] rounded-xl border border-border bg-card shadow-sm">
           <table className="w-full text-left text-xs">
-            <thead className="border-b border-border bg-secondary/50 font-medium text-muted-foreground">
+            <thead className="sticky top-0 z-10 border-b border-border bg-card/95 font-medium text-muted-foreground backdrop-blur-sm">
               <tr>
                 <th className="p-3 pl-4">Symbol</th>
                 <th className="p-3">Side</th>

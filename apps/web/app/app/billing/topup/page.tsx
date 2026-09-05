@@ -165,7 +165,7 @@ export default function TopupCreditsPage() {
       </div>
 
       {/* Custom Credit Calculator */}
-      <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-4">
+      {/* <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-4">
         <div>
           <h2 className="text-base font-bold">Custom Credit Calculator</h2>
           <p className="text-xs text-muted-foreground">Order precise quantities for specific research projects</p>
@@ -206,7 +206,7 @@ export default function TopupCreditsPage() {
             </PillButton>
           </div>
         </div>
-      </div>
+      </div> */}
     </div>
   )
 }

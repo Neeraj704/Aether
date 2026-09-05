@@ -289,7 +289,7 @@ export default function WorkspaceDashboard() {
           </Link>
         </div>
 
-        <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
+        <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-y-auto max-h-[640px]">
           {activity.map((act) => {
             const Icon = ACTIVITY_ICONS[act.kind] || ActivityIcon
             return (

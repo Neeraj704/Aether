@@ -250,6 +250,14 @@
     text-transform: uppercase;
   }
 
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
   .aurora-text {
     background: linear-gradient(100deg, #2997ff, #7b61ff 45%, #ff6ac1);
     -webkit-background-clip: text;

@@ -191,31 +191,38 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
   }
 
   const openClosedTradeInspector = (t: LiveTrade) => {
-    const flow = (t.executionFlow as any)?.flow || []
-    const candleNode = flow.find((f: any) => f.type === 'candle')
-    const featuresNode = flow.find((f: any) => f.type === 'features')
-    const signalNode = flow.find((f: any) => f.type === 'signal')
-    const riskNode = flow.find((f: any) => f.type === 'risk')
-    const fillNode = flow.find((f: any) => f.type === 'fill')
+    const ef = (t.executionFlow as any) || {}
+    const steps: any[] = Array.isArray(ef.steps) ? ef.steps : Array.isArray(ef.flow) ? ef.flow : []
+
+    const candleNode = steps.find((f: any) => f.nodeId === 'ohlcv-feed' || f.layer === 'data' || f.type === 'candle')
+    const featuresNode = steps.find((f: any) => f.nodeId === 'ta-indicators' || f.layer === 'features' || f.type === 'features')
+    const signalNode = steps.find((f: any) => f.layer === 'agents' || f.layer === 'models' || f.layer === 'ml' || f.layer === 'signal' || f.nodeId?.includes('agent') || f.nodeId?.includes('forecast') || f.type === 'signal')
+    const riskNode = steps.find((f: any) => f.nodeId === 'risk-gate' || f.layer === 'risk' || f.type === 'risk')
+    const fillNode = steps.find((f: any) => f.nodeId === 'paper-executor' || f.layer === 'execution' || f.type === 'fill')
+
+    const entryPrice = (t as any).entryPrice || (t as any).entry_price || ef.summary?.entryPrice || fillNode?.output?.entryPrice || candleNode?.output?.close || 0
+    const exitPrice = (t as any).exitPrice || (t as any).exit_price || ef.summary?.exitPrice || fillNode?.output?.exitPrice || 0
+    const stopPrice = (t as any).stopPrice || (t as any).stop_price || ef.summary?.stopPrice || riskNode?.output?.stopPrice || null
+    const size = t.size || ef.summary?.size || fillNode?.output?.size || riskNode?.output?.sizedQuantity || 0
 
     const tradeData: TradeInspectionData = {
       isOpenPosition: false,
-      symbol: t.symbol,
-      side: t.side,
-      size: t.size,
-      entryPrice: fillNode?.output?.entryPrice || 0,
-      exitPrice: fillNode?.output?.exitPrice || 0,
-      stopPrice: riskNode?.output?.stopPrice || null,
-      confidence: t.confidence,
-      entryTime: t.entryTime,
-      exitTime: t.exitTime,
-      pnl: t.pnl,
-      pnlPct: t.pnlPct,
-      triggerNode: t.triggerNode,
-      entryCandle: candleNode?.output,
-      entryFeatures: featuresNode?.output,
-      entrySignal: signalNode?.output,
-      entryRisk: riskNode?.output,
+      symbol: t.symbol || ef.symbol || 'BTCUSDT',
+      side: t.side || ef.side || 'long',
+      size: size,
+      entryPrice: entryPrice,
+      exitPrice: exitPrice,
+      stopPrice: stopPrice,
+      confidence: t.confidence || ef.summary?.confidence || signalNode?.output?.confidence || 0.75,
+      entryTime: t.entryTime || (t as any).entry_time || ef.summary?.entryTime || new Date().toISOString(),
+      exitTime: t.exitTime || (t as any).exit_time || ef.summary?.exitTime || null,
+      pnl: t.pnl ?? ef.summary?.netPnl ?? null,
+      pnlPct: t.pnlPct ?? ef.summary?.pnlPct ?? null,
+      triggerNode: t.triggerNode || signalNode?.nodeName || 'Signal Agent',
+      entryCandle: candleNode?.output || (t as any).entry_candle,
+      entryFeatures: featuresNode?.output || (t as any).entry_features,
+      entrySignal: signalNode?.output || (t as any).entry_signal,
+      entryRisk: riskNode?.output || (t as any).entry_risk,
       executionFlow: t.executionFlow,
     }
     setInspectTrade(tradeData)
@@ -700,7 +707,7 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
                 Waiting for strategy node execution step details...
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 items-start">
                 {steps.map((step: LiveNodeStep) => {
                   const isExpanded = expandedNodeId === step.nodeId
                   const outputAudit = (step.output as any)?.audit
@@ -998,7 +1005,7 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
               </div>
             </CardHeader>
 
-            <CardContent className="p-0 overflow-x-auto">
+            <CardContent className="p-0 overflow-x-auto overflow-y-auto max-h-[480px]">
               {displayedTrades.length === 0 ? (
                 <div className="p-8 text-center text-xs text-muted-foreground flex flex-col items-center justify-center gap-1.5">
                   <p className="font-medium text-foreground">No trades closed under this filter</p>
@@ -1006,7 +1013,7 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
                 </div>
               ) : (
                 <Table>
-                  <THead className="bg-secondary/40 border-b border-border text-[11px]">
+                  <THead className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm border-b border-border text-[11px]">
                     <TR>
                       <TH>Symbol</TH>
                       <TH>Side</TH>

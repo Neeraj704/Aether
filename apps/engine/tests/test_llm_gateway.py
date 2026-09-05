@@ -16,6 +16,9 @@ from apps.engine.app.db.models import (
 )
 from apps.engine.app.nodes.base import NodeContext
 from apps.engine.app.nodes.intelligence_agents.technical_analyst import TechnicalAnalystNode
+from apps.engine.app.nodes.intelligence_agents.sentiment_analyst import SentimentAnalystNode
+from apps.engine.app.nodes.intelligence_agents.macro_strategist import MacroStrategistNode
+from apps.engine.app.nodes.intelligence_agents.event_specialist import EventSpecialistNode
 from apps.engine.app.llm.gateway import (
     call_llm_for_signal,
     check_and_debit_credits,
@@ -725,3 +728,404 @@ async def test_groq_missing_server_key_raises_clear_error():
         )
         assert result.raw_status == "error"
         assert "GROQ_API_KEY is not configured on server" in (result.error_message or "")
+
+@pytest.mark.asyncio
+async def test_sentiment_analyst_paper_mode_execution_and_fallback():
+    """SentimentAnalystNode in paper mode calls LLM gateway on success and falls back to deterministic sentiment baseline on error."""
+    test_user_id = await get_test_user_id()
+    user_uuid = uuid.UUID(test_user_id)
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            update(CreditWalletModel).where(CreditWalletModel.user_id == user_uuid).values(balance=100)
+        )
+        await session.commit()
+
+        bot_res = await session.execute(select(BotModel).where(BotModel.user_id == user_uuid))
+        bot = bot_res.scalars().first()
+        if not bot:
+            bot = BotModel(id=uuid.uuid4(), user_id=user_uuid, name="Sentiment Bot", status="active", graph={})
+            session.add(bot)
+            await session.commit()
+
+        run = BacktestRunModel(id=uuid.uuid4(), bot_id=bot.id, user_id=user_uuid, status="running", config={"type": "paper"})
+        session.add(run)
+        await session.commit()
+
+        node = SentimentAnalystNode()
+        candle = {"close": 68000.0}
+        upstream = {
+            "news": {
+                "type": "NewsFeed",
+                "sentimentScore": 0.65,  # strongly bullish (> 0.3)
+                "blackoutActive": False,
+            }
+        }
+
+        ctx_paper = NodeContext(
+            candle=candle, portfolio=None, upstream_outputs=upstream,
+            mode="paper", user_id=test_user_id, bot_id=str(bot.id), run_id=str(run.id),
+            current_node_id="sentiment-agent-node-1", db=session,
+        )
+
+        node_cfg = {
+            "model": {"providerId": "anthropic", "modelId": "claude-sonnet", "temperature": 0.3, "maxTokens": 1024},
+            "bullishThreshold": 0.3,
+            "bearishThreshold": -0.3,
+        }
+
+        # 1. Successful paper execution
+        mock_success = AsyncMock()
+        mock_success.status_code = 200
+        mock_success.json = lambda: {
+            "content": [{"type": "text", "text": json.dumps({"direction": "long", "confidence": 0.93, "rationale": "Overwhelmingly positive retail and institutional sentiment."})}],
+            "usage": {"input_tokens": 80, "output_tokens": 25},
+        }
+
+        with patch("apps.engine.app.config.settings.ANTHROPIC_API_KEY", "anthropic-test-key"):
+            with patch("httpx.AsyncClient.post", return_value=mock_success):
+                out = await node.run(ctx_paper, node_cfg)
+                assert out["type"] == "Signal"
+                assert out["direction"] == "long"
+                assert out["confidence"] == 0.93
+                assert "[LLM]" in out["rationale"]
+                assert out["audit"]["llm_status"] == "ok"
+                assert out["audit"]["credits_charged"] == 2
+
+        # Verify llm_call_log entry
+        log_res = await session.execute(select(LlmCallLogModel).where(LlmCallLogModel.run_id == run.id))
+        log_row = log_res.scalars().first()
+        assert log_row is not None
+        assert log_row.component_id == "sentiment-agent"
+        assert log_row.node_id == "sentiment-agent-node-1"
+        assert log_row.provider == "anthropic"
+
+        # 2. Failed call falls back to deterministic baseline
+        mock_fail = AsyncMock()
+        mock_fail.status_code = 500
+        mock_fail.text = "Anthropic rate limit"
+
+        with patch("apps.engine.app.config.settings.ANTHROPIC_API_KEY", "anthropic-test-key"):
+            with patch("httpx.AsyncClient.post", return_value=mock_fail):
+                out_fail = await node.run(ctx_paper, node_cfg)
+                assert out_fail["direction"] == "long"
+                assert out_fail["confidence"] >= 0.65
+                assert "Sentiment_Bullish_Threshold" in out_fail["audit"]["applied_rule"]
+                assert out_fail["audit"]["llm_status"] == "error"
+
+@pytest.mark.asyncio
+async def test_macro_strategist_paper_mode_execution_and_fallback():
+    """MacroStrategistNode in paper mode calls LLM and on error falls back to regime-weighted baseline."""
+    test_user_id = await get_test_user_id()
+    user_uuid = uuid.UUID(test_user_id)
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            update(CreditWalletModel).where(CreditWalletModel.user_id == user_uuid).values(balance=100)
+        )
+        await session.commit()
+
+        bot_res = await session.execute(select(BotModel).where(BotModel.user_id == user_uuid))
+        bot = bot_res.scalars().first()
+        if not bot:
+            bot = BotModel(id=uuid.uuid4(), user_id=user_uuid, name="Macro Bot", status="active", graph={})
+            session.add(bot)
+            await session.commit()
+
+        run = BacktestRunModel(id=uuid.uuid4(), bot_id=bot.id, user_id=user_uuid, status="running", config={"type": "paper"})
+        session.add(run)
+        await session.commit()
+
+        node = MacroStrategistNode()
+        candle = {"close": 70000.0}
+        upstream = {
+            "news": {"type": "NewsFeed", "sentimentScore": 0.45, "blackoutActive": False},
+            "features": {"type": "FeatureVector", "regime": "Trend"},
+        }
+
+        ctx_paper = NodeContext(
+            candle=candle, portfolio=None, upstream_outputs=upstream,
+            mode="paper", user_id=test_user_id, bot_id=str(bot.id), run_id=str(run.id),
+            current_node_id="macro-agent-node-1", db=session,
+        )
+
+        node_cfg = {
+            "model": {"providerId": "google", "modelId": "gemini-pro", "temperature": 0.4, "maxTokens": 1024},
+            "bullishThreshold": 0.25,
+            "bearishThreshold": -0.25,
+        }
+
+        mock_google = AsyncMock()
+        mock_google.status_code = 200
+        mock_google.json = lambda: {
+            "candidates": [{"content": {"parts": [{"text": json.dumps({"direction": "long", "confidence": 0.88, "rationale": "Macro liquidity expansion supports trending asset rally."})}]}}],
+            "usageMetadata": {"promptTokenCount": 110, "candidatesTokenCount": 30},
+        }
+
+        with patch("apps.engine.app.config.settings.GOOGLE_API_KEY", "google-test-key"):
+            with patch("httpx.AsyncClient.post", return_value=mock_google):
+                out = await node.run(ctx_paper, node_cfg)
+                assert out["direction"] == "long"
+                assert out["confidence"] == 0.88
+                assert "[LLM]" in out["rationale"]
+                assert out["audit"]["llm_status"] == "ok"
+                assert out["audit"]["credits_charged"] == 3
+
+        # Fallback test
+        mock_fail = AsyncMock()
+        mock_fail.status_code = 503
+        mock_fail.text = "Service Unavailable"
+
+        with patch("apps.engine.app.config.settings.GOOGLE_API_KEY", "google-test-key"):
+            with patch("httpx.AsyncClient.post", return_value=mock_fail):
+                out_fail = await node.run(ctx_paper, node_cfg)
+                assert out_fail["direction"] == "long"
+                assert "Macro_Risk_On_Trend_Aligned" in out_fail["audit"]["applied_rule"]
+                assert out_fail["audit"]["llm_status"] == "error"
+
+@pytest.mark.asyncio
+async def test_event_specialist_paper_mode_execution_and_fallback():
+    """EventSpecialistNode in paper mode calls LLM and on error falls back to catalyst-selective baseline."""
+    test_user_id = await get_test_user_id()
+    user_uuid = uuid.UUID(test_user_id)
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            update(CreditWalletModel).where(CreditWalletModel.user_id == user_uuid).values(balance=100)
+        )
+        await session.commit()
+
+        bot_res = await session.execute(select(BotModel).where(BotModel.user_id == user_uuid))
+        bot = bot_res.scalars().first()
+        if not bot:
+            bot = BotModel(id=uuid.uuid4(), user_id=user_uuid, name="Event Bot", status="active", graph={})
+            session.add(bot)
+            await session.commit()
+
+        run = BacktestRunModel(id=uuid.uuid4(), bot_id=bot.id, user_id=user_uuid, status="running", config={"type": "paper"})
+        session.add(run)
+        await session.commit()
+
+        node = EventSpecialistNode()
+        candle = {"close": 72000.0}
+        upstream = {
+            "news": {"type": "NewsFeed", "sentimentScore": 0.60, "blackoutActive": False},
+        }
+
+        ctx_paper = NodeContext(
+            candle=candle, portfolio=None, upstream_outputs=upstream,
+            mode="paper", user_id=test_user_id, bot_id=str(bot.id), run_id=str(run.id),
+            current_node_id="event-agent-node-1", db=session,
+        )
+
+        node_cfg = {
+            "model": {"providerId": "openai", "modelId": "gpt-5-mini", "temperature": 0.4, "maxTokens": 1024},
+            "eventThreshold": 0.50,
+        }
+
+        mock_openai = AsyncMock()
+        mock_openai.status_code = 200
+        mock_openai.json = lambda: {
+            "choices": [{"message": {"role": "assistant", "content": json.dumps({"direction": "long", "confidence": 0.90, "rationale": "High-conviction post-earnings momentum catalyst."})}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 20},
+        }
+
+        with patch("apps.engine.app.config.settings.OPENAI_API_KEY", "openai-test-key"):
+            with patch("httpx.AsyncClient.post", return_value=mock_openai):
+                out = await node.run(ctx_paper, node_cfg)
+                assert out["direction"] == "long"
+                assert out["confidence"] == 0.90
+                assert "[LLM]" in out["rationale"]
+                assert out["audit"]["llm_status"] == "ok"
+                assert out["audit"]["credits_charged"] == 1
+
+        # Fallback test
+        mock_fail = AsyncMock()
+        mock_fail.status_code = 500
+        mock_fail.text = "Internal error"
+
+        with patch("apps.engine.app.config.settings.OPENAI_API_KEY", "openai-test-key"):
+            with patch("httpx.AsyncClient.post", return_value=mock_fail):
+                out_fail = await node.run(ctx_paper, node_cfg)
+                assert out_fail["direction"] == "long"
+                assert "Event_Bullish_Catalyst" in out_fail["audit"]["applied_rule"]
+                assert out_fail["audit"]["llm_status"] == "error"
+
+@pytest.mark.asyncio
+async def test_new_agents_historical_mode_never_invokes_llm_gateway():
+    """All 3 new agents in historical mode MUST NEVER invoke httpx.AsyncClient.post."""
+    candle = {"close": 60000.0}
+    upstream = {
+        "news": {"type": "NewsFeed", "sentimentScore": 0.65, "blackoutActive": False},
+        "features": {"type": "FeatureVector", "regime": "Trend"},
+    }
+
+    ctx_hist = NodeContext(
+        candle=candle, portfolio=None, upstream_outputs=upstream,
+        mode="historical", user_id="test-user-123", bot_id="test-bot-123", db=None,
+    )
+
+    nodes = [
+        (SentimentAnalystNode(), {"model": {"providerId": "anthropic", "modelId": "claude-sonnet"}}),
+        (MacroStrategistNode(), {"model": {"providerId": "google", "modelId": "gemini-pro"}}),
+        (EventSpecialistNode(), {"model": {"providerId": "openai", "modelId": "gpt-5-mini"}}),
+    ]
+
+    with patch("httpx.AsyncClient.post", side_effect=RuntimeError("HTTP call must never happen in historical mode!")) as mock_post:
+        for node, cfg in nodes:
+            out = await node.run(ctx_hist, cfg)
+            mock_post.assert_not_called()
+            assert out["type"] == "Signal"
+            assert out["audit"]["llm_status"] == "skipped_mode"
+            assert "deterministic_baseline" in out["audit"]
+
+@pytest.mark.asyncio
+async def test_new_agents_no_upstream_newsfeed_fallback():
+    """When no NewsFeed upstream is present, all 3 new agents return flat with 'Default Flat (No Data)' and skipped_no_features."""
+    candle = {"close": 50000.0}
+    upstream_empty = {}
+
+    ctx = NodeContext(
+        candle=candle, portfolio=None, upstream_outputs=upstream_empty,
+        mode="paper", user_id="test-user-123", bot_id="test-bot-123", db=None,
+    )
+
+    nodes = [SentimentAnalystNode(), MacroStrategistNode(), EventSpecialistNode()]
+
+    for node in nodes:
+        out = await node.run(ctx, {})
+        assert out["type"] == "Signal"
+        assert out["direction"] == "flat"
+        assert out["confidence"] == 0.0
+        assert out["audit"]["applied_rule"] == "Default Flat (No Data)"
+        assert out["audit"]["llm_status"] == "skipped_no_features"
+
+@pytest.mark.asyncio
+async def test_macro_strategist_blackout_override_precedence():
+    """MacroStrategistNode: blackoutActive=True MUST override even a strongly bullish/bearish sentiment score."""
+    candle = {"close": 65000.0}
+    upstream = {
+        "news": {
+            "type": "NewsFeed",
+            "sentimentScore": 0.85,  # Extreme bullish sentiment
+            "blackoutActive": True,   # Active macro blackout
+        },
+        "features": {
+            "type": "FeatureVector",
+            "regime": "Trend",
+        },
+    }
+
+    ctx = NodeContext(
+        candle=candle, portfolio=None, upstream_outputs=upstream,
+        mode="historical", user_id="test-user-123", bot_id="test-bot-123", db=None,
+    )
+
+    node = MacroStrategistNode()
+    out = await node.run(ctx, {"bullishThreshold": 0.25})
+
+    assert out["direction"] == "flat"
+    assert out["confidence"] == 0.80
+    assert out["audit"]["applied_rule"] == "Macro_Event_Blackout_Override"
+    assert "blackout" in out["rationale"].lower()
+
+@pytest.mark.asyncio
+async def test_event_specialist_two_distinct_flat_states():
+    """EventSpecialistNode distinguishes between active blackout flatness and no-catalyst flatness."""
+    candle = {"close": 60000.0}
+
+    # Case A: Blackout window flat
+    ctx_blackout = NodeContext(
+        candle=candle, portfolio=None,
+        upstream_outputs={"news": {"type": "NewsFeed", "sentimentScore": 0.80, "blackoutActive": True}},
+        mode="historical", user_id="test-user-123", bot_id="test-bot-123", db=None,
+    )
+    node = EventSpecialistNode()
+    out_blackout = await node.run(ctx_blackout, {"eventThreshold": 0.50})
+
+    assert out_blackout["direction"] == "flat"
+    assert out_blackout["confidence"] == 0.85
+    assert out_blackout["audit"]["applied_rule"] == "Active_Event_Blackout"
+    assert "blackout" in out_blackout["rationale"].lower()
+
+    # Case B: No active catalyst flat (sentiment magnitude 0.20 < threshold 0.50)
+    ctx_no_catalyst = NodeContext(
+        candle=candle, portfolio=None,
+        upstream_outputs={"news": {"type": "NewsFeed", "sentimentScore": 0.20, "blackoutActive": False}},
+        mode="historical", user_id="test-user-123", bot_id="test-bot-123", db=None,
+    )
+    out_no_catalyst = await node.run(ctx_no_catalyst, {"eventThreshold": 0.50})
+
+    assert out_no_catalyst["direction"] == "flat"
+    assert out_no_catalyst["confidence"] == 0.40
+    assert out_no_catalyst["audit"]["applied_rule"] == "No_Active_Catalyst"
+    assert "no active catalyst" in out_no_catalyst["rationale"].lower()
+
+    # Verify that the two flat states are completely distinguishable
+    assert out_blackout["audit"]["applied_rule"] != out_no_catalyst["audit"]["applied_rule"]
+    assert out_blackout["confidence"] != out_no_catalyst["confidence"]
+
+@pytest.mark.asyncio
+async def test_llm_call_log_records_correct_current_node_id():
+    """Verifies that multiple instances of an agent in a graph log their respective current_node_id, not a hardcoded default string."""
+    test_user_id = await get_test_user_id()
+    user_uuid = uuid.UUID(test_user_id)
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            update(CreditWalletModel).where(CreditWalletModel.user_id == user_uuid).values(balance=100)
+        )
+        await session.commit()
+
+        bot_res = await session.execute(select(BotModel).where(BotModel.user_id == user_uuid))
+        bot = bot_res.scalars().first()
+        if not bot:
+            bot = BotModel(id=uuid.uuid4(), user_id=user_uuid, name="Multi-Node Bot", status="active", graph={})
+            session.add(bot)
+            await session.commit()
+
+        run = BacktestRunModel(id=uuid.uuid4(), bot_id=bot.id, user_id=user_uuid, status="running", config={"type": "paper"})
+        session.add(run)
+        await session.commit()
+
+        node = SentimentAnalystNode()
+        mock_success = AsyncMock()
+        mock_success.status_code = 200
+        mock_success.json = lambda: {
+            "choices": [{"message": {"role": "assistant", "content": json.dumps({"direction": "long", "confidence": 0.85, "rationale": "Bullish view."})}}],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 15},
+        }
+
+        # Instance 1: current_node_id = "sentiment-node-alpha"
+        ctx1 = NodeContext(
+            candle={"close": 60000.0}, portfolio=None,
+            upstream_outputs={"news": {"type": "NewsFeed", "sentimentScore": 0.5, "blackoutActive": False}},
+            mode="paper", user_id=test_user_id, bot_id=str(bot.id), run_id=str(run.id),
+            current_node_id="sentiment-node-alpha", db=session,
+        )
+
+        with patch("apps.engine.app.config.settings.GROQ_API_KEY", "gsk-valid"):
+            with patch("httpx.AsyncClient.post", return_value=mock_success):
+                await node.run(ctx1, {"model": {"providerId": "groq", "modelId": "openai/gpt-oss-120b"}})
+
+        # Instance 2: current_node_id = "sentiment-node-beta"
+        ctx2 = NodeContext(
+            candle={"close": 60000.0}, portfolio=None,
+            upstream_outputs={"news": {"type": "NewsFeed", "sentimentScore": 0.5, "blackoutActive": False}},
+            mode="paper", user_id=test_user_id, bot_id=str(bot.id), run_id=str(run.id),
+            current_node_id="sentiment-node-beta", db=session,
+        )
+
+        with patch("apps.engine.app.config.settings.GROQ_API_KEY", "gsk-valid"):
+            with patch("httpx.AsyncClient.post", return_value=mock_success):
+                await node.run(ctx2, {"model": {"providerId": "groq", "modelId": "openai/gpt-oss-120b"}})
+
+        # Verify logs have both distinct node IDs
+        logs_res = await session.execute(
+            select(LlmCallLogModel).where(LlmCallLogModel.run_id == run.id).order_by(LlmCallLogModel.created_at.asc())
+        )
+        logs = logs_res.scalars().all()
+        node_ids_logged = [l.node_id for l in logs]
+        assert "sentiment-node-alpha" in node_ids_logged
+        assert "sentiment-node-beta" in node_ids_logged
+

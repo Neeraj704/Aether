@@ -2,6 +2,9 @@ from typing import Dict, Type
 from .data_collection.ohlcv_feed import OhlcvFeedNode
 from .feature_engineering.technical_indicators import TechnicalIndicatorsNode
 from .intelligence_agents.technical_analyst import TechnicalAnalystNode
+from .intelligence_agents.sentiment_analyst import SentimentAnalystNode
+from .intelligence_agents.macro_strategist import MacroStrategistNode
+from .intelligence_agents.event_specialist import EventSpecialistNode
 from .risk_management.risk_gate import RiskGateNode
 from .execution.paper_executor import PaperExecutorNode
 from .universal import create_node_factory
@@ -31,11 +34,11 @@ REGISTRY: Dict[str, Type] = {
     # Layer III: Intelligence Agents
     "technical-agent": TechnicalAnalystNode,
     "technical-analyst": TechnicalAnalystNode,
-    "sentiment-agent": create_node_factory("sentiment-agent", "agents", "Sentiment Analyst"),
-    "macro-agent": create_node_factory("macro-agent", "agents", "Macro Strategist"),
+    "sentiment-agent": SentimentAnalystNode,
+    "macro-agent": MacroStrategistNode,
     "flow-agent": create_node_factory("flow-agent", "agents", "Flow Analyst"),
     "contrarian-agent": create_node_factory("contrarian-agent", "agents", "Contrarian"),
-    "event-agent": create_node_factory("event-agent", "agents", "Event Specialist"),
+    "event-agent": EventSpecialistNode,
 
     # Layer IV: ML Predictive Models
     "gbdt-forecast": create_node_factory("gbdt-forecast", "ml", "Gradient Boosting Forecast"),

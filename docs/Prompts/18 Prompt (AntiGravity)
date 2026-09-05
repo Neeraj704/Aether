@@ -1,0 +1,283 @@
+# AETHER — Phase 16: Extend the LLM Gateway to the Contextual Intelligence Agents (Sentiment, Macro, Event)
+
+> Bounded, single-phase prompt, same discipline as every prior phase in `docs/Prompts/`. No prior conversation history is available to you — this document is self-contained. Do not touch `flow-agent` or `contrarian-agent` (a separate future phase, deliberately excluded — see Section 8) or anything outside intelligence-agent nodes. Audit first, as always.
+
+---
+
+## 0. Context you must internalize first
+
+AETHER is a no-code visual builder for algorithmic trading agents (Next.js frontend at `apps/web`, FastAPI engine at `apps/engine`, Supabase Postgres). A real LLM gateway (`apps/engine/app/llm/gateway.py`) exists: multi-provider dispatch (Groq, OpenAI, Anthropic, DeepSeek, Google, Alibaba, Ollama), atomic credit debit/refund against `credit_wallets`, a BYOK (bring-your-own-key) vault (`user_provider_keys`, encrypted at rest, resolved server-side only, never exposed to the browser or persisted in bot graphs), full audit logging to `llm_call_log`, and a hard rule — enforced and tested — that `historical`/`walk-forward`/`monte-carlo` backtests never call a real LLM; only `paper` (capped to the most recent 300 bars) and `live` do. All of this is wired into exactly one node: `TechnicalAnalystNode` (`apps/engine/app/nodes/intelligence_agents/technical_analyst.py`).
+
+Every other Layer III intelligence-agent node — `sentiment-agent`, `macro-agent`, `flow-agent`, `contrarian-agent`, `event-agent` — is still a generic rule-based stub, all routed through the same `UniversalNode` class (`apps/engine/app/nodes/universal.py`) via `create_node_factory(...)` in `apps/engine/app/nodes/registry.py`. `UniversalNode`'s `"agents"` layer branch applies one generic RSI-threshold heuristic to all of them regardless of which specific agent they claim to be — there is currently no differentiation between what a "Sentiment Analyst" and a "Macro Strategist" actually compute.
+
+**Your job this phase:** give `sentiment-agent`, `macro-agent`, and `event-agent` their own dedicated node classes with real, differentiated deterministic logic and real LLM wiring, following the exact hardened pattern already proven on Technical Analyst — but **factor the shared plumbing (credit debit/refund, BYOK resolution, gateway call, logging, redaction) into one reusable base class first**, so you are not copy-pasting ~80 lines of gateway-integration code three more times. Copy-pasting that logic once already produced a real bug in a prior phase (a hardcoded fallback `node_id` because the copy didn't thread context correctly) — a shared base class is not a nice-to-have here, it's the actual fix for a failure mode this project has already hit.
+
+`flow-agent` (needs genuinely different upstream data — order-book/microstructure numbers, not the NewsFeed-shaped stub the other three share) and `contrarian-agent` (needs an existing upstream `Signal` to contest, a fundamentally different node-graph assumption than an independent analyst) are deliberately excluded from this phase — they don't share enough shape with these three to belong in the same batch, and are planned as a separate, later phase.
+
+---
+
+## 1. Mandatory Step Zero: audit before writing any code
+
+Read and summarize (in your own words) before making changes:
+
+1. `apps/engine/app/nodes/intelligence_agents/technical_analyst.py` in full — this is the reference implementation and the thing you're about to generalize. Identify every piece of logic that is generic (mode-gating, BYOK resolution, credit debit, gateway call, refund-on-failure, logging, redaction, audit assembly) versus Technical-Analyst-specific (RSI/EMA thresholds, the specific feature vector shape, the specific persona system prompt).
+2. `apps/engine/app/llm/gateway.py` and `apps/engine/app/llm/key_vault.py` — confirm the current, hardened public interface (`call_llm_for_signal`, `check_and_debit_credits`, `refund_credits`, `log_llm_call`, `get_llm_credit_cost`, `redact_model_config`, `resolve_byok_key`) and that none of it needs to change to support additional node types — it should already be fully generic (it takes `feature_summary`/`deterministic_baseline` as plain dicts and has no Technical-Analyst-specific assumptions). If you find it does have hidden Technical-Analyst-specific coupling, note it and generalize the gateway itself minimally before proceeding, but expect this audit to come back clean.
+3. `apps/engine/app/nodes/universal.py`'s `"agents"` and `"data"` layer branches, and `apps/engine/app/nodes/registry.py`'s current mappings for `sentiment-agent`, `macro-agent`, `event-agent`, `news-stream`, `social-sentiment`, `macro-calendar`. Confirm that `news-stream`, `social-sentiment`, and `macro-calendar` (the "data" layer nodes that would sit upstream of these three agents in a real graph) all currently emit the **same generic `"NewsFeed"`-shaped output** via `UniversalNode`'s `"data"` branch — specifically `sentimentScore` (derived from RSI, not real external sentiment — confirm this and flag it plainly, see Section 6) and `blackoutActive` (currently hardcoded `False`, never actually set). This confirms the three agents you're building this phase genuinely share the same upstream input shape, justifying batching them together.
+4. `apps/web/mock/layers.ts` — find the `ComponentDef` entries for `sentiment-agent`, `macro-agent`, and `event-agent`. Confirm whether each already has a `model-select` field (the same field type `technical-agent` uses to expose provider/model/BYOK config in the Deep Customization dialog) or not. If any are missing it, you'll add one in Task 4.
+5. `apps/engine/tests/test_llm_gateway.py` — confirm the existing test structure and fixtures (`get_test_user_id`, the mocked-HTTP-response pattern, the paper-mode test scaffolding with a real `BotModel`/`BacktestRunModel`) so your new tests follow identical conventions rather than inventing a parallel style.
+
+Report all five findings before proceeding.
+
+---
+
+## 2. Task 1 — Extract the shared base class
+
+New file `apps/engine/app/nodes/intelligence_agents/base.py`:
+
+```python
+from typing import Any, Dict, Optional
+from ..base import NodeContext
+from ...llm.gateway import (
+    call_llm_for_signal,
+    check_and_debit_credits,
+    refund_credits,
+    log_llm_call,
+    get_llm_credit_cost,
+    redact_model_config,
+)
+from ...llm.key_vault import resolve_byok_key
+
+class LlmAgentNode:
+    """
+    Shared execution engine for every LLM-eligible intelligence agent node.
+    Subclasses implement exactly two hooks: compute_deterministic_baseline() and
+    build_feature_summary(). Everything else — mode gating, BYOK resolution, credit
+    debit/refund, gateway dispatch, audit logging, and secret redaction — lives here
+    exactly once, so every agent node behaves identically w.r.t. cost, security, and
+    fallback behavior by construction, not by convention.
+    """
+
+    component_id: str = "llm-agent-base"
+    default_provider_id: str = "groq"
+    default_model_id: str = "openai/gpt-oss-120b"
+    default_system_prompt: str = "You are a disciplined market analyst."
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config or {}
+
+    def find_upstream(self, ctx: NodeContext, output_type: str) -> Optional[dict]:
+        for out in ctx.upstream_outputs.values():
+            if isinstance(out, dict) and out.get("type") == output_type:
+                return out
+        return None
+
+    def compute_deterministic_baseline(self, ctx: NodeContext, cfg: dict, current_close: float) -> Dict[str, Any]:
+        """Must return {direction, confidence, rationale, applied_rule}. Subclasses must override."""
+        raise NotImplementedError
+
+    def build_feature_summary(self, ctx: NodeContext, cfg: dict, current_close: float) -> Dict[str, Any]:
+        """Must return the plain-dict feature summary sent to the LLM as market context. Subclasses must override."""
+        raise NotImplementedError
+
+    async def run(self, ctx: NodeContext, config: Dict[str, Any]) -> Dict[str, Any]:
+        cfg = {**self.config, **config}
+        c = ctx.candle
+        current_close = float(c.get("close", 0.0) if isinstance(c, dict) else getattr(c, "close", 0.0))
+
+        deterministic_baseline = self.compute_deterministic_baseline(ctx, cfg, current_close)
+        direction = deterministic_baseline["direction"]
+        confidence = deterministic_baseline["confidence"]
+        rationale = deterministic_baseline["rationale"]
+
+        system_prompt = cfg.get("systemPrompt", self.default_system_prompt)
+        model_config = cfg.get("model", {
+            "providerId": self.default_provider_id,
+            "modelId": self.default_model_id,
+            "temperature": 0.4,
+            "maxTokens": 1024,
+        })
+        provider_id = model_config.get("providerId", self.default_provider_id)
+
+        use_llm = (
+            provider_id != "rule-engine"
+            and ctx.mode in ("paper", "live")
+            and ctx.db is not None
+            and ctx.user_id is not None
+        )
+
+        llm_audit: Dict[str, Any] = {
+            "llm_status": "skipped_mode" if ctx.mode not in ("paper", "live") else ("skipped_rule_engine" if provider_id == "rule-engine" else "skipped_no_context")
+        }
+
+        active_node_id = ctx.current_node_id or self.component_id
+
+        if use_llm:
+            model_id = model_config.get("modelId", "")
+            use_byok = bool(model_config.get("useByok", False))
+            custom_api_key = await resolve_byok_key(ctx.user_id, provider_id, ctx.db) if use_byok else None
+            cost = get_llm_credit_cost(provider_id, model_id, bool(custom_api_key))
+            has_credits = await check_and_debit_credits(ctx.user_id, cost, ctx.db)
+
+            if not has_credits:
+                llm_audit = {"llm_status": "skipped_insufficient_credits", "credits_required": cost}
+                skipped_result_status = "skipped_insufficient_credits"
+                await log_llm_call(
+                    ctx=ctx, node_id=active_node_id, component_id=self.component_id,
+                    provider=provider_id, model=model_id,
+                    result=type("R", (), {"raw_status": skipped_result_status, "prompt_tokens": None,
+                                           "completion_tokens": None, "latency_ms": 0,
+                                           "error_message": f"Insufficient credits (required: {cost})"})(),
+                    credits_charged=0,
+                )
+            else:
+                feature_summary = self.build_feature_summary(ctx, cfg, current_close)
+                result = await call_llm_for_signal(
+                    provider_id=provider_id, model_id=model_id, system_prompt=system_prompt,
+                    feature_summary=feature_summary,
+                    deterministic_baseline={"direction": direction, "confidence": confidence, "rationale": rationale},
+                    temperature=float(model_config.get("temperature", 0.4)),
+                    max_tokens=int(model_config.get("maxTokens", 1024)),
+                    custom_api_key=custom_api_key,
+                )
+                actual_credits_charged = cost if result.raw_status == "ok" else 0
+                if result.raw_status != "ok" and cost > 0:
+                    await refund_credits(ctx.user_id, cost, ctx.db)
+
+                await log_llm_call(
+                    ctx=ctx, node_id=active_node_id, component_id=self.component_id,
+                    provider=provider_id, model=model_id, result=result, credits_charged=actual_credits_charged,
+                )
+
+                if result.raw_status == "ok":
+                    direction, confidence, rationale = result.direction, result.confidence, f"[LLM] {result.rationale}"
+                    llm_audit = {
+                        "llm_status": "ok", "llm_latency_ms": result.latency_ms,
+                        "credits_charged": actual_credits_charged,
+                        "prompt_tokens": result.prompt_tokens, "completion_tokens": result.completion_tokens,
+                    }
+                else:
+                    llm_audit = {"llm_status": result.raw_status, "llm_error": result.error_message, "credits_charged": actual_credits_charged}
+
+        return {
+            "type": "Signal",
+            "direction": direction,
+            "confidence": confidence,
+            "price": current_close,
+            "rationale": rationale,
+            "audit": {
+                "system_prompt": system_prompt,
+                "model_config": redact_model_config(model_config),
+                "applied_rule": deterministic_baseline.get("applied_rule"),
+                "deterministic_baseline": deterministic_baseline,
+                **llm_audit,
+            },
+        }
+```
+
+Note: the pseudo-`LlmSignalResult`-shaped inline object used for the `skipped_insufficient_credits` log call above is written out longhand rather than importing `LlmSignalResult` for that one branch, to keep this base class decoupled from the gateway's exact dataclass shape — **use your judgment here**: if importing `LlmSignalResult` directly and constructing a real instance (as `technical_analyst.py` currently does inline) is cleaner and doesn't create a circular import, prefer that over the `type(...)` hack shown above; the hack is illustrative of *what fields matter*, not a mandate to literally write it that way.
+
+**Refactor `TechnicalAnalystNode` onto this base**, as the first proof that the extraction is behavior-preserving: it becomes a small subclass providing only `compute_deterministic_baseline` (the existing RSI/EMA-oversold/overbought logic, moved verbatim) and `build_feature_summary` (the existing `{close, rsi, ema_fast, ema_slow, macd, macd_signal}` dict, moved verbatim), plus `component_id = "technical-agent"` and its existing default persona prompt/provider. After this refactor, run the entire existing `test_llm_gateway.py` suite unmodified and confirm every test still passes — this is your proof the extraction didn't change behavior. If any existing test needs to change to pass, that's a signal the refactor altered behavior, not that the test was wrong — stop and reconcile before proceeding to Task 2.
+
+---
+
+## 3. Task 2 — Three new subclasses
+
+All three live under `apps/engine/app/nodes/intelligence_agents/`, one file each, all consuming the shared `"NewsFeed"`-typed upstream output confirmed in your Step Zero audit (from whichever of `news-stream`/`social-sentiment`/`macro-calendar` sits upstream in a given graph — a node shouldn't assume which specific one; find the first `"NewsFeed"`-typed upstream output the same way `technical_analyst.py` finds the first `"FeatureVector"`-typed one).
+
+### 3.1 `sentiment_analyst.py` — `SentimentAnalystNode`, `component_id = "sentiment-agent"`
+
+Deterministic baseline: reads `sentimentScore` (a float, currently in roughly `[-0.65, 0.65]` per your audit) from the upstream NewsFeed. Threshold logic: `sentimentScore > cfg.get("bullishThreshold", 0.3)` → long; `< cfg.get("bearishThreshold", -0.3)` → short; else flat. Confidence scales with `abs(sentimentScore)` (e.g. `min(0.90, 0.55 + abs(sentimentScore) * 0.5)`), clamped sensibly. `applied_rule` should name the threshold actually crossed, mirroring Technical Analyst's descriptive style (e.g. `"Sentiment_Bullish_Threshold (> 0.30)"`).
+
+`build_feature_summary`: `{"sentiment_score": ..., "close": current_close}`.
+
+Default persona prompt: something like *"You are a disciplined sentiment analyst. Given aggregated social and news sentiment signal, form a directional view, weighing signal strength against potential noise or manipulation in social sentiment data."*
+
+If no upstream NewsFeed is found, mirror Technical Analyst's "no upstream data" fallback shape exactly (flat/0 confidence, `applied_rule: "Default Flat (No Data)"`, `llm_status: "skipped_no_features"`) — reuse this exact pattern/wording convention across all three new nodes for consistency, don't invent three different "no data" phrasings.
+
+### 3.2 `macro_strategist.py` — `MacroStrategistNode`, `component_id = "macro-agent"`
+
+Deterministic baseline: reads both `sentimentScore` and `blackoutActive` from the upstream NewsFeed, plus (if available) `regime` from an upstream `FeatureVector` if one also happens to be present in the graph (check `ctx.upstream_outputs` for a second, `"FeatureVector"`-typed output the same way `find_upstream` does for NewsFeed — a macro strategist reasonably synthesizes both, unlike Sentiment Analyst which only needs the qualitative feed). If `blackoutActive` is true, override to flat regardless of sentiment (macro event blackout takes precedence — `applied_rule: "Macro_Event_Blackout_Override"`). Otherwise apply a sentiment-plus-regime-weighted heuristic: e.g. only take a directional sentiment-based position if `regime == "Trend"` (when available), else reduce confidence in choppy regimes — use your judgment on the exact weighting formula, but it must be genuinely different from Sentiment Analyst's pure-sentiment threshold, and the difference must be visible in `applied_rule`'s wording.
+
+`build_feature_summary`: `{"sentiment_score": ..., "blackout_active": ..., "regime": ..., "close": current_close}` (omit `regime` from the dict if no `FeatureVector` was found upstream, rather than sending a fabricated value).
+
+Default persona prompt: *"You are a macro strategist. Weigh aggregate sentiment against market regime and any active event blackout window to form a cautious directional view — capital preservation during uncertain macro windows takes precedence over chasing sentiment."*
+
+### 3.3 `event_specialist.py` — `EventSpecialistNode`, `component_id = "event-agent"`
+
+Deterministic baseline: this one's primary signal is risk avoidance, not direction-picking. If `blackoutActive` is true → flat, high-confidence-in-flatness (`confidence` around `0.85`, framed as "confident this is not a tradeable window," not as directional conviction — make this framing explicit in `rationale` so it doesn't read like a bug when someone sees "flat, 85% confidence" in a trade log), `applied_rule: "Active_Event_Blackout"`. If not in blackout, fall through to a much more conservative version of the sentiment threshold (e.g. require `abs(sentimentScore)` to exceed a higher bar than Sentiment Analyst's, like `cfg.get("eventThreshold", 0.5)`, reflecting that an "event specialist" should only act on unusually strong signals tied to specific catalysts, not everyday sentiment noise) — otherwise flat with lower confidence and an `applied_rule` naming this as the default "no active catalyst" state.
+
+`build_feature_summary`: `{"sentiment_score": ..., "blackout_active": ..., "close": current_close}`.
+
+Default persona prompt: *"You are an event-driven specialist. Only take a directional view when there is a specific, strong catalyst (elevated sentiment magnitude or an active event window). Absent a clear catalyst, remain flat — this agent's edge comes from selectivity, not from having an opinion on every bar."*
+
+---
+
+## 4. Task 3 — Registry and frontend wiring
+
+### 4.1 `apps/engine/app/nodes/registry.py`
+
+Replace the three `create_node_factory(...)` entries with the new classes:
+```python
+"sentiment-agent": SentimentAnalystNode,
+"macro-agent": MacroStrategistNode,
+"event-agent": EventSpecialistNode,
+```
+Leave `flow-agent` and `contrarian-agent` exactly as their current `create_node_factory(...)` stub entries — untouched, out of scope this phase.
+
+### 4.2 `apps/web/mock/layers.ts`
+
+For each of `sentiment-agent`, `macro-agent`, `event-agent`: per your Step Zero audit, if a `model-select` field is already present on that `ComponentDef`, leave it as-is (it should already produce a `ModelSelection` shape compatible with `useByok`, per the prior phase's frontend fix — confirm this, don't assume). If missing, add one, mirroring `technical-agent`'s field definition exactly (same field key convention, same default `ModelSelection` shape with `useByok: false`) so the Deep Customization dialog surfaces identical provider/BYOK controls for these three nodes with zero additional frontend component work — `model-select-field.tsx` is already fully generic and provider-agnostic; it does not need to change for this phase.
+
+Do not add persona-specific default system prompts into `mock/layers.ts`'s field definitions beyond what the pattern already supports (a `prompt`-type field, if `technical-agent` has one, for user-editable system prompt override) — the *default* prompts you wrote in Task 2 live in the Python node classes as the fallback when `cfg.get("systemPrompt")` is absent, exactly matching how `technical_analyst.py` already does it.
+
+---
+
+## 5. Task 4 — Tests
+
+Extend `apps/engine/tests/test_llm_gateway.py` (or split into per-agent test files if it's getting unwieldy — your judgment, but keep naming/fixture conventions identical to the existing file):
+
+- One full end-to-end test per new node (mirroring `test_paper_mode_llm_execution_and_fallback_on_error`'s structure): successful LLM call in `paper` mode produces the expected `[LLM]`-prefixed rationale and a real `llm_call_log` row; a failed call falls back to the exact deterministic baseline for that node.
+- One `historical`-mode test per new node (mirroring `test_historical_mode_never_invokes_llm_gateway`) confirming none of the three ever calls `httpx.AsyncClient.post` in historical mode.
+- One test confirming the "no upstream NewsFeed" fallback path for each of the three matches the shared convention from Task 2.
+- One test specifically for `MacroStrategistNode`'s blackout-override behavior: construct an upstream NewsFeed with `blackoutActive: true` and a strongly bullish `sentimentScore`, and confirm the deterministic baseline is still flat, not long — this is the one behavior in this batch most likely to have a sign/precedence bug if implemented carelessly.
+- One test confirming `EventSpecialistNode`'s two distinct flat states (blackout-flat vs. no-catalyst-flat) produce different `applied_rule`/`rationale` text, since both return `direction: "flat"` and a naive test could pass while conflating the two meaningfully-different reasons for flatness.
+- Confirm the full pre-existing `test_llm_gateway.py` suite (Technical Analyst's tests) still passes unmodified after the Task 2 refactor, per that task's instruction.
+
+---
+
+## 6. Task 5 — Be honest about what "real" means here
+
+State plainly in your final report: the LLM reasoning added this phase is real (real API calls, real credit metering, real fallback), but the **upstream data it reasons over is still synthetic** — `sentimentScore` is currently derived from the same technical RSI feature Technical Analyst already uses, not from any real news or social media ingestion, and `blackoutActive` is never actually set to `true` by anything in the current codebase (it's a hardcoded `False` in `universal.py`'s data-layer stub). This means, today, Sentiment Analyst and Macro Strategist are structurally real but substantively still reasoning over a proxy for sentiment, not sentiment itself, and Event Specialist's blackout path is currently unreachable in practice (only exercisable in tests, which manually construct a NewsFeed with `blackoutActive: true`). Do not describe this phase's output as "real sentiment analysis" in any user-facing copy or documentation — describe it accurately as real LLM reasoning over a placeholder feature pending real data ingestion, which is a separate, future, and substantially larger phase (real news/social API integration).
+
+---
+
+## 7. Explicit non-goals for this phase
+
+Do **not**:
+- Touch `flow-agent` or `contrarian-agent` — planned for a separate future phase once real order-flow/microstructure data exists to feed the former, and once the graph-shape implications of an agent that needs an upstream `Signal` (rather than raw market data) are worked out for the latter.
+- Touch ML ensemble, RL, debate/consensus, OCULUS, or ChromaDB memory.
+- Implement real news/social/macro data ingestion — that upstream data remains the existing synthetic stub, per Task 5's honesty requirement.
+- Change anything in `apps/engine/app/llm/gateway.py`, `key_vault.py`, or the credit/BYOK system's behavior — this phase only consumes that existing, hardened interface through the new shared base class.
+- Change the paper-mode 300-bar cap or any other engine-wide backtest behavior — it already applies globally to any node called during a `paper` run, with no per-node changes needed.
+- Add new frontend components — `model-select-field.tsx` and the Deep Customization dialog are already fully generic; only `mock/layers.ts` field definitions may need additions per Task 3.2.
+
+---
+
+## 8. Acceptance checklist
+
+- [ ] `LlmAgentNode` base class exists and `TechnicalAnalystNode` is refactored onto it with zero behavior change (full pre-existing test suite passes unmodified).
+- [ ] `SentimentAnalystNode`, `MacroStrategistNode`, `EventSpecialistNode` exist, each with genuinely distinct deterministic logic (not three copies of the same threshold with renamed variables) and distinct default persona prompts.
+- [ ] `registry.py` routes `sentiment-agent`/`macro-agent`/`event-agent` to the new classes; `flow-agent`/`contrarian-agent` are untouched.
+- [ ] All three new nodes never call an LLM in `historical`/`walk-forward`/`monte-carlo` mode (verified by test, mirroring the existing Technical Analyst guarantee).
+- [ ] All three new nodes correctly resolve BYOK keys, debit/refund credits, log to `llm_call_log` with the correct `component_id` and real `current_node_id` (not a hardcoded fallback string, verified with a graph containing more than one instance of the same agent type), and redact `apiKey` from every audit output — all via the shared base class, not per-node reimplementation.
+- [ ] `MacroStrategistNode`'s event-blackout override correctly takes precedence over a strongly bullish/bearish sentiment score.
+- [ ] `EventSpecialistNode`'s two flat states are distinguishable in their audit trail.
+- [ ] The Deep Customization dialog, opened on a `sentiment-agent`/`macro-agent`/`event-agent` node in the existing frontend, shows the same provider/model/BYOK controls as `technical-agent` does, with zero new frontend components required.
+- [ ] All engine tests pass; `npx tsc --noEmit` in `apps/web` returns 0 errors.
+- [ ] The final report explicitly states the Section 6 honesty caveat about synthetic upstream data — this is a required part of "done," not optional color commentary.
+
+---
+
+## 9. What this phase deliberately does not finish
+
+After this phase: four of the six Layer III intelligence-agent nodes (Technical Analyst, Sentiment Analyst, Macro Strategist, Event Specialist) have real, hardened LLM reasoning available, sharing one audited implementation of the security/cost-critical plumbing. `flow-agent` and `contrarian-agent` remain rule-based stubs — the next phase in this sequence should address those two together (they share the property of needing a materially different upstream contract than the other four), and only after that should any future phase attempt Layer IV (ML ensemble) or beyond. Real sentiment/news/macro data ingestion, to make this phase's reasoning substantive rather than proxy-based, remains a distinct, larger, unscheduled future phase — say so plainly, don't imply it's done.

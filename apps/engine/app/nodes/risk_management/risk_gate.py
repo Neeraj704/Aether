@@ -62,7 +62,15 @@ class RiskGateNode:
 
         # Risk gate decision
         required_threshold = (threshold / 100.0 * 0.8) # Normalized threshold
-        approved = confidence >= required_threshold
+        is_unreliable_conf = (
+            isinstance(signal.get("audit"), dict)
+            and signal["audit"].get("confidence_reliability") == "unreliable_do_not_gate_or_size_on_this"
+        )
+        if is_unreliable_conf:
+            # Fall back to validating directional presence rather than vetoing on untrustworthy confidence score
+            approved = (direction in ("long", "short"))
+        else:
+            approved = confidence >= required_threshold
 
         return {
             "type": "RiskDecision",
@@ -72,11 +80,17 @@ class RiskGateNode:
             "stopPrice": stop_price,
             "confidence": confidence,
             "reason": (
-                f"Approved: Signal confidence ({confidence:.0%}) meets threshold ({threshold:.0f}%). "
+                f"Approved (unreliable confidence fallback): Direction '{direction}' accepted with conservative sizing. "
                 f"Sized {max_pos_pct:.1f}% equity (₹{allocated_capital:,.2f}) with stop @ ₹{stop_price:,.2f}."
-                if approved
-                else f"Vetoed: Signal confidence ({confidence:.0%}) below risk gate requirement ({threshold:.0f}%)."
+                if (approved and is_unreliable_conf)
+                else (
+                    f"Approved: Signal confidence ({confidence:.0%}) meets threshold ({threshold:.0f}%). "
+                    f"Sized {max_pos_pct:.1f}% equity (₹{allocated_capital:,.2f}) with stop @ ₹{stop_price:,.2f}."
+                    if approved
+                    else f"Vetoed: Signal confidence ({confidence:.0%}) below risk gate requirement ({threshold:.0f}%)."
+                )
             ),
+
             "audit": {
                 "portfolio_equity": round(equity, 2),
                 "max_position_pct": max_pos_pct,

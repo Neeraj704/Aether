@@ -301,30 +301,54 @@ class MlModelModel(Base):
 
     Only one row per (component_id, symbol, resolution) should have is_active = True at a time.
     This is enforced in application code by the training script, not a DB constraint —
-    a partial unique index would be reasonable future hardening but is out of scope for Phase 19.
+    a partial unique index would be reasonable future hardening but is not built here.
+
+    Phase 19.1 added gating columns: a model is only marked is_active=True if it passes
+    test_row_count >= 500 AND cv_mcc_mean > 0.02. Failed models get is_active=False with
+    activation_notes explaining why.
     """
     __tablename__ = "ml_models"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     component_id = Column(Text, nullable=False)           # e.g. 'gbdt-forecast'
-    version = Column(Text, nullable=False)                # e.g. 'v1' or ISO-date stamp
+    version = Column(Text, nullable=False)                # e.g. 'v20260905'
     symbol = Column(Text, nullable=False)                 # e.g. 'BTCUSDT'
     resolution = Column(Text, nullable=False)             # e.g. '15m'
-    horizon_bars = Column(Integer, nullable=False)        # bars ahead the model predicts
-    up_threshold_pct = Column(Numeric, nullable=False)    # e.g. 0.5 (%) — "up" label threshold
-    down_threshold_pct = Column(Numeric, nullable=False)  # e.g. -0.5 (%) — "down" label threshold
-    artifact_path = Column(Text, nullable=False)          # absolute path to .txt LightGBM model file
+    horizon_bars = Column(Integer, nullable=False)        # bars ahead the primary model predicts
+    up_threshold_pct = Column(Numeric, nullable=False)    # e.g. 0.5 — "up" label threshold pct
+    down_threshold_pct = Column(Numeric, nullable=False)  # e.g. -0.5 — "down" label threshold pct
+    artifact_path = Column(Text, nullable=False)          # absolute path to .txt LightGBM file
     # Exact ordered list of feature names the model expects at inference time.
-    # Matches the column order of X_train used during training — inference MUST reconstruct
-    # the feature vector in this exact order to avoid silent train/serve skew.
+    # Matches the column order of X_train — inference MUST use this order exactly.
     feature_columns = Column(ARRAY(Text), nullable=False)
     train_start = Column(DateTime(timezone=True), nullable=False)
     train_end = Column(DateTime(timezone=True), nullable=False)
     train_row_count = Column(Integer, nullable=False)
-    accuracy = Column(Numeric, nullable=True)             # held-out test accuracy, informational only
+    accuracy = Column(Numeric, nullable=True)             # primary-horizon held-out test accuracy
     is_active = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    # Phase 19.1: gating and honest-metrics columns (migration 0014_ml_models_gating.sql)
+    activation_notes      = Column(Text, nullable=True)    # why inactive, if is_active=False
+    test_row_count        = Column(Integer, nullable=True)  # size of held-out test set
+    cv_balanced_acc_mean  = Column(Numeric, nullable=True)  # 5-fold embargoed CV bal-acc mean
+    cv_balanced_acc_std   = Column(Numeric, nullable=True)  # 5-fold embargoed CV bal-acc std
+    cv_mcc_mean           = Column(Numeric, nullable=True)  # 5-fold embargoed CV MCC mean
+    cv_mcc_std            = Column(Numeric, nullable=True)  # 5-fold embargoed CV MCC std
+    majority_baseline_acc = Column(Numeric, nullable=True)  # always-predict-majority baseline acc
+    threshold_mode        = Column(Text, nullable=True)     # 'atr' or 'fixed'
+    atr_multiplier        = Column(Numeric, nullable=True)  # k: up_thresh = k * atr_pct
+
+    # Phase 19.2: discrimination and calibration columns (migration 0015_ml_models_calibration.sql)
+    test_mcc               = Column(Numeric, nullable=True)  # final model MCC on held-out test set
+    test_lift              = Column(Numeric, nullable=True)  # test_acc - majority_baseline_acc
+    is_discriminative      = Column(Boolean, nullable=False, default=False)  # AUC > 0.55 & positive Spearman
+    discrimination_auc     = Column(Numeric, nullable=True)  # AUC of confidence ranking correctness
+    calibration_path       = Column(Text, nullable=True)     # path to fitted CalibratedClassifierCV wrapper
+    calibration_mae_before = Column(Numeric, nullable=True)  # MAE across deciles before calibration
+    calibration_mae_after  = Column(Numeric, nullable=True)  # MAE across deciles after calibration
 
     __table_args__ = (
         Index("ml_models_component_symbol_idx", "component_id", "symbol", "resolution", "is_active"),
     )
+

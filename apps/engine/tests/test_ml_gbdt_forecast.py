@@ -120,7 +120,10 @@ def _make_model_row_dict(artifact_path: str, feature_columns: list) -> dict:
 def _make_candle(close: float = 50000.0, rsi: float = 50.0,
                  ema_fast: float = 49800.0, ema_slow: float = 49500.0,
                  macd: float = 10.0, macd_signal: float = 8.0) -> dict:
-    """Build a candle dict with precomputed indicator fields (as backtest_runner injects)."""
+    """Build a candle dict with all 19 precomputed indicator fields (as backtest_runner injects).
+    Phase 19.1: added _atr_14, _atr_pct, _bb_width, _volume_zscore, _roc_5/10/20, _ret_lag_1/2/3.
+    Existing tests still pass because they specify their own feature_columns in model_row_dict.
+    """
     return {
         "symbol": "BTCUSDT",
         "close": close,
@@ -129,12 +132,25 @@ def _make_candle(close: float = 50000.0, rsi: float = 50.0,
         "low": close * 0.998,
         "volume": 100.0,
         "open_time": datetime(2024, 6, 1, tzinfo=timezone.utc),
-        # Precomputed indicator fields — same keys as backtest_runner.prepare_indicators_dataframe()
+        # Original 5 precomputed fields
         "_rsi": rsi,
         "_ema_fast": ema_fast,
         "_ema_slow": ema_slow,
         "_macd": macd,
         "_macd_signal": macd_signal,
+        # Phase 19.1: additional precomputed fields
+        "_atr_14": 200.0,
+        "_atr_pct": 0.004,
+        "_bb_width": 0.02,
+        "_volume_zscore": 0.5,
+        "_roc_5": 0.01,
+        "_roc_10": 0.02,
+        "_roc_20": 0.03,
+        "_ret_lag_1": 0.001,
+        "_ret_lag_2": -0.001,
+        "_ret_lag_3": 0.0005,
+        "_hour_of_day": 12.0,
+        "_day_of_week": 0.0,
     }
 
 
@@ -536,6 +552,14 @@ def test_preexisting_imports_still_work():
     assert hasattr(MlModelModel, "feature_columns")
     assert hasattr(MlModelModel, "is_active")
     assert hasattr(MlModelModel, "artifact_path")
+    # Phase 19.1 gating columns
+    assert hasattr(MlModelModel, "activation_notes")
+    assert hasattr(MlModelModel, "test_row_count")
+    assert hasattr(MlModelModel, "cv_mcc_mean")
+    assert hasattr(MlModelModel, "cv_balanced_acc_mean")
+    assert hasattr(MlModelModel, "majority_baseline_acc")
+    assert hasattr(MlModelModel, "threshold_mode")
+    assert hasattr(MlModelModel, "atr_multiplier")
 
 
 # ---------------------------------------------------------------------------
@@ -599,4 +623,356 @@ async def test_gbdt_multi_horizon_inference_and_confluence():
         assert result["audit"]["horizons"]["12_bars"]["direction"] == "long"
         assert result["audit"]["horizons"]["24_bars"]["direction"] == "long"
         assert result["audit"]["horizons"]["32_bars"]["direction"] == "long"
+
+
+# ---------------------------------------------------------------------------
+# 11. Phase 19.1: Live-mode uses ctx.historical_window — not degenerate defaults
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_gbdt_live_mode_uses_historical_window_not_degenerate_defaults():
+    """
+    Phase 19.1 Task 1 regression test.
+
+    BEFORE Phase 19.1: in live/paper mode, when '_rsi' was absent from the candle,
+    GbdtForecastNode silently fell back to RSI=50, ema_fast=ema_slow=close, macd=0
+    on EVERY tick. This made all live-mode predictions degenerate (identical inputs).
+
+    AFTER Phase 19.1: when ctx.historical_window is present and has >=50 bars, the
+    node MUST compute real rolling indicators. We verify:
+    - rsi != 50.0 (computed from actual price changes, not a constant)
+    - ema_fast != ema_slow (different spans = different values, unless price is perfectly flat)
+    - zscore != 0.0 (non-trivial price vs. EMA relationship)
+
+    The candle is provided WITHOUT precomputed _rsi/_ema_fast fields (live mode),
+    and ctx.historical_window is a 60-bar synthetic price series with clear directionality.
+    """
+    import pandas as pd
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Train a synthetic model with the full 19-feature set
+        feature_columns = [
+            "rsi", "ema_fast", "ema_slow", "macd", "macd_signal", "zscore", "regime_numeric",
+            "atr_14", "atr_pct", "bb_width", "volume_zscore",
+            "roc_5", "roc_10", "roc_20",
+            "ret_lag_1", "ret_lag_2", "ret_lag_3",
+            "hour_of_day", "day_of_week",
+        ]
+        import lightgbm as lgb
+        np.random.seed(7)
+        n = 600
+        X = np.random.randn(n, len(feature_columns))
+        y = np.random.choice([0, 1, 2], n)
+        model = lgb.LGBMClassifier(
+            objective="multiclass", num_class=3, n_estimators=20, verbosity=-1, random_state=7
+        )
+        model.fit(X, y)
+        artifact_path = os.path.join(tmp_dir, "BTCUSDT_15m_v_live_test.txt")
+        model.booster_.save_model(artifact_path)
+
+        model_row = _make_model_row_dict(artifact_path, feature_columns)
+        cache = {"gbdt-forecast:BTCUSDT:15m": model_row}
+
+        # Build a 60-bar historical window with a clear uptrend (non-flat prices)
+        np.random.seed(99)
+        prices = 50000.0 + np.cumsum(np.random.randn(60) * 50.0 + 10.0)
+        open_times = pd.date_range("2024-06-01", periods=60, freq="15min", tz="UTC")
+        window_df = pd.DataFrame({
+            "open_time": open_times,
+            "open":   prices * 0.999,
+            "high":   prices * 1.002,
+            "low":    prices * 0.998,
+            "close":  prices,
+            "volume": np.random.uniform(50, 200, 60),
+        })
+
+        # Candle WITHOUT precomputed fields — live mode
+        live_candle = {
+            "symbol": "BTCUSDT",
+            "close":  float(prices[-1]),
+            "open":   float(prices[-1]) * 0.999,
+            "high":   float(prices[-1]) * 1.002,
+            "low":    float(prices[-1]) * 0.998,
+            "volume": 100.0,
+            "open_time": open_times[-1].to_pydatetime(),
+            # NO _rsi, NO _ema_fast — this is the live/paper mode scenario
+        }
+
+        ctx = NodeContext(
+            candle=live_candle,
+            portfolio=MagicMock(equity=100000.0),
+            upstream_outputs={},
+            mode="live",
+            ml_model_registry_cache=cache,
+            db=None,
+            historical_window=window_df,
+        )
+
+        node = GbdtForecastNode()
+
+        # Patch _compute_features_from_window to capture what it returned
+        from apps.engine.app.nodes.ml import gbdt_forecast as gf_mod
+        original_fn = gf_mod._compute_features_from_window
+        captured = {}
+        def capturing_fn(window, candle):
+            result = original_fn(window, candle)
+            captured["features"] = result
+            return result
+        gf_mod._compute_features_from_window = capturing_fn
+
+        try:
+            result = await node.run(ctx, {"minConfidence": 0.0})
+        finally:
+            gf_mod._compute_features_from_window = original_fn
+
+        # The result must NOT be the insufficient_window fallback
+        assert result["audit"].get("model_status") != "insufficient_window", (
+            f"Node returned insufficient_window fallback — live-mode feature computation did not run. "
+            f"audit: {result['audit']}"
+        )
+
+        # The features computed from the window must NOT be degenerate constants
+        assert captured.get("features") is not None, (
+            "_compute_features_from_window was not called — live-mode path not triggered"
+        )
+        feats = captured["features"]
+        assert abs(feats["rsi"] - 50.0) > 1.0, (
+            f"rsi={feats['rsi']} — expected a real RSI value, not the degenerate default 50.0. "
+            f"Live-mode fallback is still using constants instead of ctx.historical_window."
+        )
+        assert abs(feats["ema_fast"] - feats["ema_slow"]) > 1.0, (
+            f"ema_fast={feats['ema_fast']}, ema_slow={feats['ema_slow']} are equal — "
+            f"EMA-20 and EMA-50 should differ on a trending price series. "
+            f"Live-mode fallback may still be using ema_fast=ema_slow=close."
+        )
+        assert abs(feats["zscore"]) > 0.01, (
+            f"zscore={feats['zscore']} — expected a non-trivial z-score from the trending price series. "
+            f"zscore=0 is the degenerate fallback value."
+        )
+
+
+# ---------------------------------------------------------------------------
+# 12. Phase 19.1: Train/test embargo — no label leakage across split boundary
+# ---------------------------------------------------------------------------
+
+def test_train_test_split_has_no_label_leakage():
+    """
+    Phase 19.1 Task 2 regression test.
+
+    BEFORE Phase 19.1: compute_labels() was applied to the full DataFrame, then split
+    at 80%. Training rows at [split_idx - horizon_bars : split_idx] had labels whose
+    target close was at [split_idx : split_idx + horizon_bars] — inside the test set.
+
+    AFTER Phase 19.1: the training tail is trimmed by horizon_bars rows (embargo cut).
+    Specifically: embargo_cut = split_idx - horizon_bars.
+    This guarantees NO training sample has a label whose target close falls in the test set.
+
+    This test verifies the index arithmetic directly, without needing a real DB.
+    It tests the invariant: for ALL rows in df_train, their look-forward target index
+    (i + horizon_bars) is STRICTLY LESS THAN split_idx.
+    """
+    import pandas as pd
+    from apps.engine.app.ml.train_gbdt_forecast import compute_labels
+
+    # Build a minimal synthetic DataFrame
+    N = 500
+    np.random.seed(42)
+    prices = 100.0 + np.cumsum(np.random.randn(N))
+    df = pd.DataFrame({
+        "close": prices,
+        "open":  prices,
+        "high":  prices * 1.001,
+        "low":   prices * 0.999,
+        "volume": 100.0,
+    })
+
+    for horizon in [12, 24, 32]:
+        # compute_labels drops the last horizon_bars rows — so len(df_h) = N - horizon
+        df_h = compute_labels(df, horizon, 0.5, -0.5)
+
+        split_idx    = int(len(df_h) * 0.80)
+        embargo_cut  = max(0, split_idx - horizon)
+        df_train     = df_h.iloc[:embargo_cut]
+        df_test_start_idx = split_idx
+
+        # For every training row i, its look-forward target is the close at original position i + horizon.
+        # After compute_labels drops the last `horizon` rows, row i in df_h corresponds to the
+        # original DataFrame row i. Its label was set using close.shift(-horizon), i.e. close[i + horizon].
+        # We must verify: for all i in df_train indices, i + horizon < split_idx.
+        train_indices = list(range(len(df_train)))
+        leaked = [i for i in train_indices if i + horizon >= df_test_start_idx]
+
+        assert len(leaked) == 0, (
+            f"Horizon {horizon}: {len(leaked)} training rows have labels that look into the test set. "
+            f"First leaked index: {leaked[0]} (label target at {leaked[0] + horizon}, test starts at {df_test_start_idx}). "
+            f"Embargo cut must trim training tail by at least {horizon} rows before split_idx={split_idx}."
+        )
+
+        # Also verify we haven't over-trimmed (train should have substantial data)
+        assert len(df_train) > 200, (
+            f"Horizon {horizon}: df_train has only {len(df_train)} rows after embargo — over-trimmed?"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 13. Phase 19.2: Discrimination check — detecting non-discriminative confidence
+# ---------------------------------------------------------------------------
+
+def test_compute_discrimination_metrics_flags_random_confidence_as_non_discriminative():
+    """
+    Phase 19.2 Task 1: A model whose confidence is random noise relative to correctness
+    must produce AUC ≈ 0.50 and be flagged is_discriminative=False.
+    """
+    from apps.engine.app.ml.train_gbdt_forecast import compute_discrimination_metrics
+
+    np.random.seed(42)
+    n = 1000
+    y_test = np.random.choice([0, 1, 2], size=n)
+    # Random probability distribution independent of y_test
+    raw_logits = np.random.randn(n, 3)
+    exp_logits = np.exp(raw_logits)
+    proba = exp_logits / exp_logits.sum(axis=1, keepdims=True)
+
+    metrics = compute_discrimination_metrics(None, None, y_test, proba=proba)
+
+    assert metrics["is_discriminative"] is False, "Random confidence must be flagged as non-discriminative"
+    assert metrics["auc_confidence_correctness"] < 0.55, (
+        f"Expected AUC < 0.55 for random confidence, got {metrics['auc_confidence_correctness']}"
+    )
+
+
+def test_compute_discrimination_metrics_detects_genuine_ranking_signal():
+    """
+    Phase 19.2 Task 1: A model whose confidence genuinely ranks correctness
+    must produce AUC > 0.55 and positive Spearman, flagged is_discriminative=True.
+    """
+    from apps.engine.app.ml.train_gbdt_forecast import compute_discrimination_metrics
+
+    np.random.seed(42)
+    n = 1000
+    y_test = np.random.choice([0, 1, 2], size=n)
+    proba = np.zeros((n, 3))
+
+    for i in range(n):
+        true_lbl = y_test[i]
+        # When correct, assign high confidence; when incorrect, assign low confidence
+        is_correct = (i % 3 != 0)  # ~67% accuracy
+        if is_correct:
+            conf = np.random.uniform(0.60, 0.95)
+            proba[i, true_lbl] = conf
+            rem = (1.0 - conf) / 2.0
+            for c in range(3):
+                if c != true_lbl:
+                    proba[i, c] = rem
+        else:
+            wrong_lbl = (true_lbl + 1) % 3
+            conf = np.random.uniform(0.35, 0.45)
+            proba[i, wrong_lbl] = conf
+            rem = (1.0 - conf) / 2.0
+            for c in range(3):
+                if c != wrong_lbl:
+                    proba[i, c] = rem
+
+    metrics = compute_discrimination_metrics(None, None, y_test, proba=proba)
+
+    assert metrics["is_discriminative"] is True, "Genuine ranking confidence must be flagged as discriminative"
+    assert metrics["auc_confidence_correctness"] > 0.70, (
+        f"Expected AUC > 0.70 for ranked synthetic data, got {metrics['auc_confidence_correctness']}"
+    )
+    assert metrics["spearman_corr"] > 0.5, (
+        f"Expected Spearman correlation > 0.5, got {metrics['spearman_corr']}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 14. Phase 19.2: GbdtForecastNode minConfidence bypass for non-discriminative models
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_gbdt_node_bypasses_min_confidence_for_non_discriminative_model():
+    """
+    Phase 19.2 Task 4: For active-but-non-discriminative models, the minConfidence gate
+    must be bypassed (direction is NOT flattened even if minConfidence is high), and
+    confidence_reliability must be flagged as 'unreliable_do_not_gate_or_size_on_this'.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        artifact_path, feature_cols = _make_synthetic_model_and_artifact(tmp_dir)
+
+        node = GbdtForecastNode(config={"minConfidence": 0.99})  # Very high minConfidence
+        mock_row = {
+            "component_id": "gbdt-forecast",
+            "version": "v_test",
+            "symbol": "BTCUSDT",
+            "resolution": "15m",
+            "horizon_bars": 12,
+            "artifact_path": artifact_path,
+            "feature_columns": feature_cols,
+            "is_active": True,
+            "is_discriminative": False,  # NON-DISCRIMINATIVE
+            "cv_mcc_mean": 0.04,
+            "test_mcc": 0.03,
+            "calibration_path": None,
+        }
+
+        ctx = NodeContext(
+            candle={
+                "close": 50000.0,
+                "_rsi": 15.0,  # Model predicts "down" / short
+                "_ema_fast": 49000.0,
+                "_ema_slow": 51000.0,
+                "_macd": -100.0,
+                "_macd_signal": -80.0,
+            },
+            portfolio=MagicMock(),
+            upstream_outputs={},
+            ml_model_registry_cache={"gbdt-forecast:BTCUSDT:15m": mock_row},
+        )
+
+        result = await node.run(ctx, config={"minConfidence": 0.99})
+
+        assert result["type"] == "Signal"
+        assert result["direction"] == "short", (
+            f"Expected non-discriminative model to bypass minConfidence 0.99 and emit 'short', got '{result['direction']}'"
+        )
+        assert result["audit"]["confidence_reliability"] == "unreliable_do_not_gate_or_size_on_this"
+        assert result["audit"]["min_confidence_applied"] == 0.0
+        assert "uncalibratable" in result["audit"]["edge_tier"]
+
+
+# ---------------------------------------------------------------------------
+# 15. Phase 19.2: RiskGateNode awareness for unreliable confidence
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_risk_gate_fallback_for_unreliable_confidence_signal():
+    """
+    Phase 19.2 Task 6: Risk gate approves directional signal when upstream confidence
+    is explicitly marked unreliable, rather than vetoing solely on untrusted confidence.
+    """
+    from apps.engine.app.nodes.risk_management.risk_gate import RiskGateNode
+
+    risk_node = RiskGateNode(config={"threshold": 80.0})  # 80% threshold
+
+    # Signal with 45% confidence (< threshold requirement of 64%), but marked unreliable
+    signal = {
+        "type": "Signal",
+        "direction": "long",
+        "confidence": 0.45,
+        "price": 50000.0,
+        "audit": {
+            "confidence_reliability": "unreliable_do_not_gate_or_size_on_this",
+        }
+    }
+
+    ctx = NodeContext(
+        candle={"close": 50000.0},
+        portfolio=MagicMock(equity=100000.0),
+        upstream_outputs={"upstream_gbdt": signal},
+    )
+
+    decision = await risk_node.run(ctx, config={})
+    assert decision["type"] == "RiskDecision"
+    assert decision["approved"] is True, "Risk gate should approve signal via unreliable confidence fallback"
+    assert decision["direction"] == "long"
+    assert decision["sizedQuantity"] > 0.0
+
 

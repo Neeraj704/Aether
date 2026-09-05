@@ -58,8 +58,8 @@ class NewsStreamNode:
         else:
             ref_time = datetime.now(timezone.utc)
 
-        # 3. Lookback window
-        lookback_mins = int(cfg.get("lookbackMinutes") or cfg.get("dedupWindow") or 180)
+        # 3. Lookback window (default: 6 hours / 360 mins)
+        lookback_mins = int(cfg.get("lookbackMinutes") or 360)
         window_start = ref_time - timedelta(minutes=lookback_mins)
         window_end = ref_time  # Strictly <= ref_time
 
@@ -130,12 +130,35 @@ class NewsStreamNode:
             macro_events_cache=ctx.macro_events_cache,
         )
 
+        # 7. Format top matched articles for inspection
+        articles_payload = []
+        for item, pub_utc in matching_articles[:5]:
+            if isinstance(item, dict):
+                title = str(item.get("title") or "")
+                source = str(item.get("source") or "")
+                url = str(item.get("url") or "")
+                sent = float(item.get("sentiment_compound") or 0.0)
+            else:
+                title = str(getattr(item, "title", "") or "")
+                source = str(getattr(item, "source", "") or "")
+                url = str(getattr(item, "url", "") or "")
+                sent = float(getattr(item, "sentiment_compound", 0.0) or 0.0)
+
+            articles_payload.append({
+                "title": title,
+                "source": source,
+                "url": url,
+                "publishedAt": pub_utc.isoformat(),
+                "sentiment": round(sent, 4),
+            })
+
         return {
             "type": "NewsFeed",
             "symbol": raw_symbol,
             "timestamp": ref_time.isoformat(),
             "sentimentScore": round(sentiment_score, 4),
             "articleCount": len(matching_articles),
+            "articles": articles_payload,
             "blackoutActive": blackout_active,
             "blackoutReason": blackout_reason,
         }

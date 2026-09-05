@@ -249,6 +249,16 @@ def build_node_step_summaries(node_instances: list, upstream_outputs: dict, cand
                 metric_label = "Risk Gate"
                 metric_value = "PASS" if approved else "STANDBY"
                 append_bot_log(bot_id, "risk", f"Risk Check: {'APPROVED' if approved else 'STANDBY'} — {reason}", node_name)
+
+            elif out_type == "NewsFeed":
+                art_cnt = out.get("articleCount", 0)
+                sent_score = float(out.get("sentimentScore", 0.0))
+                arts = out.get("articles", [])
+                latest_title = arts[0]["title"] if arts else "No headlines in window"
+                summary = f"{art_cnt} article(s) (Score: {sent_score:+.2f}) — Latest: {latest_title[:60]}..." if arts else f"0 articles in lookback window (Sentiment: neutral 0.0)"
+                metric_label = "Sentiment"
+                metric_value = f"{sent_score:+.2f} ({art_cnt} arts)"
+                append_bot_log(bot_id, "data", f"News Stream: Ingested {art_cnt} article(s) (Sentiment: {sent_score:+.2f})", node_name)
             else:
                 summary = f"Executed {node_name} with status OK"
                 metric_label = "Status"
@@ -300,7 +310,7 @@ async def evaluate_live_snapshot(bot_id: str, bot_graph_dict: dict, symbol: str 
 
         steps = build_node_step_summaries(node_instances, ctx.upstream_outputs, candle, bot_id)
 
-        eval_data = {
+        eval_data = make_json_serializable({
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "symbol": symbol,
             "resolution": resolution,
@@ -314,7 +324,7 @@ async def evaluate_live_snapshot(bot_id: str, bot_graph_dict: dict, symbol: str 
                 "openTime": candle.get("open_time").isoformat() if hasattr(candle.get("open_time"), "isoformat") else str(candle.get("open_time")),
             },
             "steps": steps,
-        }
+        })
         _latest_bot_evaluations[str(bot_id)] = eval_data
         return eval_data
     except Exception as e:
@@ -414,7 +424,7 @@ async def tick_bot(bot_id: str, session: Optional[AsyncSession] = None):
         # Generate node step inspection details & logs
         steps = build_node_step_summaries(node_instances, ctx.upstream_outputs, candle, str(bot_id))
         
-        _latest_bot_evaluations[str(bot_id)] = {
+        _latest_bot_evaluations[str(bot_id)] = make_json_serializable({
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "symbol": symbol,
             "resolution": resolution,
@@ -428,7 +438,7 @@ async def tick_bot(bot_id: str, session: Optional[AsyncSession] = None):
                 "openTime": candle.get("open_time").isoformat() if hasattr(candle.get("open_time"), "isoformat") else str(candle.get("open_time")),
             },
             "steps": steps,
-        }
+        })
 
         # If this is a new closed bar, persist state
         if not already_processed:

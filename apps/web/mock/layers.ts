@@ -815,7 +815,7 @@ export const COMPONENTS: ComponentDef[] = [
     'Flow Analyst',
     'Follows the money.',
     'Interprets institutional flow, block trades, FII/DII activity and unusual options positioning.',
-    ['FeatureVector'],
+    ['MarketData', 'FeatureVector'],
     ['Signal'],
     'starter',
     229,

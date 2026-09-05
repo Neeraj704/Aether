@@ -1,5 +1,6 @@
 from typing import Dict, Type
 from .data_collection.ohlcv_feed import OhlcvFeedNode
+from .data_collection.orderbook_depth import OrderbookDepthNode
 from .data_collection.news_stream import NewsStreamNode
 from .data_collection.social_sentiment import SocialSentimentNode
 from .data_collection.macro_calendar import MacroCalendarNode
@@ -7,6 +8,8 @@ from .feature_engineering.technical_indicators import TechnicalIndicatorsNode
 from .intelligence_agents.technical_analyst import TechnicalAnalystNode
 from .intelligence_agents.sentiment_analyst import SentimentAnalystNode
 from .intelligence_agents.macro_strategist import MacroStrategistNode
+from .intelligence_agents.flow_analyst import FlowAnalystNode
+from .intelligence_agents.contrarian import ContrarianAgentNode
 from .intelligence_agents.event_specialist import EventSpecialistNode
 from .risk_management.risk_gate import RiskGateNode
 from .execution.paper_executor import PaperExecutorNode
@@ -16,7 +19,7 @@ from .universal import create_node_factory
 REGISTRY: Dict[str, Type] = {
     # Layer I: Data Collection
     "ohlcv-feed": OhlcvFeedNode,
-    "orderbook-depth": create_node_factory("orderbook-depth", "data", "Order Book Depth"),
+    "orderbook-depth": OrderbookDepthNode,
     "news-stream": NewsStreamNode,
     "social-sentiment": SocialSentimentNode,
     "macro-calendar": MacroCalendarNode,
@@ -39,8 +42,8 @@ REGISTRY: Dict[str, Type] = {
     "technical-analyst": TechnicalAnalystNode,
     "sentiment-agent": SentimentAnalystNode,
     "macro-agent": MacroStrategistNode,
-    "flow-agent": create_node_factory("flow-agent", "agents", "Flow Analyst"),
-    "contrarian-agent": create_node_factory("contrarian-agent", "agents", "Contrarian"),
+    "flow-agent": FlowAnalystNode,
+    "contrarian-agent": ContrarianAgentNode,
     "event-agent": EventSpecialistNode,
 
     # Layer IV: ML Predictive Models

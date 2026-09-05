@@ -1,0 +1,204 @@
+AETHER — Phase 18: Order-Flow Data + Flow Analyst & Contrarian Agents
+
+Bounded, single-phase prompt, same discipline as Phases 10–17 (Prompts 12–19) in docs/Prompts/. Self-contained — no prior conversation history available to you. Audit first, as always. Do not expand scope beyond what is listed here.
+
+0. Context you must internalize first
+
+Phase 17 made news-stream, social-sentiment, and macro-calendar real, replacing a fake RSI-derived sentimentScore and a blackoutActive that never fired. Four Layer III intelligence agents (technical-agent, sentiment-agent, macro-agent, event-agent) now reason over genuinely real (or honestly-labeled-proxy) inputs, sharing one hardened LlmAgentNode base class (apps/engine/app/nodes/intelligence_agents/base.py) for all LLM gateway plumbing.
+
+Two Layer III agents remain generic UniversalNode stubs, deliberately excluded from every prior batch because they don't share the same upstream contract as the other four:
+
+flow-agent ("Flow Analyst") — per the product's own architecture doc (docs/Full context.md §3.1, §9.2's MERCURY), this agent's edge is supposed to come from order-book microstructure: bid/ask volume imbalance, absorption, book skew — not from price/RSI or from news. It needs its own Layer I data source (orderbook-depth), which today is also a generic UniversalNode stub, just like news-stream was before Phase 17.
+contrarian-agent — this one needs no new external data at all. Structurally, it needs an upstream Signal (another agent's already-computed directional view) as its input, not a NewsFeed or FeatureVector. Its entire reason to exist is to contest or fade another agent's conviction — a fundamentally different node-graph position than every agent built so far, all of which independently form a view from raw data.
+
+Your job this phase: build both, correctly scoped for what's actually achievable — real order-book depth for flow-agent in live/paper modes (Binance's REST order-book endpoint gives you the current book, not history), with an honestly-labeled volatility/wick-based proxy for historical/walk-forward/Monte-Carlo modes (no free source of historical L2 order-book depth exists for retrospective replay — say so plainly, exactly as Phase 17 was honest about its own scope boundaries). And build contrarian-agent as a structurally distinct node type that consumes an upstream Signal, with its own deterministic "fade excessive conviction" logic, using the same LlmAgentNode base class as every other agent.
+
+1. Mandatory Step Zero: audit before writing any code
+
+Read and summarize (real vs. mock) before making any change:
+
+apps/engine/app/nodes/universal.py — the "data" branch's handling of orderbook-depth (note: it currently emits depthLevels from config and nothing else real), and the "agents" branch's generic handling of flow-agent and contrarian-agent (confirm both currently route through the exact same RSI-threshold heuristic as every other unbuilt agent — there is no existing differentiation to preserve).
+apps/engine/app/nodes/registry.py — confirm the current create_node_factory(...) entries for orderbook-depth, flow-agent, contrarian-agent.
+apps/engine/app/nodes/intelligence_agents/base.py and all four existing subclasses (technical_analyst.py, sentiment_analyst.py, macro_strategist.py, event_specialist.py) — confirm the base class's run() method only requires two overridden hooks (compute_deterministic_baseline, build_feature_summary) and has no hidden assumption that upstream input is NewsFeed- or FeatureVector-shaped — verify by reading the actual find_upstream(ctx, output_type) helper signature; it takes an arbitrary output_type string, so finding a "Signal"-typed upstream output instead of "NewsFeed" should require zero base-class changes. Confirm this claim against the code, don't assume it.
+apps/engine/app/data/news_ingest.py and apps/engine/app/data/binance_ingest.py — your structural templates: a standalone ingestion function, an idempotent upsert pattern, a scheduler registration in main.py's lifespan on the shared AsyncIOScheduler.
+apps/engine/app/data/macro_blackout.py — the ctx.db is None vs. DB-backed dual path pattern Phase 17 established for historical-vs-live data access. flow-agent's data source needs the same dual-path treatment, for the same reason.
+apps/engine/app/nodes/base.py — confirm NodeContext's current fields (mode, user_id, bot_id, run_id, live_session_id, db, historical_window, macro_events_cache from Phase 17). You may need one more optional field this phase (see Task 2).
+apps/web/mock/layers.ts — find the ComponentDef entries for orderbook-depth, flow-agent, contrarian-agent. Confirm whether flow-agent/contrarian-agent already have a model-select field (matching technical-agent's) for LLM provider/BYOK configuration — add one if missing, following the exact pattern used for the Phase 16 agents, no other frontend changes.
+apps/engine/app/graph/validate.py — confirm whether any structural rule currently prevents or allows an edge from one agents-layer node into another (i.e., can technical-agent's output already legally feed contrarian-agent's input in the graph compiler?). Per COMPONENT_LAYER_MAP, both are tagged 'agents' — check whether any existing rule forbids agent-to-agent edges. If none does, no validator change is needed and you should say so; if one does, that is the one validator change this phase is allowed to make, and it must be narrowly scoped (permit agent→agent edges specifically for the case where the upstream node's output type is Signal, not a blanket loosening of all structural rules).
+apps/engine/tests/test_llm_gateway.py and the Phase 17 test_data_ingestion.py — confirm test fixture/mocking conventions so your new tests match exactly.
+
+Report all nine findings before proceeding.
+
+2. Task 1 — Real order-book depth: what's actually achievable, stated honestly
+
+Binance's public REST endpoint GET /api/v3/depth?symbol=BTCUSDT&limit=100 returns the current order book (top N bid/ask levels with price+quantity) — a real, live, free-to-query snapshot. It does not provide historical order-book state; Binance does not offer free retrospective L2 depth data, and third-party providers that do are paid. This is a hard, real constraint — do not attempt to fake around it with a misleading approximation presented as real data.
+
+Therefore:
+
+paper and live modes: fetch a real, current order-book snapshot from Binance, compute genuine bid/ask volume imbalance from it. This is real data, real signal.
+historical/walk-forward/monte-carlo modes: use a clearly-labeled proxy computed from the OHLCV candle itself — e.g. (close - open) / (high - low) as a crude stand-in for directional pressure within the bar, plus relative volume vs. a rolling average as a stand-in for participation intensity. Label this proxy explicitly in the output ("dataQuality": "proxy_from_ohlcv" vs. "dataQuality": "real_orderbook") so nothing downstream or in any report can mistake one for the other. This exact dataQuality field is new and additive — it does not exist on any other node's output today, and its presence here is specifically because this is the one node in the system with a genuinely bifurcated real/proxy data quality depending on mode, unlike every prior data node which is either fully real or fully honest-stub.
+2.1 apps/engine/app/data/orderbook_snapshot.py (new file)
+python
+async def fetch_orderbook_snapshot(symbol: str = "BTCUSDT", limit: int = 100) -> Optional[dict]:
+    """
+    Fetches the current order book from Binance's public REST depth endpoint.
+    Returns { bids: [[price, qty], ...], asks: [[price, qty], ...], symbol, fetched_at }
+    or None on any network/API failure (never raises — callers must treat None as
+    'no real snapshot available right now', with a graceful degradation path, not a crash).
+    """
+
+def compute_imbalance(bids: list, asks: list, depth_levels: int = 20) -> dict:
+    """
+    Sums bid volume and ask volume across the top `depth_levels` on each side.
+    Returns { bidVolume, askVolume, imbalanceRatio, imbalancePct }
+    where imbalanceRatio = bidVolume / max(askVolume, epsilon), and imbalancePct
+    normalizes this into a -1.0 (heavy sell pressure) to +1.0 (heavy buy pressure) scale,
+    e.g. imbalancePct = (bidVolume - askVolume) / (bidVolume + askVolume).
+    """
+
+No database table is required for this task — unlike news, there is nothing meaningful to cache for later historical replay (a stale order-book snapshot from an hour ago tells you nothing useful about now, and it can never be used for true historical backtesting per the constraint above). Fetch live, use immediately, discard. This is the correct, honest design — do not build a orderbook_snapshots table that would create a false impression of a growing historical dataset that's actually useless for its stated purpose.
+
+3. Task 2 — OrderbookDepthNode (Layer I, component_id = "orderbook-depth")
+
+New file apps/engine/app/nodes/data_collection/orderbook_depth.py:
+
+python
+class OrderbookDepthNode:
+    component_id = "orderbook-depth"
+
+    async def run(self, ctx: NodeContext, config: dict) -> dict:
+        """
+        In paper/live mode: fetches a real Binance snapshot, computes real imbalance.
+        In historical/walk-forward/monte-carlo mode: computes the OHLCV-derived proxy.
+        Always returns the same output shape regardless of path, tagged with dataQuality.
+        """
+
+Output shape (a new port-type-consistent dict — check mock/layers.ts's PortType list from your audit for whether orderbook-depth's output is already typed as MarketData or something else; match whatever the frontend already expects, do not invent a new port type without checking first):
+
+python
+{
+    "type": "MarketData",  # or whatever mock/layers.ts already declares — verify, don't guess
+    "symbol": ...,
+    "timestamp": ...,
+    "bidVolume": ...,
+    "askVolume": ...,
+    "imbalanceRatio": ...,
+    "imbalancePct": ...,       # -1.0 to 1.0
+    "dataQuality": "real_orderbook" | "proxy_from_ohlcv",
+}
+
+Logic:
+
+if ctx.mode in ("paper", "live"): call fetch_orderbook_snapshot(symbol). If it succeeds, compute real imbalance via compute_imbalance, tag dataQuality: "real_orderbook". If the fetch fails (network error, rate limit, symbol not found), fall back to the proxy path below rather than raising or returning garbage — a transient Binance API hiccup during a live tick must never crash the bot's execution loop, matching the same resilience principle already established for fetch_latest_candle's error handling in binance_ingest.py.
+else (historical/walk-forward/monte-carlo, or paper/live fetch failure): compute the OHLCV-derived proxy from ctx.candle (open/high/low/close/volume), tag dataQuality: "proxy_from_ohlcv".
+Never let this node's output be silently indistinguishable between the two paths — dataQuality must always be present and correct.
+4. Task 3 — FlowAnalystNode (component_id = "flow-agent")
+
+New file apps/engine/app/nodes/intelligence_agents/flow_analyst.py, subclassing the existing LlmAgentNode base exactly like the four Phase 14–16 agents:
+
+python
+class FlowAnalystNode(LlmAgentNode):
+    component_id = "flow-agent"
+    default_provider_id = "deepseek"        # pick any provider already in mock/models.ts's
+    default_model_id = "deepseek-v3"        # PROVIDERS list you haven't used as a default yet,
+                                              # for variety across the agent roster — confirm
+                                              # the exact id string against mock/models.ts, don't guess
+    default_system_prompt = (
+        "You are an order-flow analyst. Given bid/ask volume imbalance data, form a "
+        "directional view based on where real buying or selling pressure is concentrated. "
+        "Weight your conviction by the data's quality — a real order-book reading deserves "
+        "more confidence than a proxy estimate derived from candle shape alone."
+    )
+
+compute_deterministic_baseline: find the upstream MarketData-typed (or whatever the real port type is per your audit) output from OrderbookDepthNode specifically — you may need to disambiguate from ohlcv-feed's own MarketData output if both are present in the same graph; check for the presence of an imbalancePct key as the disambiguator, since only OrderbookDepthNode's output has it. If no such upstream output exists at all: return the standard "no data" fallback shape (applied_rule: "Default Flat (No Data)", no_data: True) — same convention every other agent already uses.
+
+If found:
+
+threshold = cfg.get("imbalanceThreshold", 0.25).
+imbalancePct > threshold → long; < -threshold → short; else flat.
+Confidence must be scaled down when dataQuality == "proxy_from_ohlcv" — e.g. cap proxy-mode confidence at 0.65 regardless of how strong the raw imbalance reading is, while real-orderbook-mode confidence can scale normally up to the usual 0.90-ish ceiling other agents use. This is the concrete mechanism that makes the dataQuality distinction actually matter to trading behavior, not just a cosmetic label — a strategy backtested on the proxy should never look as confident as one that will actually run on real order-book data live, or the backtest would be misleadingly optimistic about this specific agent's conviction.
+applied_rule must name which data quality path was used, e.g. "Flow_Imbalance_Bullish_RealOrderbook (> 0.25)" vs. "Flow_Imbalance_Bullish_ProxyEstimate (> 0.25)" — this distinction must be visible in the trade audit trail, not buried.
+
+build_feature_summary: {"imbalance_pct": ..., "bid_volume": ..., "ask_volume": ..., "data_quality": ..., "close": current_close}.
+
+5. Task 4 — ContrarianAgentNode (component_id = "contrarian-agent")
+
+New file apps/engine/app/nodes/intelligence_agents/contrarian.py, also subclassing LlmAgentNode. This one is structurally different from every other agent — it consumes an upstream Signal, not raw market/news data:
+
+python
+class ContrarianAgentNode(LlmAgentNode):
+    component_id = "contrarian-agent"
+    default_provider_id = "anthropic"
+    default_model_id = "claude-haiku"        # confirm exact id against mock/models.ts
+    default_system_prompt = (
+        "You are a contrarian analyst. Your job is to identify when another agent's "
+        "conviction may be overextended — excessive confidence is often a late-stage "
+        "signal, not a strong one. You do not automatically oppose every signal; you "
+        "only push back when the incoming conviction looks crowded or overconfident. "
+        "Absent that condition, defer to the incoming view rather than manufacturing "
+        "disagreement for its own sake."
+    )
+
+compute_deterministic_baseline:
+
+Find the first upstream output with type == "Signal" — reuse self.find_upstream(ctx, "Signal"), which the base class already provides (per your Step Zero audit finding #3, this requires zero base-class changes). If none exists: standard "no data" fallback (applied_rule: "Default Flat (No Data)" — but phrase the rationale/reasoning specifically as "No upstream directional signal to evaluate", since "no data" here means something structurally different than it does for technical-agent — a contrarian agent's "no data" is "nothing to contest", not "no market features available"; make this distinction clear in the returned text, not just internally).
+If found, read incoming_direction = signal["direction"], incoming_confidence = signal.get("confidence", 0.5).
+Fade logic: only take a contrarian (opposite-direction) position when incoming confidence exceeds a high bar — fade_threshold = cfg.get("fadeThreshold", 0.85). If incoming_confidence >= fade_threshold and incoming_direction != "flat": take the opposite direction, with a confidence that is deliberately moderate, not equally extreme (e.g. min(0.70, 0.40 + (incoming_confidence - fade_threshold) * 2)) — a contrarian call should never claim higher conviction than the very consensus it's fading, since that would be internally incoherent; applied_rule: "Contrarian_Fade_Overextended_Conviction (>= 0.85)".
+If incoming confidence is below the fade threshold, or direction is flat: defer — return direction: incoming_direction (i.e., agree, don't manufacture contrarian noise) with a modestly reduced confidence relative to the incoming signal (e.g. incoming_confidence * 0.8), applied_rule: "Contrarian_Defers_No_Crowding_Detected", and a rationale that says plainly it found no evidence of overextension and is not overriding the incoming view. This matters: a contrarian agent that always opposes is just a sign-flipper, not a genuine "fade the crowd" heuristic, and the system prompt above explicitly instructs the LLM path the same way — the deterministic baseline must model the same discipline the prompt asks the LLM for, or the two paths would contradict each other's stated philosophy.
+
+build_feature_summary: {"incoming_direction": ..., "incoming_confidence": ..., "incoming_rationale": signal.get("rationale", ""), "close": current_close} — give the LLM the upstream agent's own stated reasoning as context, not just its number, so it can genuinely evaluate whether that reasoning sounds crowded/overextended versus well-founded.
+
+6. Task 5 — NodeContext / graph considerations
+
+Per your Step Zero audit finding #6, no new NodeContext field is anticipated for this task — FlowAnalystNode and ContrarianAgentNode both work entirely off ctx.upstream_outputs, ctx.candle, and ctx.mode, all of which already exist. If your audit surfaces a genuine need for something new, add the minimal field with a safe default, following the exact precedent Phase 14 (mode/user_id/db/etc.) and Phase 17 (macro_events_cache) both set — additive only, never a breaking signature change to run_one_bar/build_node_instances.
+
+Per your Step Zero audit finding #8: if graph/validate.py currently forbids or has no opinion on agent-to-agent edges, document your finding. If (and only if) it actively blocks a Signal-typed output from feeding another agents-layer node's input, add the narrowest possible fix — do not touch any other validation rule in that file, and do not weaken the existing rule that execution nodes can't connect directly to data-collection nodes, or any other existing structural check.
+
+7. Task 6 — Registry and frontend field check
+7.1 apps/engine/app/nodes/registry.py
+python
+"orderbook-depth": OrderbookDepthNode,
+"flow-agent": FlowAnalystNode,
+"contrarian-agent": ContrarianAgentNode,
+7.2 apps/web/mock/layers.ts
+
+Per audit finding #7: add a model-select field to flow-agent and contrarian-agent's ComponentDef entries if missing, mirroring technical-agent's exactly (same field key, same default ModelSelection shape with useByok: false). If orderbook-depth doesn't already expose a depthLevels/similar config field your Python code reads (cfg.get("imbalanceThreshold", ...), compute_imbalance's depth_levels param), confirm the field key names match what's already there rather than inventing new ones the frontend doesn't send. No other frontend changes.
+
+8. Task 7 — Tests
+
+New apps/engine/tests/test_flow_and_contrarian_agents.py, matching the exact conventions of test_llm_gateway.py/test_data_ingestion.py:
+
+compute_imbalance() with known bid/ask volumes produces the correct imbalanceRatio/imbalancePct — a simple, deterministic unit test, no mocking needed.
+OrderbookDepthNode.run() in mode="paper" with a mocked successful Binance depth response returns dataQuality: "real_orderbook" and correct imbalance figures; with a mocked failed/erroring fetch, falls back to dataQuality: "proxy_from_ohlcv" without raising.
+OrderbookDepthNode.run() in mode="historical" always uses the proxy path and never attempts an HTTP call (mock httpx.AsyncClient.get/.post and assert not called) — mirroring the exact "never call external services in historical mode" discipline already proven for the LLM gateway and news ingestion.
+FlowAnalystNode's deterministic baseline: confirm confidence is capped lower when dataQuality == "proxy_from_ohlcv" versus the same imbalance magnitude with dataQuality == "real_orderbook" — this is the load-bearing test proving the data-quality-aware confidence scaling actually works, not just exists in a comment.
+FlowAnalystNode in historical mode never invokes the LLM gateway (mirroring every prior agent's equivalent test).
+FlowAnalystNode in paper mode with a mocked successful LLM response produces the expected [LLM]-prefixed rationale and a real llm_call_log row, and on failure falls back to the exact deterministic baseline — same structure as every prior agent's end-to-end test.
+ContrarianAgentNode with a strongly confident upstream Signal (e.g. confidence: 0.92, direction: "long") produces a "short" (opposite) deterministic baseline with moderate, not extreme, confidence, and applied_rule naming the fade.
+ContrarianAgentNode with a modestly confident upstream Signal (e.g. confidence: 0.55) defers — same direction as the incoming signal, reduced confidence, and applied_rule naming the deferral, not a fade.
+ContrarianAgentNode with no upstream Signal present at all returns the "nothing to contest" flat fallback, distinctly worded from every other agent's "no data" fallback per Task 4 step 1.
+Confirm the full pre-existing test suites (test_llm_gateway.py, test_data_ingestion.py) still pass unmodified after this phase.
+9. Explicit non-goals for this phase
+
+Do not:
+
+Build a database table for order-book snapshots — per Task 1, there is no honest use for one given the free-tier data constraint; don't build storage that implies a capability that doesn't exist.
+Touch fundamentals, options-chain, or onchain-feed — still generic stubs, still out of scope, no real data source has been designed for them yet.
+Touch ML ensemble, RL, debate/consensus, confidence calibration, OCULUS, or ChromaDB memory.
+Modify technical_analyst.py, sentiment_analyst.py, macro_strategist.py, event_specialist.py, apps/engine/app/llm/gateway.py, or key_vault.py — the base class and the four existing agents should require zero changes this phase; if you find yourself editing them, stop and reconcile against your Step Zero audit finding #3.
+Loosen graph/validate.py's structural rules beyond the one narrow, audit-justified fix described in Task 5, if even that turns out to be necessary.
+Modify supabase/migrations/0001–0012 or add a new migration — this phase needs no new tables per Task 1's reasoning.
+Add a paid order-book history API/vendor of any kind.
+10. Acceptance checklist
+ A clean Python import check on apps/engine passes with no errors.
+ npx tsc --noEmit in apps/web returns 0 errors.
+ All new and existing tests pass, including the new test_flow_and_contrarian_agents.py, and both prior test files (test_llm_gateway.py, test_data_ingestion.py) pass unmodified.
+ A live/paper-mode run of a bot containing orderbook-depth → flow-agent against a real, currently-reachable Binance symbol produces dataQuality: "real_orderbook" and a plausible, non-fabricated imbalance reading — spot-check by comparing against Binance's own order-book UI for the same symbol at roughly the same moment.
+ A historical-mode backtest of the same graph produces dataQuality:     "proxy_from_ohlcv" throughout, with flow-agent's confidence visibly capped lower than what the same imbalance magnitude would produce in real-orderbook mode — verify by comparing two trade audit trails side by side.
+ A graph with technical-agent → contrarian-agent (contrarian fed by technical analyst's Signal output) compiles and validates successfully — confirms the audit finding from Task 5/§1 point 8 was correctly resolved either way.
+ Feeding ContrarianAgentNode a synthetic upstream Signal with confidence 0.92 produces an opposite-direction, moderate-confidence fade; a 0.55-confidence input produces a same-direction deferral — both verified directly via unit test, not just manual inspection.
+ No secret/API key of any kind appears in any error message, log line, or audit payload produced by OrderbookDepthNode's Binance fetch failure path (mirrors the redaction discipline already established for the LLM gateway).
+ The final report explicitly states the Task 1 honesty caveat: flow-agent's data quality is genuinely bifurcated by mode (real order-book in paper/live, an OHLCV-derived proxy in historical/walk-forward/Monte-Carlo), this is a hard constraint of free-tier market data availability and not an oversight, and the dataQuality field plus confidence-scaling mechanism is how the system stays honest about this to itself (in the audit trail) rather than silently blending the two.
+11. What this phase deliberately does not finish
+
+After this phase: all six originally-envisioned Layer III intelligence agents (technical-agent, sentiment-agent, macro-agent, event-agent, flow-agent, contrarian-agent) have real, differentiated deterministic logic, sharing one hardened LLM-gateway integration. fundamentals, options-chain, and onchain-feed (Layer I) remain unbuilt generic stubs — no agent currently depends on them, so they are lower priority than what comes next. Per the Phase 17 roadmap, the next phase should be the first real ML model (Layer IV) — start with one, not all seven originally envisioned in docs/Full context.md §9.4, and it should very likely consume the now-real feature set this phase and Phase 17 finished building (price features, real sentiment, real order-flow imbalance) rather than reasoning over a still-fake input, continuing the same "make the foundation real before building on it" discipline this phase and Phase 17 both followed. Say this plainly in your summary.

@@ -53,67 +53,89 @@ function mapPresetRow(
   }
 }
 
-export async function listMyPresets(): Promise<MyPreset[]> {
-  const supabase = createClient()
-  const { data, error } = await supabase
-    .from('presets')
-    .select(`
-      *,
-      preset_versions (
-        id,
-        label,
-        note,
-        created_at
-      )
-    `)
-    .order('updated_at', { ascending: false })
+import { MY_PRESETS } from '@/mock/data'
 
-  if (error || !data) {
-    console.error('Error fetching presets:', error)
-    return []
+export async function listMyPresets(): Promise<MyPreset[]> {
+  let dbPresets: MyPreset[] = []
+  try {
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from('presets')
+      .select(`
+        *,
+        preset_versions (
+          id,
+          label,
+          note,
+          created_at
+        )
+      `)
+      .order('updated_at', { ascending: false })
+
+    if (data && !error && data.length > 0) {
+      dbPresets = data.map((row) => {
+        const versions = (row.preset_versions || [])
+          .map((v: any) => ({
+            id: v.id,
+            label: v.label,
+            createdAt: v.created_at,
+            note: v.note || '',
+          }))
+          .sort(
+            (a: any, b: any) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+          )
+
+        return mapPresetRow(row, versions)
+      })
+    }
+  } catch (e) {
+    // Ignore error
   }
 
-  return data.map((row) => {
-    const versions = (row.preset_versions || []).map((v: any) => ({
-      id: v.id,
-      label: v.label,
-      createdAt: v.created_at,
-      note: v.note || '',
-    })).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-
-    return mapPresetRow(row, versions)
-  })
+  const existingIds = new Set(dbPresets.map((p) => p.id))
+  return [...dbPresets, ...MY_PRESETS.filter((p) => !existingIds.has(p.id))]
 }
 
 export async function getPreset(id: string): Promise<MyPreset | null> {
-  const supabase = createClient()
-  const { data: row, error } = await supabase
-    .from('presets')
-    .select(`
-      *,
-      preset_versions (
-        id,
-        label,
-        note,
-        created_at,
-        graph
-      )
-    `)
-    .eq('id', id)
-    .single()
+  try {
+    const supabase = createClient()
+    const { data: row, error } = await supabase
+      .from('presets')
+      .select(`
+        *,
+        preset_versions (
+          id,
+          label,
+          note,
+          created_at,
+          graph
+        )
+      `)
+      .eq('id', id)
+      .single()
 
-  if (error || !row) {
-    return null
+    if (row && !error) {
+      const versions = (row.preset_versions || [])
+        .map((v: any) => ({
+          id: v.id,
+          label: v.label,
+          createdAt: v.created_at,
+          note: v.note || '',
+        }))
+        .sort(
+          (a: any, b: any) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        )
+
+      return mapPresetRow(row, versions)
+    }
+  } catch (e) {
+    // Ignore error
   }
 
-  const versions = (row.preset_versions || []).map((v: any) => ({
-    id: v.id,
-    label: v.label,
-    createdAt: v.created_at,
-    note: v.note || '',
-  })).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-
-  return mapPresetRow(row, versions)
+  const fallback = MY_PRESETS.find((p) => p.id === id)
+  return fallback || null
 }
 
 export async function createPreset(input: CreatePresetInput): Promise<MyPreset> {

@@ -40,55 +40,71 @@ function mapBotRow(row: any, versions: BotVersion[] = []): Bot {
   }
 }
 
+import { BOTS } from '@/mock/data'
+
 export async function listBots(includeArchived = false): Promise<Bot[]> {
-  const supabase = createClient()
-  let query = supabase
-    .from('bots')
-    .select('*')
-    .order('updated_at', { ascending: false })
+  let dbBots: Bot[] = []
+  try {
+    const supabase = createClient()
+    let query = supabase
+      .from('bots')
+      .select('*')
+      .order('updated_at', { ascending: false })
 
-  if (!includeArchived) {
-    query = query.eq('archived', false)
+    if (!includeArchived) {
+      query = query.eq('archived', false)
+    }
+
+    const { data, error } = await query
+
+    if (data && !error && data.length > 0) {
+      dbBots = data.map((b) => mapBotRow(b))
+    }
+  } catch (e) {
+    // Ignore error
   }
 
-  const { data, error } = await query
+  const existingIds = new Set(dbBots.map((b) => b.id))
+  const fallbackBots = includeArchived
+    ? BOTS
+    : BOTS.filter((b) => !b.archived)
 
-  if (error || !data) {
-    console.error('Error fetching bots:', error)
-    return []
-  }
-
-  return data.map((b) => mapBotRow(b))
+  return [...dbBots, ...fallbackBots.filter((b) => !existingIds.has(b.id))]
 }
 
 export async function getBot(id: string): Promise<Bot | null> {
-  const supabase = createClient()
-  const { data: botRow, error: botError } = await supabase
-    .from('bots')
-    .select('*')
-    .eq('id', id)
-    .single()
+  try {
+    const supabase = createClient()
+    const { data: botRow, error: botError } = await supabase
+      .from('bots')
+      .select('*')
+      .eq('id', id)
+      .single()
 
-  if (botError || !botRow) {
-    return null
+    if (botRow && !botError) {
+      const { data: versionRows } = await supabase
+        .from('bot_versions')
+        .select('*')
+        .eq('bot_id', id)
+        .order('created_at', { ascending: false })
+
+      const versions: BotVersion[] = (versionRows || []).map((v) => ({
+        id: v.id,
+        label: v.label,
+        createdAt: v.created_at,
+        note: v.note || '',
+        nodeCount: v.node_count,
+        graph: v.graph,
+      }))
+
+      return mapBotRow(botRow, versions)
+    }
+  } catch (e) {
+    // Ignore error
   }
 
-  const { data: versionRows } = await supabase
-    .from('bot_versions')
-    .select('*')
-    .eq('bot_id', id)
-    .order('created_at', { ascending: false })
-
-  const versions: BotVersion[] = (versionRows || []).map((v) => ({
-    id: v.id,
-    label: v.label,
-    createdAt: v.created_at,
-    note: v.note || '',
-    nodeCount: v.node_count,
-    graph: v.graph,
-  }))
-
-  return mapBotRow(botRow, versions)
+  const fallback = BOTS.find((b) => b.id === id)
+  return fallback || null
 }
 
 export async function createBot(input: CreateBotInput = {}): Promise<Bot> {

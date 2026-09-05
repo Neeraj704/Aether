@@ -147,6 +147,11 @@ export interface LiveSessionPosition {
 
 export type LiveTrade = BacktestRun['trades'][number] & {
   executionFlow?: any
+  entryPrice?: number
+  exitPrice?: number
+  stopPrice?: number | null
+  sessionId?: string
+  confidence?: number
 }
 
 export interface LiveSessionSummary {

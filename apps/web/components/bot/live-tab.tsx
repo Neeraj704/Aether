@@ -26,6 +26,9 @@ import {
   TrendingDown,
   Coins,
   Calculator,
+  Volume2,
+  VolumeX,
+  Flame,
 } from 'lucide-react'
 import type { Bot } from '@/mock/data'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -90,6 +93,25 @@ function formatLogTimestamp(timeStr: string) {
   return timeStr
 }
 
+function playFillChime() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime)
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12)
+    gain.gain.setValueAtTime(0.15, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25)
+    osc.start()
+    osc.stop(ctx.currentTime + 0.25)
+  } catch {
+    // audio context blocked or unsupported
+  }
+}
+
 interface LiveTabProps {
   bot: Bot
   onSwitchTab?: (tab: string) => void
@@ -104,13 +126,17 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
   const [actionLoading, setActionLoading] = useState(false)
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null)
   const [logFilter, setLogFilter] = useState<string>('all')
+  const [simSpeed, setSimSpeed] = useState<'1x' | '5x' | '15x' | '60x'>('1x')
+  const [soundOn, setSoundOn] = useState(true)
+  const [simPosition, setSimPosition] = useState<any | null>(null)
+  const [simPriceDelta, setSimPriceDelta] = useState<number>(0)
 
   // Start Modal State
   const [startModalOpen, setStartModalOpen] = useState(false)
   const [startSymbol, setStartSymbol] = useState('BTCUSDT')
   const [startCapital, setStartCapital] = useState(100000)
 
-  // Real-time 1-minute countdown timer (synchronized to next candle boundary)
+  // Real-time countdown timer (synchronized to next candle boundary)
   const [secondsToNextBar, setSecondsToNextBar] = useState(60)
 
   // Fetch live state from engine (always allowed so we can inspect error/stopped state)
@@ -165,26 +191,72 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
     }
   }, [insufficientCreditsNode, hasNotifiedCredits])
 
+  // Simulation trades & position overrides for demo recording
+  const [simTrades, setSimTrades] = useState<LiveTrade[]>([])
+
+  // Extract configured resolution & interval from bot graph or backend state
+  const ohlcvNode = bot.graph?.nodes?.find((n: any) => n.componentId === 'ohlcv-feed')
+  const botResolution = (ohlcvNode?.config?.resolution as string) || liveState?.resolution || '1m'
+  const botInterval = (ohlcvNode?.config?.interval as number) || liveState?.interval || (botResolution === '1m' ? 60 : 900)
+  const intervalDisplay = botInterval < 60 ? `${botInterval}s` : botResolution
+
+  // Extract all symbols configured on bot plus popular crypto pairs for selection
+  const availableSymbols = useMemo(() => {
+    const list: string[] = []
+    if (ohlcvNode?.config?.symbol) {
+      list.push(String(ohlcvNode.config.symbol).toUpperCase())
+    }
+    if (Array.isArray(ohlcvNode?.config?.symbols)) {
+      ohlcvNode.config.symbols.forEach((s: string) => {
+        const up = String(s).toUpperCase()
+        if (!list.includes(up)) list.push(up)
+      })
+    }
+    if (session?.symbol) {
+      const up = session.symbol.toUpperCase()
+      if (!list.includes(up)) list.unshift(up)
+    }
+    const defaults = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT', 'XRPUSDT']
+    defaults.forEach((s) => {
+      if (!list.includes(s)) list.push(s)
+    })
+    return list
+  }, [ohlcvNode, session?.symbol])
+
+  const [selectedChartSymbol, setSelectedChartSymbol] = useState<string>('')
+  const activeSymbol = selectedChartSymbol || session?.symbol || candle?.symbol || (ohlcvNode?.config?.symbol as string) || 'BTCUSDT'
+
+  // Active position combining engine position and simulated position
+  const activePosition = useMemo(() => {
+    if (simPosition) return simPosition
+    return position
+  }, [simPosition, position])
+
+  // Combined trades list
+  const combinedTrades = useMemo(() => {
+    return [...simTrades, ...trades]
+  }, [simTrades, trades])
+
   // Trade Decision & DAG Flow Inspector State
   const [inspectTrade, setInspectTrade] = useState<TradeInspectionData | null>(null)
   const [tradeModalOpen, setTradeModalOpen] = useState(false)
 
   const openPositionInspector = () => {
-    if (!position) return
+    if (!activePosition) return
     const tradeData: TradeInspectionData = {
       isOpenPosition: true,
-      symbol: session?.symbol || 'BTCUSDT',
-      side: position.side || 'long',
-      size: position.size || 0,
-      entryPrice: position.entry_price || 0,
-      stopPrice: position.stop_price,
-      confidence: position.confidence || 0.75,
-      entryTime: position.entry_time || session?.lastBarTime || new Date().toISOString(),
-      entryCandle: position.entry_candle,
-      entryFeatures: position.entry_features,
-      entrySignal: position.entry_signal,
-      entryRisk: position.entry_risk,
-      rawPosition: position,
+      symbol: session?.symbol || activePosition.symbol || 'BTCUSDT',
+      side: activePosition.side || 'long',
+      size: activePosition.size || 0,
+      entryPrice: activePosition.entry_price || activePosition.entryPrice || 0,
+      stopPrice: activePosition.stop_price || activePosition.stopPrice,
+      confidence: activePosition.confidence || 0.85,
+      entryTime: activePosition.entry_time || activePosition.entryTime || session?.lastBarTime || new Date().toISOString(),
+      entryCandle: activePosition.entry_candle,
+      entryFeatures: activePosition.entry_features,
+      entrySignal: activePosition.entry_signal,
+      entryRisk: activePosition.entry_risk,
+      rawPosition: activePosition,
     }
     setInspectTrade(tradeData)
     setTradeModalOpen(true)
@@ -265,6 +337,150 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
     return () => clearInterval(interval)
   }, [isLive, isPollingActive, fetchState])
 
+  // Fast simulation interval loop when simSpeed !== '1x'
+  useEffect(() => {
+    if (simSpeed === '1x') return
+
+    const intervalMs = simSpeed === '5x' ? 3000 : simSpeed === '15x' ? 1200 : 400
+    const timer = setInterval(() => {
+      const stepDelta = (Math.random() - 0.48) * (activeSymbol.includes('BTC') ? 95 : 12)
+      setSimPriceDelta((prev) => prev + stepDelta)
+
+      // Decrement countdown faster
+      setSecondsToNextBar((prev) => {
+        if (prev <= (simSpeed === '60x' ? 15 : 6)) {
+          const newTime = new Date().toLocaleTimeString('en-IN', { hour12: false })
+          setAccumulatedLogs((logs) => [
+            {
+              id: `sim-bar-${Date.now()}`,
+              time: newTime,
+              type: 'features',
+              node: 'ta-indicators',
+              text: `Bar completed on ${activeSymbol}. Indicators updated: EMA_9=${(88000 + simPriceDelta).toFixed(1)}, RSI_14=${(45 + Math.random() * 20).toFixed(1)}`,
+            },
+            ...logs.slice(0, 1500),
+          ])
+          return 60
+        }
+        return Math.max(1, prev - (simSpeed === '60x' ? 12 : simSpeed === '15x' ? 4 : 2))
+      })
+    }, intervalMs)
+
+    return () => clearInterval(timer)
+  }, [simSpeed, activeSymbol, simPriceDelta])
+
+  const handleForceTick = () => {
+    setSecondsToNextBar(60)
+    const tickTime = new Date().toLocaleTimeString('en-IN', { hour12: false })
+    const price = (candle?.close || 88120) + simPriceDelta
+    const newLog: LiveLogEntry = {
+      id: `tick-${Date.now()}`,
+      time: tickTime,
+      type: 'signal',
+      node: 'multi-agent-orchestrator',
+      text: `Manual tick forced on ${activeSymbol} @ $${price.toFixed(2)}. Strategy DAG evaluated with confidence 84%.`,
+    }
+    setAccumulatedLogs((prev) => [newLog, ...prev])
+    if (soundOn) playFillChime()
+    toast.success('Candle Tick Forced', `Evaluated all DAG nodes on ${activeSymbol} @ $${price.toFixed(2)}`)
+    fetchState()
+  }
+
+  const handleSimFill = (side: 'long' | 'short') => {
+    const ltp = (candle?.close || 88150) + simPriceDelta
+    const isLong = side === 'long'
+    const stopPrice = isLong ? ltp * 0.975 : ltp * 1.025
+    const size = activeSymbol.includes('BTC') ? 0.25 : 2.5
+    const newPos = {
+      symbol: activeSymbol,
+      side,
+      size,
+      entry_price: ltp,
+      stop_price: stopPrice,
+      confidence: 0.88,
+      entry_time: new Date().toISOString(),
+      entry_candle: { open: ltp - 20, high: ltp + 40, low: ltp - 30, close: ltp, volume: 142.5 },
+      entry_features: { rsi: isLong ? 34.2 : 68.4, ema9: ltp * 0.99, ema21: ltp * 0.98 },
+      entry_signal: { action: isLong ? 'BUY' : 'SELL', confidence: 0.88, reason: 'Trend alignment & momentum cross' },
+      entry_risk: { maxLoss: 5000, riskReward: 2.8, sizedQuantity: size, approved: true },
+    }
+    setSimPosition(newPos)
+    const logTime = new Date().toLocaleTimeString('en-IN', { hour12: false })
+    setAccumulatedLogs((prev) => [
+      {
+        id: `fill-${Date.now()}`,
+        time: logTime,
+        type: 'fill',
+        node: 'paper-executor',
+        text: `EXECUTED SIMULATED ${side.toUpperCase()} FILL on ${activeSymbol}: ${size} units @ $${ltp.toFixed(2)} (SL: $${stopPrice.toFixed(2)})`,
+      },
+      ...prev,
+    ])
+    if (soundOn) playFillChime()
+    toast.success(`Simulated ${side.toUpperCase()} Position Opened`, `${size} ${activeSymbol} @ $${ltp.toFixed(2)}`)
+  }
+
+  const handleCloseSimPosition = () => {
+    if (!activePosition) return
+    const ltp = (candle?.close || 88150) + simPriceDelta
+    const entryP = Number(activePosition.entry_price || activePosition.entryPrice || ltp)
+    const size = Number(activePosition.size || 0.25)
+    const isLong = activePosition.side === 'long'
+    const pnl = isLong ? (ltp - entryP) * size : (entryP - ltp) * size
+    const pnlPct = entryP > 0 ? (pnl / (entryP * size)) * 100 : 0
+
+    const closedTrade: LiveTrade = {
+      id: `sim-closed-${Date.now()}`,
+      symbol: activeSymbol,
+      side: activePosition.side,
+      size,
+      entryPrice: entryP,
+      exitPrice: ltp,
+      pnl,
+      pnlPct,
+      confidence: activePosition.confidence || 0.85,
+      entryTime: activePosition.entry_time || activePosition.entryTime || new Date().toISOString(),
+      exitTime: new Date().toISOString(),
+      triggerNode: 'Manual Demo Exit',
+    }
+
+    setSimTrades((prev) => [closedTrade, ...prev])
+    setSimPosition(null)
+    const logTime = new Date().toLocaleTimeString('en-IN', { hour12: false })
+    setAccumulatedLogs((prev) => [
+      {
+        id: `close-${Date.now()}`,
+        time: logTime,
+        type: 'fill',
+        node: 'paper-executor',
+        text: `CLOSED POSITION on ${activeSymbol} @ $${ltp.toFixed(2)}. Realized P&L: ₹${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`,
+      },
+      ...prev,
+    ])
+    if (soundOn) playFillChime()
+    toast.info('Position Closed', `Realized P&L: ₹${pnl.toFixed(2)} (${pnlPct.toFixed(2)}%)`)
+  }
+
+  const handleVolatilityShock = () => {
+    const shockPct = (Math.random() > 0.5 ? 1 : -1) * 0.024
+    const delta = (candle?.close || 88000) * shockPct
+    setSimPriceDelta((prev) => prev + delta)
+    const shockLtp = (candle?.close || 88000) + simPriceDelta + delta
+    const logTime = new Date().toLocaleTimeString('en-IN', { hour12: false })
+    setAccumulatedLogs((prev) => [
+      {
+        id: `shock-${Date.now()}`,
+        time: logTime,
+        type: 'warn',
+        node: 'risk-gate',
+        text: `VOLATILITY SHOCK INJECTED: Price swung ${(shockPct * 100).toFixed(2)}% to $${shockLtp.toFixed(2)}. Stop-loss triggers & exposure limits verified.`,
+      },
+      ...prev,
+    ])
+    if (soundOn) playFillChime()
+    toast.warn('Volatility Shock Injected', `Market shifted ${(shockPct * 100).toFixed(2)}% to $${shockLtp.toFixed(2)}`)
+  }
+
   const handleStartLive = async () => {
     setActionLoading(true)
     try {
@@ -324,26 +540,20 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
   const [tradeHistoryFilter, setTradeHistoryFilter] = useState<'all' | 'session' | 'long' | 'short'>('all')
 
   const sessionTrades = useMemo(() => {
-    if (!session?.id) return trades
-    return trades.filter((t: any) => t.sessionId === session.id)
-  }, [trades, session?.id])
+    if (!session?.id) return combinedTrades
+    return combinedTrades.filter((t: any) => t.sessionId === session.id || t.id.startsWith('sim-'))
+  }, [combinedTrades, session?.id])
 
   const displayedTrades = useMemo(() => {
-    return trades.filter((t: any) => {
+    return combinedTrades.filter((t: any) => {
       if (tradeHistoryFilter === 'session') {
-        return session?.id ? t.sessionId === session.id : true
+        return session?.id ? (t.sessionId === session.id || t.id.startsWith('sim-')) : true
       }
       if (tradeHistoryFilter === 'long') return t.side === 'long'
       if (tradeHistoryFilter === 'short') return t.side === 'short'
       return true
     })
-  }, [trades, tradeHistoryFilter, session?.id])
-
-  // Extract configured resolution & interval from bot graph or backend state
-  const ohlcvNode = bot.graph?.nodes?.find((n: any) => n.componentId === 'ohlcv-feed')
-  const botResolution = (ohlcvNode?.config?.resolution as string) || liveState?.resolution || '1m'
-  const botInterval = (ohlcvNode?.config?.interval as number) || liveState?.interval || (botResolution === '1m' ? 60 : 900)
-  const intervalDisplay = botInterval < 60 ? `${botInterval}s` : botResolution
+  }, [combinedTrades, tradeHistoryFilter, session?.id])
 
   const currentEquity = session?.equity ?? session?.capital ?? 100000
   const startingCapital = session?.capital ?? 100000
@@ -354,32 +564,6 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
     if (logFilter === 'all') return true
     return log.type === logFilter
   })
-
-  // Extract all symbols configured on bot plus popular crypto pairs for selection
-  const availableSymbols = useMemo(() => {
-    const list: string[] = []
-    if (ohlcvNode?.config?.symbol) {
-      list.push(String(ohlcvNode.config.symbol).toUpperCase())
-    }
-    if (Array.isArray(ohlcvNode?.config?.symbols)) {
-      ohlcvNode.config.symbols.forEach((s: string) => {
-        const up = String(s).toUpperCase()
-        if (!list.includes(up)) list.push(up)
-      })
-    }
-    if (session?.symbol) {
-      const up = session.symbol.toUpperCase()
-      if (!list.includes(up)) list.unshift(up)
-    }
-    const defaults = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT', 'XRPUSDT']
-    defaults.forEach((s) => {
-      if (!list.includes(s)) list.push(s)
-    })
-    return list
-  }, [ohlcvNode, session?.symbol])
-
-  const [selectedChartSymbol, setSelectedChartSymbol] = useState<string>('')
-  const activeSymbol = selectedChartSymbol || session?.symbol || candle?.symbol || (ohlcvNode?.config?.symbol as string) || 'BTCUSDT'
 
   // If bot is not live, has no past session, and has no error record: render clean EmptyState
   if (!isLive && !hasSession && !isError) {
@@ -581,6 +765,128 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
             <span>
               <strong>Paper trading only</strong> &mdash; Simulated execution environment. No real funds are being used.
             </span>
+          </div>
+
+          {/* Interactive Demo Simulation Controls Toolbar */}
+          <div className="rounded-xl border border-brand/30 bg-gradient-to-r from-brand/10 via-card/90 to-brand/5 p-3.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm backdrop-blur-sm">
+            <div className="flex items-center gap-2.5">
+              <div className="size-7 rounded-lg bg-brand/20 border border-brand/30 flex items-center justify-center text-brand">
+                <Zap className="size-4" />
+              </div>
+              <div>
+                <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  Live Test Controls & Simulation Deck
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-brand/20 text-brand border border-brand/30">
+                    DEMO MODE
+                  </span>
+                </span>
+                <span className="text-[10px] text-muted-foreground block">
+                  Accelerate candle ticks, inject fills, simulate volatility shocks & test audio alerts
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+              {/* Speed Multipliers */}
+              <div className="flex items-center bg-secondary/80 rounded-lg p-0.5 border border-border">
+                {(['1x', '5x', '15x', '60x'] as const).map((spd) => (
+                  <button
+                    key={spd}
+                    type="button"
+                    onClick={() => {
+                      setSimSpeed(spd)
+                      toast.info(`Simulation Speed: ${spd}`, spd === '1x' ? 'Real-time 1m cadence' : `Accelerated ${spd} ticker simulation`)
+                    }}
+                    className={cn(
+                      'px-2 py-1 text-[10px] font-mono font-medium rounded transition-all cursor-pointer',
+                      simSpeed === spd
+                        ? 'bg-brand text-black font-bold shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {spd}
+                  </button>
+                ))}
+              </div>
+
+              {/* Force Candle Tick */}
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={handleForceTick}
+                className="h-7 text-[11px] gap-1 bg-card/80 border-border hover:border-brand/50 hover:text-brand"
+                title="Force evaluate next candle now"
+              >
+                <Zap className="size-3 text-brand" />
+                Force Tick
+              </Button>
+
+              {/* Sim Long Fill */}
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => handleSimFill('long')}
+                className="h-7 text-[11px] gap-1 bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
+                title="Simulate a long market order fill"
+              >
+                <ArrowUpRight className="size-3" />
+                Test Long
+              </Button>
+
+              {/* Sim Short Fill */}
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => handleSimFill('short')}
+                className="h-7 text-[11px] gap-1 bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20"
+                title="Simulate a short market order fill"
+              >
+                <ArrowDownRight className="size-3" />
+                Test Short
+              </Button>
+
+              {/* Volatility Shock */}
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={handleVolatilityShock}
+                className="h-7 text-[11px] gap-1 bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20"
+                title="Inject sudden +/- 2.5% market swing"
+              >
+                <Flame className="size-3 text-amber-400" />
+                Shock
+              </Button>
+
+              {/* Audio Sound Toggle */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSoundOn(!soundOn)
+                  if (!soundOn) playFillChime()
+                }}
+                className={cn(
+                  'h-7 w-7 rounded-lg border flex items-center justify-center transition-colors cursor-pointer',
+                  soundOn
+                    ? 'bg-brand/15 border-brand/40 text-brand'
+                    : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground',
+                )}
+                title={soundOn ? 'Trade chime audio on' : 'Trade chime audio muted'}
+              >
+                {soundOn ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
+              </button>
+
+              {/* Close Sim Position if open */}
+              {activePosition && (
+                <Button
+                  size="xs"
+                  variant="destructive"
+                  onClick={handleCloseSimPosition}
+                  className="h-7 text-[10px] gap-1"
+                >
+                  Close Position
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Metrics Overview Grid */}
@@ -819,7 +1125,7 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
                   <Activity className="size-3.5 text-brand" />
                   Active Market Position
                 </h4>
-                {position ? (
+                {activePosition ? (
                   <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                     <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
                     Live Contract
@@ -831,11 +1137,11 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
                 )}
               </div>
               <span className="text-xs text-muted-foreground font-mono">
-                Symbol: {session?.symbol || 'BTCUSDT'} ({botResolution} Interval)
+                Symbol: {session?.symbol || activePosition?.symbol || 'BTCUSDT'} ({botResolution} Interval)
               </span>
             </CardHeader>
             <CardContent className="p-0 overflow-x-auto">
-              {position ? (
+              {activePosition ? (
                 <Table>
                   <THead className="bg-secondary/40 border-b border-border text-[11px]">
                     <TR>
@@ -853,15 +1159,15 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
                   </THead>
                   <TBody>
                     {(() => {
-                      const posSize = Number(position.size || 0)
-                      const entryP = Number(position.entry_price || 0)
-                      const isLong = position.side === 'long'
-                      const ltp = Number(candle?.close || entryP)
+                      const posSize = Number(activePosition.size || 0)
+                      const entryP = Number(activePosition.entry_price || activePosition.entryPrice || 0)
+                      const isLong = activePosition.side === 'long'
+                      const ltp = Number((candle?.close || entryP) + simPriceDelta)
                       const uPnl = posSize > 0 && entryP > 0
                         ? (isLong ? (ltp - entryP) * posSize : (entryP - ltp) * posSize)
                         : 0
                       const uPnlPct = (entryP * posSize) > 0 ? (uPnl / (entryP * posSize)) * 100 : 0
-                      const stopPrice = position.stop_price ? Number(position.stop_price) : null
+                      const stopPrice = activePosition.stop_price || activePosition.stopPrice ? Number(activePosition.stop_price || activePosition.stopPrice) : null
                       const stopDist = stopPrice && ltp > 0 ? Math.abs((stopPrice - ltp) / ltp) * 100 : null
 
                       return (
@@ -870,7 +1176,7 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
                           className="cursor-pointer transition-colors hover:bg-secondary/60 group"
                         >
                           <TD className="font-bold text-foreground group-hover:text-brand transition-colors">
-                            {session?.symbol || 'BTCUSDT'}
+                            {session?.symbol || activePosition.symbol || 'BTCUSDT'}
                           </TD>
                           <TD>
                             <Badge
@@ -879,7 +1185,7 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
                               className="uppercase font-mono text-[10px] inline-flex items-center gap-0.5"
                             >
                               {isLong ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
-                              {position.side}
+                              {activePosition.side}
                             </Badge>
                           </TD>
                           <TD numeric className="font-mono text-foreground font-semibold">
@@ -908,21 +1214,23 @@ export function LiveTab({ bot, onSwitchTab }: LiveTabProps) {
                             )}
                           </TD>
                           <TD numeric className="font-mono font-semibold text-brand">
-                            {Math.round((position.confidence || 0.75) * 100)}%
+                            {Math.round((activePosition.confidence || 0.75) * 100)}%
                           </TD>
                           <TD className="text-right pr-4">
-                            <Button
-                              size="xs"
-                              variant="outline"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                openPositionInspector()
-                              }}
-                              className="gap-1.5 text-xs font-mono group-hover:border-brand group-hover:text-brand"
-                            >
-                              <Eye className="size-3.5 text-brand" />
-                              Inspect Flow &rarr;
-                            </Button>
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  openPositionInspector()
+                                }}
+                                className="gap-1.5 text-xs font-mono group-hover:border-brand group-hover:text-brand"
+                              >
+                                <Eye className="size-3.5 text-brand" />
+                                Inspect Flow &rarr;
+                              </Button>
+                            </div>
                           </TD>
                         </TR>
                       )

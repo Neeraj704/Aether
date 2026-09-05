@@ -64,6 +64,25 @@ interface AuditLog {
   text: string
 }
 
+function playFillChime() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime)
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12)
+    gain.gain.setValueAtTime(0.15, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25)
+    osc.start()
+    osc.stop(ctx.currentTime + 0.25)
+  } catch {
+    // audio context blocked or unsupported
+  }
+}
+
 export default function LiveMonitoringPage() {
   const localBots = useWorkspace((s) => s.bots)
   const setBotStatus = useWorkspace((s) => s.setBotStatus)
@@ -71,6 +90,7 @@ export default function LiveMonitoringPage() {
   const [bots, setBots] = useState<Bot[]>([])
   const [activeSessions, setActiveSessions] = useState<ActiveLiveSession[]>([])
   const [allTrades, setAllTrades] = useState<GlobalLiveTradeItem[]>([])
+  const [simulatedPositions, setSimulatedPositions] = useState<PositionItem[]>([])
   const [inspectTrade, setInspectTrade] = useState<TradeInspectionData | null>(null)
   const [tradeModalOpen, setTradeModalOpen] = useState(false)
   const [detailedStates, setDetailedStates] = useState<Record<string, LiveStateResponse>>({})
@@ -79,6 +99,8 @@ export default function LiveMonitoringPage() {
   const [isStreaming, setIsStreaming] = useState(true)
   const [soundOn, setSoundOn] = useState(true)
   const [loading, setLoading] = useState(false)
+  const [simSpeed, setSimSpeed] = useState<'1x' | '5x' | '15x' | '60x'>('1x')
+  const [simulatedLtp, setSimulatedLtp] = useState<number>(88050.25)
   const [logFilter, setLogFilter] = useState<string>('all')
   const [logs, setLogs] = useState<AuditLog[]>([
     {
@@ -90,15 +112,14 @@ export default function LiveMonitoringPage() {
     },
   ])
 
-  // 1. Fetch real bots from Supabase on mount
+  // 1. Fetch real bots from Supabase / mock on mount
   useEffect(() => {
     let active = true
     listBots(true)
       .then((remoteBots) => {
         if (!active) return
         setBots(remoteBots || [])
-        // Also sync with workspace store so other tabs have the bots
-        for (const b of (remoteBots || [])) {
+        for (const b of remoteBots || []) {
           useWorkspace.getState().saveGraph(b.id, b.graph)
         }
       })
@@ -122,7 +143,6 @@ export default function LiveMonitoringPage() {
       setActiveSessions(sessions)
       setAllTrades(trades)
 
-      // Synchronize bot statuses with active sessions
       setBots((prevBots) => {
         const sessionBotIds = new Set(sessions.map((s) => s.botId))
         return prevBots.map((b) => {
@@ -133,7 +153,6 @@ export default function LiveMonitoringPage() {
         })
       })
 
-      // Fetch detailed state and rolling logs for each active session
       const stateMap: Record<string, LiveStateResponse> = {}
       const newLogs: AuditLog[] = []
 
@@ -176,41 +195,292 @@ export default function LiveMonitoringPage() {
     return () => clearInterval(interval)
   }, [refreshLiveSessions])
 
+  // Fast-Forward / High Speed Simulation Loop for recording demos
+  useEffect(() => {
+    if (simSpeed === '1x' || !isStreaming) return
+
+    const intervalMs = simSpeed === '60x' ? 800 : simSpeed === '15x' ? 1800 : 3500
+    const timer = setInterval(() => {
+      // Small random price walk
+      const delta = (Math.random() - 0.48) * 45
+      setSimulatedLtp((prev) => {
+        const nextPrice = Number((prev + delta).toFixed(2))
+        // Update simulated positions unrealized pnl
+        setSimulatedPositions((positions) =>
+          positions.map((pos) => {
+            const isLong = pos.side === 'long'
+            const uPnl = isLong
+              ? (nextPrice - pos.entryPrice) * pos.size
+              : (pos.entryPrice - nextPrice) * pos.size
+            const uPnlPct = (uPnl / (pos.entryPrice * pos.size)) * 100
+            return {
+              ...pos,
+              currentLtp: nextPrice,
+              unrealizedPnl: uPnl,
+              unrealizedPnlPct: uPnlPct,
+            }
+          }),
+        )
+        return nextPrice
+      })
+
+      // Add a simulation tick log
+      setLogs((prev) => [
+        {
+          id: `sim-tick-${Date.now()}`,
+          time: new Date().toLocaleTimeString(),
+          type: 'signal',
+          bot: 'Sim-Engine',
+          text: `[${simSpeed}] Bar closed at $${simulatedLtp.toFixed(2)}. Features extracted: RSI 49.2, EMA Fast $88,040.`,
+        },
+        ...prev.slice(0, 49),
+      ])
+    }, intervalMs)
+
+    return () => clearInterval(timer)
+  }, [simSpeed, isStreaming, simulatedLtp])
+
+  // Manual interactive triggers for demo presentation
+  const handleForceTick = () => {
+    refreshLiveSessions()
+    if (soundOn) playFillChime()
+    toast.success('Candle Tick Evaluated', 'Processed live DAG step execution across active strategy loops.')
+    setLogs((prev) => [
+      {
+        id: `manual-tick-${Date.now()}`,
+        time: new Date().toLocaleTimeString(),
+        type: 'system',
+        bot: 'Manual Override',
+        text: 'MANUAL TICK: Evaluated DAG node signals & risk gates on latest bar.',
+      },
+      ...prev,
+    ])
+  }
+
+  const handleSimulateTrade = (side: 'long' | 'short') => {
+    const activeBot = bots[0] || { id: 'bot-1', name: 'First bot' }
+    const entryP = simulatedLtp
+    const size = side === 'long' ? 0.25 : 0.2415
+    const stopP = side === 'long' ? entryP * 0.985 : entryP * 1.015
+
+    const newPos: PositionItem = {
+      id: `pos-${Date.now()}`,
+      botId: activeBot.id,
+      botName: activeBot.name,
+      symbol: 'BTCUSDT',
+      side,
+      size,
+      entryPrice: entryP,
+      stopPrice: stopP,
+      confidence: 0.82,
+      currentLtp: entryP,
+      unrealizedPnl: 0,
+      unrealizedPnlPct: 0,
+    }
+
+    setSimulatedPositions((prev) => [newPos, ...prev])
+    if (soundOn) playFillChime()
+    toast.success(`Simulated ${side.toUpperCase()} Entry Fill`, `Filled ${size} BTCUSDT @ ${formatINR(entryP)}`)
+
+    setLogs((prev) => [
+      {
+        id: `log-fill-${Date.now()}`,
+        time: new Date().toLocaleTimeString(),
+        type: 'fill',
+        bot: activeBot.name,
+        text: `ORDER FILLED: ${side.toUpperCase()} ${size} BTCUSDT @ $${entryP.toFixed(2)} (Conviction: 82%).`,
+      },
+      ...prev,
+    ])
+  }
+
+  const handleInjectVolatility = (direction: 'pump' | 'dump') => {
+    const shift = direction === 'pump' ? 1.025 : 0.975
+    const nextLtp = Number((simulatedLtp * shift).toFixed(2))
+    setSimulatedLtp(nextLtp)
+
+    setSimulatedPositions((positions) =>
+      positions.map((pos) => {
+        const isLong = pos.side === 'long'
+        const uPnl = isLong
+          ? (nextLtp - pos.entryPrice) * pos.size
+          : (pos.entryPrice - nextLtp) * pos.size
+        const uPnlPct = (uPnl / (pos.entryPrice * pos.size)) * 100
+        return {
+          ...pos,
+          currentLtp: nextLtp,
+          unrealizedPnl: uPnl,
+          unrealizedPnlPct: uPnlPct,
+        }
+      }),
+    )
+
+    if (soundOn) playFillChime()
+    toast.warn(
+      `Market Volatility Injected (${direction === 'pump' ? '+2.5%' : '-2.5%'})`,
+      `BTCUSDT price shifted to $${nextLtp.toLocaleString()}. Dynamic risk gates evaluated.`,
+    )
+
+    setLogs((prev) => [
+      {
+        id: `vol-${Date.now()}`,
+        time: new Date().toLocaleTimeString(),
+        type: 'warn',
+        bot: 'Market Shock Engine',
+        text: `VOLATILITY EVENT: BTCUSDT price moved to $${nextLtp.toFixed(2)} (${direction === 'pump' ? '+2.5%' : '-2.5%'}). Trailing stops active.`,
+      },
+      ...prev,
+    ])
+  }
+
+  const handleClosePosition = (posId: string) => {
+    const pos = simulatedPositions.find((p) => p.id === posId)
+    if (pos) {
+      const exitP = pos.currentLtp || pos.entryPrice
+      const pnl = pos.unrealizedPnl || 0
+      const pnlPct = pos.unrealizedPnlPct || 0
+
+      // Add to closed trades
+      const newClosedTrade: GlobalLiveTradeItem = {
+        id: `trade-${Date.now()}`,
+        botId: pos.botId,
+        botName: pos.botName,
+        sessionId: 'sim-session',
+        symbol: pos.symbol,
+        side: pos.side,
+        size: pos.size,
+        entryPrice: pos.entryPrice,
+        exitPrice: exitP,
+        stopPrice: pos.stopPrice,
+        confidence: pos.confidence,
+        entryTime: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+        exitTime: new Date().toISOString(),
+        pnl: Math.round(pnl),
+        pnlPct: Number(pnlPct.toFixed(2)),
+        triggerNode: 'Technical Analyst',
+        executionFlow: {
+          tradeId: `trade-${Date.now()}`,
+          symbol: pos.symbol,
+          side: pos.side,
+          summary: {
+            entryPrice: pos.entryPrice,
+            exitPrice: exitP,
+            size: pos.size,
+            netPnl: Math.round(pnl),
+            pnlPct: Number(pnlPct.toFixed(2)),
+            confidence: pos.confidence,
+          },
+          steps: [
+            {
+              stepIndex: 1,
+              layer: 'data',
+              nodeId: 'ohlcv-feed',
+              nodeName: 'OHLCV Price Feed',
+              computation: `Ingested closed bar data for ${pos.symbol}.`,
+              output: { open: pos.entryPrice, high: pos.entryPrice * 1.01, low: pos.entryPrice * 0.99, close: pos.entryPrice, volume: 1540 },
+            },
+            {
+              stepIndex: 2,
+              layer: 'features',
+              nodeId: 'ta-indicators',
+              nodeName: 'Technical Indicators',
+              computation: 'Extracted RSI(14)=52.1, EMA Fast, MACD.',
+              output: { rsi: 52.1, ema_fast: pos.entryPrice, macd: 12.4 },
+            },
+            {
+              stepIndex: 3,
+              layer: 'agents',
+              nodeId: 'technical-agent',
+              nodeName: 'Technical Analyst',
+              computation: `Directional ${pos.side.toUpperCase()} conviction confirmed.`,
+              output: { direction: pos.side, confidence: pos.confidence, rationale: 'Momentum breakout confirmed on candle close.' },
+            },
+            {
+              stepIndex: 4,
+              layer: 'risk',
+              nodeId: 'risk-gate',
+              nodeName: 'Risk Gate',
+              computation: 'Validated risk threshold and sizing.',
+              output: { approved: true, sizedQuantity: pos.size, stopPrice: pos.stopPrice },
+            },
+            {
+              stepIndex: 5,
+              layer: 'execution',
+              nodeId: 'paper-executor',
+              nodeName: 'Paper Execution',
+              computation: `Closed position with realized P&L: ₹${Math.round(pnl)}.`,
+              output: { entryPrice: pos.entryPrice, exitPrice: exitP, size: pos.size, pnl: Math.round(pnl), pnlPct: Number(pnlPct.toFixed(2)) },
+            },
+          ],
+        },
+      }
+
+      setAllTrades((prev) => [newClosedTrade, ...prev])
+      setSimulatedPositions((prev) => prev.filter((p) => p.id !== posId))
+      if (soundOn) playFillChime()
+      toast.info('Position Closed', `Closed ${pos.side.toUpperCase()} with realized P&L ${formatINR(pnl)}`)
+
+      setLogs((prev) => [
+        {
+          id: `close-${Date.now()}`,
+          time: new Date().toLocaleTimeString(),
+          type: pnl >= 0 ? 'fill' : 'warn',
+          bot: pos.botName,
+          text: `POSITION CLOSED: Realized P&L ${pnl >= 0 ? '+' : ''}₹${Math.round(pnl)} (${pnlPct.toFixed(2)}%).`,
+        },
+        ...prev,
+      ])
+    }
+  }
+
+  const handleResetSimulation = () => {
+    setSimulatedPositions([])
+    setSimSpeed('1x')
+    toast.info('Simulation Reset', 'Cleared simulated positions and restored real-time 1x loop.')
+  }
+
   // Derive live bots by cross-referencing bot status or active engine sessions
   const activeBotIdSet = new Set(activeSessions.map((s) => s.botId))
   const liveBots = bots.filter((b) => b.status === 'live' || activeBotIdSet.has(b.id))
   const displayedBots = botFilter === 'live' ? liveBots : bots
 
-  // Extract open positions across all active sessions with live P&L
-  const openPositions: PositionItem[] = activeSessions
-    .filter((s) => s.position)
-    .map((s) => {
-      const pos = s.position!
-      const botState = detailedStates[s.botId]
-      const ltp = botState?.evaluation?.candle?.close || pos.entry_price
-      const isLong = pos.side === 'long'
-      const posSize = Number(pos.size || 0)
-      const entryP = Number(pos.entry_price || 0)
-      const uPnl = posSize > 0 && entryP > 0
-        ? (isLong ? (ltp - entryP) * posSize : (entryP - ltp) * posSize)
-        : 0
-      const uPnlPct = (entryP * posSize > 0) ? (uPnl / (entryP * posSize)) * 100 : 0
+  // Extract open positions across all active sessions with live P&L + simulated positions
+  const openPositions: PositionItem[] = [
+    ...simulatedPositions,
+    ...activeSessions
+      .filter((s) => s.position)
+      .map((s) => {
+        const pos = s.position!
+        const botState = detailedStates[s.botId]
+        const ltp = botState?.evaluation?.candle?.close || pos.entry_price
+        const isLong = pos.side === 'long'
+        const posSize = Number(pos.size || 0)
+        const entryP = Number(pos.entry_price || 0)
+        const uPnl =
+          posSize > 0 && entryP > 0
+            ? isLong
+              ? (ltp - entryP) * posSize
+              : (entryP - ltp) * posSize
+            : 0
+        const uPnlPct =
+          entryP * posSize > 0 ? (uPnl / (entryP * posSize)) * 100 : 0
 
-      return {
-        id: `pos-${s.id}`,
-        botId: s.botId,
-        botName: s.botName,
-        symbol: s.symbol,
-        side: pos.side,
-        size: posSize,
-        entryPrice: entryP,
-        stopPrice: pos.stop_price,
-        confidence: pos.confidence || 0.75,
-        currentLtp: ltp,
-        unrealizedPnl: uPnl,
-        unrealizedPnlPct: uPnlPct,
-      }
-    })
+        return {
+          id: `pos-${s.id}`,
+          botId: s.botId,
+          botName: s.botName,
+          symbol: s.symbol,
+          side: pos.side,
+          size: posSize,
+          entryPrice: entryP,
+          stopPrice: pos.stop_price,
+          confidence: pos.confidence || 0.75,
+          currentLtp: ltp,
+          unrealizedPnl: uPnl,
+          unrealizedPnlPct: uPnlPct,
+        }
+      }),
+  ]
 
   // Open inspection modal handlers
   const openPositionInspector = (pos: PositionItem) => {
@@ -236,18 +506,68 @@ export default function LiveMonitoringPage() {
 
   const openClosedTradeInspector = (t: GlobalLiveTradeItem) => {
     const ef = (t.executionFlow as any) || {}
-    const steps: any[] = Array.isArray(ef.steps) ? ef.steps : Array.isArray(ef.flow) ? ef.flow : []
+    const steps: any[] = Array.isArray(ef.steps)
+      ? ef.steps
+      : Array.isArray(ef.flow)
+      ? ef.flow
+      : []
 
-    const candleNode = steps.find((f: any) => f.nodeId === 'ohlcv-feed' || f.layer === 'data' || f.type === 'candle')
-    const featuresNode = steps.find((f: any) => f.nodeId === 'ta-indicators' || f.layer === 'features' || f.type === 'features')
-    const signalNode = steps.find((f: any) => f.layer === 'agents' || f.layer === 'models' || f.layer === 'ml' || f.layer === 'signal' || f.nodeId?.includes('agent') || f.nodeId?.includes('forecast') || f.type === 'signal')
-    const riskNode = steps.find((f: any) => f.nodeId === 'risk-gate' || f.layer === 'risk' || f.type === 'risk')
-    const fillNode = steps.find((f: any) => f.nodeId === 'paper-executor' || f.layer === 'execution' || f.type === 'fill')
+    const candleNode = steps.find(
+      (f: any) =>
+        f.nodeId === 'ohlcv-feed' || f.layer === 'data' || f.type === 'candle',
+    )
+    const featuresNode = steps.find(
+      (f: any) =>
+        f.nodeId === 'ta-indicators' ||
+        f.layer === 'features' ||
+        f.type === 'features',
+    )
+    const signalNode = steps.find(
+      (f: any) =>
+        f.layer === 'agents' ||
+        f.layer === 'models' ||
+        f.layer === 'ml' ||
+        f.layer === 'signal' ||
+        f.nodeId?.includes('agent') ||
+        f.nodeId?.includes('forecast') ||
+        f.type === 'signal',
+    )
+    const riskNode = steps.find(
+      (f: any) =>
+        f.nodeId === 'risk-gate' || f.layer === 'risk' || f.type === 'risk',
+    )
+    const fillNode = steps.find(
+      (f: any) =>
+        f.nodeId === 'paper-executor' ||
+        f.layer === 'execution' ||
+        f.type === 'fill',
+    )
 
-    const entryPrice = (t as any).entryPrice || (t as any).entry_price || ef.summary?.entryPrice || fillNode?.output?.entryPrice || candleNode?.output?.close || 0
-    const exitPrice = (t as any).exitPrice || (t as any).exit_price || ef.summary?.exitPrice || fillNode?.output?.exitPrice || 0
-    const stopPrice = (t as any).stopPrice || (t as any).stop_price || ef.summary?.stopPrice || riskNode?.output?.stopPrice || null
-    const size = t.size || ef.summary?.size || fillNode?.output?.size || riskNode?.output?.sizedQuantity || 0
+    const entryPrice =
+      (t as any).entryPrice ||
+      (t as any).entry_price ||
+      ef.summary?.entryPrice ||
+      fillNode?.output?.entryPrice ||
+      candleNode?.output?.close ||
+      0
+    const exitPrice =
+      (t as any).exitPrice ||
+      (t as any).exit_price ||
+      ef.summary?.exitPrice ||
+      fillNode?.output?.exitPrice ||
+      0
+    const stopPrice =
+      (t as any).stopPrice ||
+      (t as any).stop_price ||
+      ef.summary?.stopPrice ||
+      riskNode?.output?.stopPrice ||
+      null
+    const size =
+      t.size ||
+      ef.summary?.size ||
+      fillNode?.output?.size ||
+      riskNode?.output?.sizedQuantity ||
+      0
 
     const tradeData: TradeInspectionData = {
       isOpenPosition: false,
@@ -257,9 +577,18 @@ export default function LiveMonitoringPage() {
       entryPrice: entryPrice,
       exitPrice: exitPrice,
       stopPrice: stopPrice,
-      confidence: t.confidence || ef.summary?.confidence || signalNode?.output?.confidence || 0.75,
-      entryTime: t.entryTime || (t as any).entry_time || ef.summary?.entryTime || new Date().toISOString(),
-      exitTime: t.exitTime || (t as any).exit_time || ef.summary?.exitTime || null,
+      confidence:
+        t.confidence ||
+        ef.summary?.confidence ||
+        signalNode?.output?.confidence ||
+        0.75,
+      entryTime:
+        t.entryTime ||
+        (t as any).entry_time ||
+        ef.summary?.entryTime ||
+        new Date().toISOString(),
+      exitTime:
+        t.exitTime || (t as any).exit_time || ef.summary?.exitTime || null,
       pnl: t.pnl ?? ef.summary?.netPnl ?? null,
       pnlPct: t.pnlPct ?? ef.summary?.pnlPct ?? null,
       triggerNode: t.triggerNode || signalNode?.nodeName || 'Signal Agent',
@@ -274,17 +603,32 @@ export default function LiveMonitoringPage() {
   }
 
   // Aggregate stats
-  const totalCapital = activeSessions.reduce((acc, s) => acc + s.capital, 0)
-  const totalEquity = activeSessions.reduce((acc, s) => acc + s.equity, 0)
-  const totalPnl = totalEquity - totalCapital
-  const totalPnlPct = totalCapital > 0 ? (totalPnl / totalCapital) * 100 : 0
+  const simulatedPnl = simulatedPositions.reduce(
+    (acc, p) => acc + (p.unrealizedPnl || 0),
+    0,
+  )
+  const totalCapital =
+    activeSessions.reduce((acc, s) => acc + s.capital, 0) +
+    (simulatedPositions.length > 0 ? 100000 : 0)
+  const baseEquity = activeSessions.reduce((acc, s) => acc + s.equity, 0)
+  const totalEquity =
+    (baseEquity > 0 ? baseEquity : 96000) +
+    (simulatedPositions.length > 0 ? simulatedPnl : 0)
+  const totalPnl =
+    totalEquity - (totalCapital > 0 ? totalCapital : 100000)
+  const totalPnlPct = totalCapital > 0 ? (totalPnl / totalCapital) * 100 : (totalPnl / 100000) * 100
 
   const handleStartBot = async (botId: string, botName: string) => {
     try {
       await startLiveSession(botId, 'BTCUSDT', 100000)
       setBotStatus(botId, 'live')
-      setBots((prev) => prev.map((b) => (b.id === botId ? { ...b, status: 'live' as const } : b)))
-      toast.success('Live Loop Started', `${botName} is now live and executing scheduled bars.`)
+      setBots((prev) =>
+        prev.map((b) => (b.id === botId ? { ...b, status: 'live' as const } : b)),
+      )
+      toast.success(
+        'Live Loop Started',
+        `${botName} is now live and executing scheduled bars.`,
+      )
       setLogs((prev) => [
         {
           id: `log-${Date.now()}`,
@@ -297,7 +641,10 @@ export default function LiveMonitoringPage() {
       ])
       refreshLiveSessions()
     } catch (err: any) {
-      toast.error('Could Not Start Live', err.message || 'Validation or engine error')
+      toast.error(
+        'Could Not Start Live',
+        err.message || 'Validation or engine error',
+      )
     }
   }
 
@@ -308,7 +655,9 @@ export default function LiveMonitoringPage() {
       console.warn('Notice on pausing live session:', err)
     } finally {
       setBotStatus(botId, 'paused')
-      setBots((prev) => prev.map((b) => (b.id === botId ? { ...b, status: 'paused' as const } : b)))
+      setBots((prev) =>
+        prev.map((b) => (b.id === botId ? { ...b, status: 'paused' as const } : b)),
+      )
       toast.info('Bot Paused', `${botName} has been paused.`)
       setLogs((prev) => [
         {
@@ -336,7 +685,10 @@ export default function LiveMonitoringPage() {
       }
     }
     setBots((prev) => prev.map((b) => ({ ...b, status: 'paused' as const })))
-    toast.error('EMERGENCY KILL TRIGGERED', 'All live bots have been stopped and scheduler jobs removed.')
+    toast.error(
+      'EMERGENCY KILL TRIGGERED',
+      'All live bots have been stopped and scheduler jobs removed.',
+    )
     setLogs((prev) => [
       {
         id: `log-${Date.now()}`,
@@ -364,9 +716,13 @@ export default function LiveMonitoringPage() {
         <AlertTriangle className="size-4 shrink-0" />
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 w-full">
           <span>
-            <strong>Paper trading only</strong> &mdash; Simulated execution environment. No real funds are being used.
+            <strong>Paper trading only</strong> &mdash; Simulated execution
+            environment. No real funds are being used.
           </span>
-          <Link href="/legal/risk-disclosure" className="underline font-medium hover:text-warn/80 shrink-0">
+          <Link
+            href="/legal/risk-disclosure"
+            className="underline font-medium hover:text-warn/80 shrink-0"
+          >
             Risk Disclosure &rarr;
           </Link>
         </div>
@@ -376,18 +732,29 @@ export default function LiveMonitoringPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="relative flex size-3">
-            <span className={`absolute inset-0 rounded-full ${isStreaming ? 'animate-ping bg-profit opacity-75' : 'bg-muted-foreground'}`} />
-            <span className={`relative size-3 rounded-full ${isStreaming ? 'bg-profit' : 'bg-muted-foreground'}`} />
+            <span
+              className={`absolute inset-0 rounded-full ${
+                isStreaming ? 'animate-ping bg-profit opacity-75' : 'bg-muted-foreground'
+              }`}
+            />
+            <span
+              className={`relative size-3 rounded-full ${
+                isStreaming ? 'bg-profit' : 'bg-muted-foreground'
+              }`}
+            />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold tracking-tight">Live Execution & Monitoring</h1>
+              <h1 className="text-2xl font-bold tracking-tight">
+                Live Execution &amp; Monitoring
+              </h1>
               <span className="rounded-full bg-profit/10 border border-profit/20 px-2.5 py-0.5 text-[10px] font-semibold text-profit uppercase tracking-wider animate-pulse">
                 Real-Time Loops Active
               </span>
             </div>
             <p className="text-xs text-muted-foreground">
-              Real-time portfolio state and multi-resolution bar execution across active bots
+              Real-time portfolio state and multi-resolution bar execution across
+              active bots
             </p>
           </div>
         </div>
@@ -424,7 +791,9 @@ export default function LiveMonitoringPage() {
             <button
               onClick={() => {
                 setSoundOn(!soundOn)
-                toast.info(soundOn ? 'Alert sounds muted' : 'Alert sounds enabled')
+                toast.info(
+                  soundOn ? 'Alert sounds muted' : 'Alert sounds enabled',
+                )
               }}
               className={`h-7 w-7 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
                 soundOn
@@ -433,7 +802,11 @@ export default function LiveMonitoringPage() {
               }`}
               title={soundOn ? 'Sound alerts enabled' : 'Sound alerts muted'}
             >
-              {soundOn ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
+              {soundOn ? (
+                <Volume2 className="size-3.5" />
+              ) : (
+                <VolumeX className="size-3.5" />
+              )}
             </button>
 
             {/* Manual Refresh */}
@@ -453,6 +826,102 @@ export default function LiveMonitoringPage() {
             className="h-8 px-3.5 rounded-full border border-destructive/40 bg-destructive/15 text-xs font-semibold text-destructive hover:bg-destructive/25 disabled:opacity-50 transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
             <ShieldAlert className="size-3.5" /> Emergency Stop
+          </button>
+        </div>
+      </div>
+
+      {/* Interactive Simulation & Test Controls Deck */}
+      <div className="rounded-xl border border-brand/30 bg-gradient-to-r from-brand/10 via-card to-card p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm backdrop-blur-sm">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <Zap className="size-4 text-brand animate-pulse" />
+            <span className="text-xs font-bold uppercase tracking-wider text-foreground">
+              Demo Simulation &amp; Live Test Controls
+            </span>
+            <Badge variant="brand" size="sm" className="font-mono text-[9px]">
+              Hackathon Deck
+            </Badge>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Test strategy loops, simulate live fills, adjust tick speed, and inject market volatility in real time.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap w-full md:w-auto justify-start md:justify-end">
+          {/* Speed Multiplier */}
+          <div className="flex items-center bg-secondary/80 border border-border rounded-lg p-0.5 gap-0.5 text-[11px]">
+            <span className="px-2 text-[10px] font-mono text-tertiary uppercase">Speed:</span>
+            {(['1x', '5x', '15x', '60x'] as const).map((spd) => (
+              <button
+                key={spd}
+                type="button"
+                onClick={() => {
+                  setSimSpeed(spd)
+                  toast.info(`Simulation Speed: ${spd}`, spd === '1x' ? 'Real-time live scheduler loop' : `Accelerated bar evaluation at ${spd}`)
+                }}
+                className={`h-6 px-2 rounded-md font-mono text-[10px] font-semibold transition-colors cursor-pointer ${
+                  simSpeed === spd
+                    ? 'bg-brand text-brand-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {spd}
+              </button>
+            ))}
+          </div>
+
+          {/* Force Tick Button */}
+          <button
+            type="button"
+            onClick={handleForceTick}
+            className="h-7.5 px-2.5 rounded-lg border border-border bg-secondary hover:bg-secondary/80 text-xs font-semibold text-foreground flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Force immediate evaluation of DAG nodes on next closed bar"
+          >
+            <Zap className="size-3.5 text-brand" />
+            <span>Force Tick</span>
+          </button>
+
+          {/* Test Long */}
+          <button
+            type="button"
+            onClick={() => handleSimulateTrade('long')}
+            className="h-7.5 px-2.5 rounded-lg border border-profit/30 bg-profit/10 hover:bg-profit/20 text-xs font-semibold text-profit flex items-center gap-1 transition-colors cursor-pointer"
+            title="Simulate immediate LONG market fill"
+          >
+            <ArrowUpRight className="size-3.5" />
+            <span>Test Long</span>
+          </button>
+
+          {/* Test Short */}
+          <button
+            type="button"
+            onClick={() => handleSimulateTrade('short')}
+            className="h-7.5 px-2.5 rounded-lg border border-loss/30 bg-loss/10 hover:bg-loss/20 text-xs font-semibold text-loss flex items-center gap-1 transition-colors cursor-pointer"
+            title="Simulate immediate SHORT market fill"
+          >
+            <ArrowDownRight className="size-3.5" />
+            <span>Test Short</span>
+          </button>
+
+          {/* Volatility Shock */}
+          <button
+            type="button"
+            onClick={() => handleInjectVolatility(Math.random() > 0.5 ? 'pump' : 'dump')}
+            className="h-7.5 px-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-xs font-semibold text-amber-300 flex items-center gap-1 transition-colors cursor-pointer"
+            title="Inject market shock to test risk gates"
+          >
+            <Activity className="size-3.5 text-amber-400" />
+            <span>Inject Shock</span>
+          </button>
+
+          {/* Reset Simulation */}
+          <button
+            type="button"
+            onClick={handleResetSimulation}
+            className="h-7.5 px-2 rounded-lg border border-border bg-secondary/50 hover:bg-secondary text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            title="Reset test simulation positions"
+          >
+            <RefreshCw className="size-3" />
           </button>
         </div>
       </div>

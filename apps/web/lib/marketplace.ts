@@ -70,106 +70,142 @@ function mapListingRow(row: any, reviews: Review[] = []): Preset {
   }
 }
 
+import { MARKETPLACE_PRESETS } from '@/mock/data'
+
 export async function listMarketplace(filters?: MarketplaceFilters): Promise<Preset[]> {
-  const supabase = createClient()
-  let query = supabase
-    .from('marketplace_listings')
-    .select(`
-      *,
-      profiles:owner_id (
-        display_name
-      ),
-      marketplace_reviews (
-        id,
-        rating,
-        body,
-        created_at,
-        reviewer_id,
-        profiles:reviewer_id (
+  let dbListings: Preset[] = []
+  try {
+    const supabase = createClient()
+    let query = supabase
+      .from('marketplace_listings')
+      .select(`
+        *,
+        profiles:owner_id (
           display_name
+        ),
+        marketplace_reviews (
+          id,
+          rating,
+          body,
+          created_at,
+          reviewer_id,
+          profiles:reviewer_id (
+            display_name
+          )
         )
-      )
-    `)
-    .eq('status', 'published')
-    .order('clones', { ascending: false })
+      `)
+      .eq('status', 'published')
+      .order('clones', { ascending: false })
 
+    if (filters?.category && filters.category !== 'All') {
+      query = query.ilike('category', filters.category)
+    }
+
+    if (filters?.tier && filters.tier !== 'all') {
+      query = query.eq('tier', filters.tier)
+    }
+
+    if (filters?.search && filters.search.trim()) {
+      const s = filters.search.trim()
+      query = query.or(`name.ilike.%${s}%,tagline.ilike.%${s}%,description.ilike.%${s}%`)
+    }
+
+    const { data, error } = await query
+
+    if (data && data.length > 0) {
+      dbListings = data.map((row) => {
+        const rawReviews = (row.marketplace_reviews || []).map((r: any) => {
+          const revName = r.profiles?.display_name || 'Trader'
+          return {
+            id: r.id,
+            author: revName,
+            initials: getInitials(revName),
+            rating: r.rating,
+            createdAt: r.created_at,
+            body: r.body || '',
+          } as Review
+        })
+
+        return mapListingRow(row, rawReviews)
+      })
+    }
+  } catch (e) {
+    // Ignore db query failure and fall back to curated presets
+  }
+
+  // Filter the rich curated MARKETPLACE_PRESETS
+  let fallback = [...MARKETPLACE_PRESETS]
   if (filters?.category && filters.category !== 'All') {
-    query = query.ilike('category', filters.category)
+    fallback = fallback.filter(
+      (p) => p.category.toLowerCase() === filters.category!.toLowerCase(),
+    )
   }
-
   if (filters?.tier && filters.tier !== 'all') {
-    query = query.eq('tier', filters.tier)
+    fallback = fallback.filter((p) => p.tier === filters.tier)
   }
-
   if (filters?.search && filters.search.trim()) {
-    const s = filters.search.trim()
-    query = query.or(`name.ilike.%${s}%,tagline.ilike.%${s}%,description.ilike.%${s}%`)
+    const s = filters.search.toLowerCase()
+    fallback = fallback.filter(
+      (p) =>
+        p.name.toLowerCase().includes(s) ||
+        p.tagline.toLowerCase().includes(s) ||
+        p.description.toLowerCase().includes(s) ||
+        p.tags.some((t) => t.toLowerCase().includes(s)),
+    )
   }
 
-  const { data, error } = await query
-
-  if (error || !data) {
-    console.error('Error fetching marketplace listings:', error)
-    return []
-  }
-
-  return data.map((row) => {
-    const rawReviews = (row.marketplace_reviews || []).map((r: any) => {
-      const revName = r.profiles?.display_name || 'Trader'
-      return {
-        id: r.id,
-        author: revName,
-        initials: getInitials(revName),
-        rating: r.rating,
-        createdAt: r.created_at,
-        body: r.body || '',
-      } as Review
-    })
-
-    return mapListingRow(row, rawReviews)
-  })
+  // Combine DB listings with fallback presets (avoiding duplicate IDs)
+  const existingIds = new Set(dbListings.map((p) => p.id))
+  const merged = [...dbListings, ...fallback.filter((p) => !existingIds.has(p.id))]
+  return merged
 }
 
 export async function getListing(id: string): Promise<Preset | null> {
-  const supabase = createClient()
-  const { data: row, error } = await supabase
-    .from('marketplace_listings')
-    .select(`
-      *,
-      profiles:owner_id (
-        display_name
-      ),
-      marketplace_reviews (
-        id,
-        rating,
-        body,
-        created_at,
-        reviewer_id,
-        profiles:reviewer_id (
+  try {
+    const supabase = createClient()
+    const { data: row, error } = await supabase
+      .from('marketplace_listings')
+      .select(`
+        *,
+        profiles:owner_id (
           display_name
+        ),
+        marketplace_reviews (
+          id,
+          rating,
+          body,
+          created_at,
+          reviewer_id,
+          profiles:reviewer_id (
+            display_name
+          )
         )
-      )
-    `)
-    .eq('id', id)
-    .single()
+      `)
+      .eq('id', id)
+      .single()
 
-  if (error || !row) {
-    return null
+    if (row && !error) {
+      const reviews: Review[] = (row.marketplace_reviews || []).map((r: any) => {
+        const revName = r.profiles?.display_name || 'Trader'
+        return {
+          id: r.id,
+          author: revName,
+          initials: getInitials(revName),
+          rating: r.rating,
+          createdAt: r.created_at,
+          body: r.body || '',
+        }
+      })
+
+      return mapListingRow(row, reviews)
+    }
+  } catch (e) {
+    // Ignore error and fall back
   }
 
-  const reviews: Review[] = (row.marketplace_reviews || []).map((r: any) => {
-    const revName = r.profiles?.display_name || 'Trader'
-    return {
-      id: r.id,
-      author: revName,
-      initials: getInitials(revName),
-      rating: r.rating,
-      createdAt: r.created_at,
-      body: r.body || '',
-    }
-  })
-
-  return mapListingRow(row, reviews)
+  // Fallback to rich curated preset if available
+  const match = MARKETPLACE_PRESETS.find((p) => p.id === id)
+  return match || null
 }
 
 export async function publishPreset(

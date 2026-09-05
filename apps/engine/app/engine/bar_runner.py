@@ -40,6 +40,7 @@ async def run_one_bar(
     db: Optional[Any] = None,
     macro_events_cache: Optional[Any] = None,
     news_items_cache: Optional[Any] = None,
+    ml_model_registry_cache: Optional[Any] = None,
 ) -> Any:
     """
     Runs one bar through the compiled node pipeline against a portfolio.
@@ -58,6 +59,7 @@ async def run_one_bar(
         db=db,
         macro_events_cache=macro_events_cache,
         news_items_cache=news_items_cache,
+        ml_model_registry_cache=ml_model_registry_cache,
     )
     closed_trade = None
 

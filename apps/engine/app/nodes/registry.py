@@ -13,6 +13,7 @@ from .intelligence_agents.contrarian import ContrarianAgentNode
 from .intelligence_agents.event_specialist import EventSpecialistNode
 from .risk_management.risk_gate import RiskGateNode
 from .execution.paper_executor import PaperExecutorNode
+from .ml.gbdt_forecast import GbdtForecastNode
 from .universal import create_node_factory
 
 # Primary specialized nodes
@@ -47,7 +48,9 @@ REGISTRY: Dict[str, Type] = {
     "event-agent": EventSpecialistNode,
 
     # Layer IV: ML Predictive Models
-    "gbdt-forecast": create_node_factory("gbdt-forecast", "ml", "Gradient Boosting Forecast"),
+    # gbdt-forecast is the only real, trained-artifact inference node in Phase 19.
+    # The other five remain UniversalNode stubs until their own dedicated phases.
+    "gbdt-forecast": GbdtForecastNode,
     "sequence-model": create_node_factory("sequence-model", "ml", "Sequence Model"),
     "vol-forecast": create_node_factory("vol-forecast", "ml", "Volatility Forecast"),
     "ensemble-stacker": create_node_factory("ensemble-stacker", "ml", "Ensemble Stacker"),

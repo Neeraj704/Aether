@@ -937,8 +937,10 @@ export const COMPONENTS: ComponentDef[] = [
     0,
     [
       { key: 'target', label: 'Target', type: 'select', options: ['Direction', 'Forward return', 'Volatility'], value: 'Direction' },
-      { key: 'horizon', label: 'Prediction horizon', type: 'slider', min: 1, max: 60, step: 1, value: 5, unit: ' bars' },
+      { key: 'primaryHorizon', label: 'Primary Horizon', type: 'select', options: ['12 bars', '24 bars', '32 bars'], value: '12 bars' },
+      { key: 'requireHorizonConfluence', label: 'Require Horizon Confluence', type: 'switch', value: false, help: 'Requires multi-horizon directional consensus (e.g. at least 2 of 3 horizons agree) before triggering a trade.' },
       { key: 'depth', label: 'Max tree depth', type: 'slider', min: 2, max: 16, step: 1, value: 6 },
+      { key: 'minConfidence', label: 'Min Output Confidence', type: 'slider', min: 0.0, max: 0.9, step: 0.05, value: 0.4 },
     ],
     'The model to beat before you try anything fancier.',
     [

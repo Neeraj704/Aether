@@ -45,6 +45,7 @@ class NodeContext:
         current_node_id: Optional[str] = None,
         macro_events_cache: Optional[Any] = None,
         news_items_cache: Optional[Any] = None,
+        ml_model_registry_cache: Optional[Any] = None,
     ):
         self.candle = candle
         self.portfolio = portfolio
@@ -59,6 +60,10 @@ class NodeContext:
         self.current_node_id = current_node_id
         self.macro_events_cache = macro_events_cache
         self.news_items_cache = news_items_cache
+        # dict keyed by "component_id:symbol:resolution" → active MlModelModel row (or dict).
+        # Populated upfront in backtest_runner.run_backtest() alongside macro_events_cache,
+        # enabling DB-free ML inference in the historical hot loop. Mirrors news_items_cache pattern.
+        self.ml_model_registry_cache = ml_model_registry_cache
 
 
 class Node(Protocol):

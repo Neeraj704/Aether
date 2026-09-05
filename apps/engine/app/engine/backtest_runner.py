@@ -274,6 +274,7 @@ async def simulate_historical_pass(
     db: Optional[Any] = None,
     macro_events_cache: Optional[Any] = None,
     news_items_cache: Optional[Any] = None,
+    ml_model_registry_cache: Optional[Any] = None,
 ) -> tuple[List[ClosedTrade], List[EquityPoint], Portfolio]:
     portfolio = Portfolio(cash=config.capital, seed=config.seed + seed_offset)
     equity_curve: List[EquityPoint] = []
@@ -306,6 +307,7 @@ async def simulate_historical_pass(
             db=db,
             macro_events_cache=macro_events_cache,
             news_items_cache=news_items_cache,
+            ml_model_registry_cache=ml_model_registry_cache,
         )
         if closed_trade is not None:
             trades.append(closed_trade)
@@ -403,6 +405,24 @@ async def run_backtest(
         except Exception as e:
             print(f"[Backtest Runner] Notice on pre-fetching news items: {e}")
 
+        # Upfront cache fetch for ML model registry (used by GbdtForecastNode and future
+        # Layer IV nodes in DB-free historical hot loops — mirrors macro_events_cache pattern).
+        # Keyed by "component_id:symbol:resolution" for O(1) lookup per bar.
+        ml_model_registry_cache: Dict[str, Any] = {}
+        try:
+            from ..db.models import MlModelModel
+            ml_res = await db.execute(
+                select(MlModelModel).where(MlModelModel.is_active == True)
+            )
+            for ml_row in ml_res.scalars().all():
+                key = f"{ml_row.component_id}:{ml_row.symbol}:{ml_row.resolution}"
+                ml_model_registry_cache[key] = ml_row
+            if ml_model_registry_cache:
+                print(f"[Backtest Runner] Loaded {len(ml_model_registry_cache)} active ML model(s) "
+                      f"into registry cache: {list(ml_model_registry_cache.keys())}")
+        except Exception as e:
+            print(f"[Backtest Runner] Notice on pre-fetching ML model registry: {e}")
+
         trades: List[ClosedTrade] = []
         equity_curve: List[EquityPoint] = []
         portfolio = Portfolio(cash=config.capital, seed=config.seed)
@@ -417,6 +437,7 @@ async def run_backtest(
                 ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.0,
                 mode="historical", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=None,
                 macro_events_cache=macro_events_cache, news_items_cache=news_items_cache,
+                ml_model_registry_cache=ml_model_registry_cache,
             )
 
         # ----------------------------------------------------
@@ -438,6 +459,7 @@ async def run_backtest(
                 ordered_nodes, paper_candle_records, config, paper_full_df, slippage_multiplier=1.45, queue_delay=1, seed_offset=17,
                 mode="paper", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=db,
                 macro_events_cache=macro_events_cache, news_items_cache=news_items_cache,
+                ml_model_registry_cache=ml_model_registry_cache,
             )
 
         # ----------------------------------------------------
@@ -479,6 +501,7 @@ async def run_backtest(
                             ordered_nodes, test_records, fold_cfg, test_df, slippage_multiplier=1.15, seed_offset=f * 50,
                             mode="walk-forward", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=None,
                             macro_events_cache=macro_events_cache, news_items_cache=news_items_cache,
+                            ml_model_registry_cache=ml_model_registry_cache,
                         )
                         all_trades.extend(f_trades)
                         all_equity.extend(f_eq)
@@ -493,6 +516,7 @@ async def run_backtest(
                     ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.2,
                     mode="walk-forward", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=None,
                     macro_events_cache=macro_events_cache, news_items_cache=news_items_cache,
+                    ml_model_registry_cache=ml_model_registry_cache,
                 )
 
         # ----------------------------------------------------
@@ -503,6 +527,7 @@ async def run_backtest(
                 ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.0,
                 mode="monte-carlo", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=None,
                 macro_events_cache=macro_events_cache, news_items_cache=news_items_cache,
+                ml_model_registry_cache=ml_model_registry_cache,
             )
             np.random.seed(config.seed)
             if base_trades:

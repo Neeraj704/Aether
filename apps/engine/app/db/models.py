@@ -291,3 +291,40 @@ class MacroEventModel(Base):
     )
 
 
+class MlModelModel(Base):
+    """
+    Tracks trained ML model artifacts for Layer IV nodes.
+
+    The engine's offline training scripts write rows here after each training run.
+    Inference nodes (e.g. GbdtForecastNode) read the row marked `is_active` for their
+    component_id/symbol/resolution to determine which artifact file to load from disk.
+
+    Only one row per (component_id, symbol, resolution) should have is_active = True at a time.
+    This is enforced in application code by the training script, not a DB constraint —
+    a partial unique index would be reasonable future hardening but is out of scope for Phase 19.
+    """
+    __tablename__ = "ml_models"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    component_id = Column(Text, nullable=False)           # e.g. 'gbdt-forecast'
+    version = Column(Text, nullable=False)                # e.g. 'v1' or ISO-date stamp
+    symbol = Column(Text, nullable=False)                 # e.g. 'BTCUSDT'
+    resolution = Column(Text, nullable=False)             # e.g. '15m'
+    horizon_bars = Column(Integer, nullable=False)        # bars ahead the model predicts
+    up_threshold_pct = Column(Numeric, nullable=False)    # e.g. 0.5 (%) — "up" label threshold
+    down_threshold_pct = Column(Numeric, nullable=False)  # e.g. -0.5 (%) — "down" label threshold
+    artifact_path = Column(Text, nullable=False)          # absolute path to .txt LightGBM model file
+    # Exact ordered list of feature names the model expects at inference time.
+    # Matches the column order of X_train used during training — inference MUST reconstruct
+    # the feature vector in this exact order to avoid silent train/serve skew.
+    feature_columns = Column(ARRAY(Text), nullable=False)
+    train_start = Column(DateTime(timezone=True), nullable=False)
+    train_end = Column(DateTime(timezone=True), nullable=False)
+    train_row_count = Column(Integer, nullable=False)
+    accuracy = Column(Numeric, nullable=True)             # held-out test accuracy, informational only
+    is_active = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ml_models_component_symbol_idx", "component_id", "symbol", "resolution", "is_active"),
+    )

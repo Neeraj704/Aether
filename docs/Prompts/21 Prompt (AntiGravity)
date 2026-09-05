@@ -1,0 +1,276 @@
+AETHER — Phase 19: The First Real ML Model (Layer IV — `gbdt-forecast`)
+
+> Bounded, single-phase prompt, same discipline as Phases 10–18 (Prompts 12–20) in `docs/Prompts/`. Self-contained — no prior conversation history is available to you. Audit first, as always. Do not expand scope beyond what is listed here.
+
+---
+
+## 0. Context you must internalize first
+
+Phases 10–18 made auth, bot persistence, historical/paper/walk-forward/Monte-Carlo backtesting, the scheduled live paper-trading loop, presets/marketplace, Razorpay billing/credits, and all six Layer III intelligence agents (`technical-agent`, `sentiment-agent`, `macro-agent`, `event-agent`, `flow-agent`, `contrarian-agent`) genuinely real — each sharing one hardened `LlmAgentNode` base class for LLM-gateway plumbing (credits, BYOK, audit logging, mode-gating).
+
+**The gap this phase closes:** every Layer IV "ML Predictive Models" component — `gbdt-forecast`, `sequence-model`, `vol-forecast`, `ensemble-stacker`, `anomaly-detector`, `meta-labeler` — is still routed through `apps/engine/app/nodes/universal.py`'s generic `UniversalNode`, specifically the `elif self.layer == "ml":` branch:
+
+```python
+pred_return = 0.015 if rsi < 35 else (-0.015 if rsi > 65 else 0.0)
+```
+
+This is not a model. It is the same RSI threshold every other unbuilt stub in this codebase reuses, wearing a "12-bar forecast" label. No training ever happens, no model artifact exists, and `predictedReturnPct` is a hardcoded constant (`±1.5%`) regardless of input.
+
+**Your job this phase:** build exactly **one** real, trained ML model — `gbdt-forecast` ("Gradient Boosting Forecast") — end to end: an offline training pipeline that trains on real cached OHLCV + already-real technical/sentiment/order-flow features, a versioned model artifact stored on disk and referenced from Postgres, a real inference node that loads that artifact and produces a genuine probability-based `Signal`, and full integration into the existing audit/credit/mode-gating conventions this project has followed since Phase 14. Do not touch `sequence-model`, `vol-forecast`, `ensemble-stacker`, `anomaly-detector`, or `meta-labeler` — they remain `UniversalNode` stubs. This is a single-model proof, exactly as Phase 14 built one real LLM node (Technical Analyst) before Phase 16 batched three more.
+
+**Critical design decisions, made for you — do not relitigate them:**
+
+1. **Library: LightGBM, not XGBoost, not a deep sequence model.** LightGBM trains fast on CPU (this engine has no GPU), needs no huge dependency tree, handles tabular technical-indicator features well, and — critically — supports probability calibration natively via its classifier API. A sequence model (LSTM/GRU, matching `sequence-model`'s eventual scope) requires a training loop, GPU-friendly tensors, and a much larger engineering surface; that is explicitly out of scope for this phase and is `sequence-model`'s own future phase, not this one.
+2. **Training happens offline, via a standalone script, never inside a request/response cycle or the live-tick loop.** This mirrors the project's own existing pattern exactly: `binance_ingest.py` and `seed_macro_events.py` are both standalone, manually-invoked scripts, not HTTP routes. `gbdt-forecast`'s inference node **loads** a pre-trained artifact; it never trains on the fly.
+3. **The prediction target is a classification problem, not a raw regression.** Predict `P(price up by more than a threshold in the next N bars)` as a 3-class problem (`up` / `down` / `flat`), not a continuous return percentage. A raw regression on 15-minute crypto returns is dominated by noise and produces a spuriously precise-looking number with no real predictive content; a calibrated 3-class probability is honest about what a tabular GBDT can actually do here, and it maps directly onto the same `direction`/`confidence` `Signal` shape every other agent already produces — no new port type, no frontend change.
+4. **No LLM involvement whatsoever in this node.** This is a pure statistical/ML model, not a Layer III reasoning agent. It does not use `LlmAgentNode`, does not touch the credit wallet, does not call any LLM gateway function. Its cost to the user is effectively free compute, exactly like `technical-indicators` or `risk-gate` — this is a deliberate, stated distinction between Layer III (LLM-optional reasoning, credit-metered) and Layer IV (deterministic statistical inference, free).
+5. **Historical backtests DO run real inference.** Unlike the Phase 14 LLM-mode-gating rule (LLM calls only in `paper`/`live`), a trained GBDT model is cheap and fast (sub-millisecond inference per row) — there is no cost reason to skip it in `historical`/`walk-forward`/`monte-carlo` modes, and skipping it would defeat the entire purpose of being able to walk-forward validate an ML-driven strategy, which is the whole reason `docs/Full context.md` §9.1's 4-stage validation pipeline exists. `gbdt-forecast` runs its real trained model in **every** mode, always. Do not carry over the LLM's mode-gating pattern here — it does not apply, and copying it would be a mistake, not a safety measure.
+
+---
+
+## 1. Mandatory Step Zero: audit before writing any code
+
+Read and summarize (real vs. mock, in your own words) before making any change:
+
+1. `apps/engine/app/nodes/universal.py` — the `elif self.layer == "ml":` branch in full. Confirm this is genuinely the only place `gbdt-forecast` currently gets any behavior, and that it is componentId-agnostic (i.e. `sequence-model`/`vol-forecast`/etc. currently produce **identical** output to `gbdt-forecast` today, since `UniversalNode` doesn't differentiate within a layer — this is exactly the gap Phase 16 closed for Layer III agents, now repeating one level up).
+2. `apps/engine/app/nodes/registry.py` — confirm the current `create_node_factory("gbdt-forecast", "ml", "Gradient Boosting Forecast")` entry, and that the other five `ml`-layer entries exist alongside it and are explicitly out of scope this phase.
+3. `apps/engine/app/nodes/feature_engineering/technical_indicators.py` — the exact `FeatureVector` shape it currently produces (RSI, EMA fast/slow, MACD, MACD signal, zscore, regime). This is your primary tabular feature source; you are not inventing a new feature-engineering node, you are training on what already exists.
+4. `apps/engine/app/nodes/data_collection/news_stream.py` and `orderbook_depth.py` — confirm their real output shapes (`sentimentScore`, `articleCount`, `imbalancePct`, `dataQuality`) from Phases 17–18. These become optional additional training features **only when present in the graph** — the model must not hard-require them (a bot that only has `ohlcv-feed` → `technical-indicators` → `gbdt-forecast` with no news/orderbook nodes must still work).
+5. `apps/engine/app/nodes/base.py` — confirm `NodeContext`'s current fields (`mode`, `user_id`, `bot_id`, `run_id`, `live_session_id`, `db`, `historical_window`, `macro_events_cache`). Confirm whether `historical_window` (the rolling DataFrame passed for indicator calculation) is available in **every** mode or only some — your inference node needs a rolling window of recent bars' features to build a single training-row-shaped feature vector at each call, and you must know where that window already comes from rather than re-fetching it.
+6. `apps/engine/app/engine/bar_runner.py` — `build_node_instances`, confirm exactly how/when a node class is instantiated (once per backtest run, or once per bar?). This matters enormously for this phase: loading a LightGBM model artifact from disk is not free, and **must happen once when the node instance is constructed, never inside `run()`** — check the current pattern before assuming.
+7. `apps/engine/app/db/models.py` — confirm there is no existing table for tracking trained model artifacts/versions.
+8. `apps/engine/requirements.txt` — confirm `lightgbm`, `scikit-learn` are not already present.
+9. `apps/web/mock/layers.ts` — find the `ComponentDef` entry for `gbdt-forecast`. Note its existing fields (does it already expose a lookahead/horizon config, a confidence threshold, a model-version selector?). Your Python config parsing must accept whatever shape already exists there without requiring a frontend change, per the standing discipline every prior phase followed.
+10. `apps/engine/tests/test_flow_and_contrarian_agents.py` and `test_data_ingestion.py` — confirm test fixture/mocking conventions (`get_test_user_id`, `AsyncSessionLocal`, `httpx.AsyncClient` patching style) so your new tests match exactly.
+
+Report all ten findings before proceeding.
+
+---
+
+## 2. Task 1 — Database: model registry
+
+New migration `supabase/migrations/0013_ml_models.sql`:
+
+```sql
+-- Tracks trained model artifacts. The engine writes here after each offline training
+-- run; inference nodes read the row marked `is_active` for their component_id to know
+-- which artifact file to load. This is metadata only — the actual serialized model
+-- (a .txt/.pkl file) lives on the engine's local disk / persistent volume, referenced
+-- by `artifact_path`, exactly the same "DB row + disk file" split already used nowhere
+-- else in this codebase yet, but the standard pattern for ML artifacts industry-wide.
+create table public.ml_models (
+  id uuid primary key default gen_random_uuid(),
+  component_id text not null,             -- e.g. 'gbdt-forecast'
+  version text not null,                  -- e.g. 'v1', ISO-date-stamped is fine too
+  symbol text not null,                   -- trained per-symbol, e.g. 'BTCUSDT'
+  resolution text not null,               -- e.g. '15m' — must match the bot's candle resolution to be valid
+  horizon_bars int not null,              -- how many bars ahead the model predicts, e.g. 12
+  up_threshold_pct numeric not null,      -- e.g. 0.5 (%) — return above this over horizon_bars labeled 'up'
+  down_threshold_pct numeric not null,    -- e.g. -0.5 (%) — return below this labeled 'down'; between is 'flat'
+  artifact_path text not null,            -- path on the engine's filesystem/volume
+  feature_columns text[] not null,        -- exact ordered list of feature names the model expects
+  train_start timestamptz not null,
+  train_end timestamptz not null,
+  train_row_count int not null,
+  accuracy numeric,                       -- held-out test accuracy, informational only
+  is_active boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create index ml_models_component_symbol_idx on public.ml_models (component_id, symbol, resolution, is_active);
+
+alter table public.ml_models enable row level security;
+create policy "ml_models readable by anyone authenticated" on public.ml_models
+  for select using (auth.role() = 'authenticated');
+-- No insert/update/delete policy for anon/authenticated — only the offline training
+-- script (via the service-role connection) writes here, same pattern as `candles`.
+```
+
+Add a matching `MlModelModel` to `apps/engine/app/db/models.py`, following the exact column/type conventions already used elsewhere in that file (`ARRAY(Text)` for `feature_columns`, matching how `NewsItemModel.symbols` already does it per Phase 17).
+
+Only one row per `(component_id, symbol, resolution)` should have `is_active = true` at a time — enforce this in application code in the training script (unset the previous active row in the same transaction that sets the new one active), not via a DB constraint — a partial unique index here would be reasonable but is not required for this phase's scope; note this as a possible future hardening in a code comment rather than building it now.
+
+---
+
+## 3. Task 2 — Offline training pipeline
+
+New file `apps/engine/app/ml/__init__.py` (empty) and `apps/engine/app/ml/train_gbdt_forecast.py` — a standalone script (`python -m app.ml.train_gbdt_forecast --symbol BTCUSDT --resolution 15m`), same invocation style as `binance_ingest.py`.
+
+### 3.1 Feature construction
+
+Query `candles` for the given `symbol`/`resolution` across the full available history (per `binance_ingest.py`'s backfill, this should be ~2 years of 15m bars). Load into a single pandas DataFrame, sorted by `open_time` ascending.
+
+Recompute the **exact same** feature set `TechnicalIndicatorsNode` produces at inference time — RSI(14), EMA fast/slow, MACD, MACD signal, the same `zscore`/`regime` calculation from `universal.py`'s features branch — using `pandas-ta` (already a dependency) applied vectorized across the whole DataFrame, not by calling the node's `run()` in a loop (that's for per-bar live inference; training needs a fast, vectorized pass over ~70,000 rows). **This is the single most important correctness constraint in this task:** if your vectorized training-time feature computation doesn't produce numerically identical values to `TechnicalIndicatorsNode`'s per-bar computation for the same historical window, the model will have learned a feature distribution that inference never actually reproduces — a silent, hard-to-debug train/serve skew. Write a small sanity check at the end of this script: recompute features for the last 300 rows both via the vectorized batch path and by instantiating `TechnicalIndicatorsNode` and calling it row-by-row with a rolling window slice, and assert the two feature sets match within floating-point tolerance before proceeding to training. Fail loudly and stop if they don't — do not train on a feature pipeline you haven't proven matches production.
+
+### 3.2 Labeling
+
+For each row `t`, compute `future_return_pct = (close[t + horizon_bars] - close[t]) / close[t] * 100`. Label:
+- `up` if `future_return_pct > up_threshold_pct`
+- `down` if `future_return_pct < down_threshold_pct`
+- `flat` otherwise
+
+Use `horizon_bars = 12` (3 hours on 15m candles) and `up_threshold_pct = 0.5`, `down_threshold_pct = -0.5` as defaults — these become CLI args with these defaults, not hardcoded magic numbers, and get written into the `ml_models` row so inference can report what the model actually predicts (e.g. in the node's `rationale` string). Drop the last `horizon_bars` rows (no future data to label them with) and any row with a `NaN` feature (indicator warm-up period at the start of the series).
+
+### 3.3 Train/test split — chronological, never random
+
+**Do not use a random train/test split.** This is time-series data; a random split leaks future information into training via autocorrelated neighboring bars. Use a strict chronological split: the earliest 80% of rows for training, the most recent 20% for a held-out test set. Report test-set accuracy and a per-class breakdown (precision/recall for `up`/`down`/`flat`) to stdout, and store the overall accuracy in the `ml_models.accuracy` column. State plainly in your final report that class imbalance (in most regimes, `flat` will dominate) means raw accuracy alone is not a strong signal — report the per-class breakdown too, and don't oversell whatever number comes out.
+
+### 3.4 Model
+
+```python
+import lightgbm as lgb
+from sklearn.preprocessing import LabelEncoder
+
+model = lgb.LGBMClassifier(
+    objective="multiclass",
+    num_class=3,
+    n_estimators=200,
+    learning_rate=0.05,
+    max_depth=6,
+    random_state=42,
+)
+model.fit(X_train, y_train_encoded)
+```
+
+Use `LabelEncoder` (or a fixed manual mapping — your choice, but document it) for `{"down": 0, "flat": 1, "up": 2}` so encode/decode is unambiguous and stable across training runs (do not let `LabelEncoder` alphabetize non-deterministically relative to your own code's expectations — write the mapping explicitly).
+
+### 3.5 Persist
+
+Serialize the fitted model with `model.booster_.save_model(artifact_path)` (LightGBM's native format — do not use `pickle` for the model itself, since `pickle` across library-version upgrades is fragile; LightGBM's native text format is portable and version-stable). Store the artifact under a new directory, e.g. `apps/engine/model_artifacts/gbdt-forecast/{symbol}_{resolution}_{version}.txt` — add this directory to `.gitignore` (trained model files do not belong in git; they are regenerated by re-running this script) and confirm the deployment target (Render, per Phase 10's Part E.15) has a persistent disk mounted at this path, or note in your report that on an ephemeral filesystem this script must be re-run after every deploy — state this limitation plainly rather than silently hoping it isn't a problem.
+
+Insert the `ml_models` row (unsetting any previous `is_active` row for the same `component_id`/`symbol`/`resolution` first, in the same transaction) with `feature_columns` set to the **exact ordered list** of column names `X_train` was built from — this ordered list is what the inference node uses to reconstruct a matching feature vector at serve time; a mismatch in column order between training and inference is a silent correctness bug in tabular ML and must be guarded against explicitly (see Task 3.3).
+
+---
+
+## 4. Task 3 — The inference node
+
+New file `apps/engine/app/nodes/ml/__init__.py` (empty) and `apps/engine/app/nodes/ml/gbdt_forecast.py`:
+
+```python
+class GbdtForecastNode:
+    component_id = "gbdt-forecast"
+
+    def __init__(self, config: dict = None):
+        self.config = config or {}
+        self._model = None            # lazy-loaded, see 4.1
+        self._model_row = None
+        self._load_error: Optional[str] = None
+
+    async def run(self, ctx: NodeContext, config: dict) -> dict:
+        ...
+```
+
+### 4.1 Lazy, cached model loading — load once, not per bar
+
+Per your Step Zero audit finding #6, confirm exactly when node instances are constructed relative to the per-bar loop. Loading a LightGBM booster from disk takes tens of milliseconds — acceptable once per backtest run, catastrophic if repeated for every one of ~70,000 historical bars. Load the model **once**, on first `run()` call (lazy init, cached on `self._model`), not in `__init__` (which per your audit may run before a DB session is available to query `ml_models` for the active row — if `__init__` already has DB access per the existing pattern, load there instead; **match whatever the existing node-instantiation lifecycle actually supports**, don't assume).
+
+Query `ml_models` for the row where `component_id = 'gbdt-forecast'`, `symbol` matches the bot's configured symbol (from `ctx.candle`), `resolution` matches the bot's configured resolution (available via whatever mechanism `ohlcv-feed`/`live_runner.py`'s `extract_bot_resolution_and_interval` already uses — reuse that, don't reinvent resolution detection), and `is_active = true`. If no such row exists (model never trained for this symbol/resolution combination), set `self._load_error = "No trained gbdt-forecast model found for {symbol}/{resolution} — run app.ml.train_gbdt_forecast first."` and every subsequent `run()` call returns the standard "no data" fallback shape (see 4.3) with this message in `rationale` — never crash the bot's execution loop over a missing model artifact.
+
+If `ctx.db is None` (pure in-memory historical pass with no DB session, per the established Phase 14/17 pattern): mirror the `macro_events_cache` precedent exactly — the model row lookup must happen **once**, upfront, before the per-bar loop starts (in `backtest_runner.py`'s `run_backtest`, alongside where `macro_events_cache` is already fetched), and be passed into `NodeContext` as a new optional field, e.g. `ctx.ml_model_registry_cache: Optional[dict]` (a dict keyed by `f"{component_id}:{symbol}:{resolution}"`, since more than one ML node type may eventually need this same cache). `GbdtForecastNode` checks this cache first if `ctx.db is None`, falls back to a real DB query otherwise — the exact same dual-path discipline `compute_blackout` established in Phase 17. Update `apps/engine/app/nodes/base.py` and thread this new field through `bar_runner.py` and `backtest_runner.py` the same additive, default-`None` way every prior phase's new context field was added.
+
+### 4.2 Building the feature vector at inference time
+
+Using `ctx.historical_window` (the rolling window DataFrame already passed for indicator calculation — confirmed present per your audit) plus the current bar, compute the **exact same** feature set the training script computed (RSI, EMA fast/slow, MACD, MACD signal, zscore, regime-as-a-numeric-encoding — LightGBM needs numeric input, so encode `regime` the same way you did in training, e.g. `1.0` for `"Trend"`, `0.0` for `"Chop"`, and store this encoding convention as a comment in both the training script and this node so they never drift apart). Optionally include `sentimentScore` and `imbalancePct` **only if** an upstream `NewsFeed`/`MarketData`-with-`imbalancePct` output is present in `ctx.upstream_outputs` (reuse `find_upstream`-style lookups) — if the model was trained without these columns (because your Task 2 default training run only used OHLCV-derived features), do not fabricate them; only include columns the loaded model's `feature_columns` list actually expects. **Build the final feature vector strictly in the order given by `self._model_row.feature_columns`** — do not rely on dict insertion order or any implicit ordering; explicitly select and order columns by name from a dict you've built, and raise a clear internal error (caught and turned into a graceful fallback, never an unhandled exception propagating out of `run()`) if any expected column is missing.
+
+### 4.3 Inference and output
+
+```python
+probs = self._model.predict([feature_vector])[0]   # [P(down), P(flat), P(up)] per your training-time label encoding
+direction_idx = int(probs.argmax())
+direction = {0: "short", 1: "flat", 2: "long"}[direction_idx]
+confidence = float(probs[direction_idx])
+```
+
+Return:
+```python
+{
+    "type": "Signal",
+    "direction": direction,
+    "confidence": round(confidence, 4),
+    "price": current_close,
+    "rationale": (
+        f"GBDT forecast ({self._model_row.version}, {self._model_row.horizon_bars}-bar horizon): "
+        f"P(down)={probs[0]:.0%} P(flat)={probs[1]:.0%} P(up)={probs[2]:.0%}"
+    ),
+    "audit": {
+        "model_version": self._model_row.version,
+        "model_symbol": self._model_row.symbol,
+        "model_resolution": self._model_row.resolution,
+        "horizon_bars": self._model_row.horizon_bars,
+        "train_accuracy": float(self._model_row.accuracy) if self._model_row.accuracy is not None else None,
+        "probabilities": {"down": round(float(probs[0]), 4), "flat": round(float(probs[1]), 4), "up": round(float(probs[2]), 4)},
+        "feature_vector": dict(zip(self._model_row.feature_columns, [round(float(v), 4) for v in feature_vector])),
+    },
+}
+```
+
+The "no model found" / "missing feature" fallback shape must be structurally consistent with every other agent's established "no data" convention (`direction: "flat"`, low confidence, a clear `rationale`, and — new for this node specifically — `audit: {"model_status": "not_found" | "feature_mismatch", ...}` so a bot builder can immediately tell from the trade log why the ML node contributed nothing, rather than silently looking like a real-but-neutral prediction).
+
+---
+
+## 5. Task 4 — Registry and requirements
+
+`apps/engine/app/nodes/registry.py`:
+```python
+"gbdt-forecast": GbdtForecastNode,
+```
+Leave `sequence-model`, `vol-forecast`, `ensemble-stacker`, `anomaly-detector`, `meta-labeler` exactly as their current `create_node_factory(...)` stub entries — untouched, out of scope this phase.
+
+`apps/engine/requirements.txt`: add `lightgbm`, `scikit-learn` (needed for `LabelEncoder` and standard train/test utilities), `joblib` if you use it for anything beyond what `lightgbm`'s native save/load already covers (likely unnecessary — prefer LightGBM's own `save_model`/`Booster(model_file=...)` over `joblib`/`pickle` per Task 3.5's reasoning).
+
+---
+
+## 6. Task 5 — Frontend field check (minimal, additive only)
+
+Per your Step Zero audit finding #9: `apps/web/mock/layers.ts`'s `gbdt-forecast` `ComponentDef` may already expose fields this node can read (a horizon or confidence-threshold slider, perhaps). If it does, confirm the field keys match what your Python config parsing expects (`cfg.get("minConfidence", ...)`, etc. — if you add a confidence gate at the node level, e.g. only emit a non-`"flat"` direction if `confidence >= cfg.get("minConfidence", 0.4)`, otherwise flatten to reduce noise from low-conviction predictions). If no relevant field exists yet and you judge one is genuinely useful (a `minConfidence` slider is a reasonable, minimal addition matching the `slider`/`number` `FieldDef` shapes already used elsewhere), add it following the existing file's exact conventions — do not restructure the file or touch any other `ComponentDef`. Do not add a "select which trained model version to use" UI control this phase — the node always uses whichever row is `is_active` in `ml_models`; a version-picker UI is a reasonable future enhancement, explicitly out of scope here.
+
+---
+
+## 7. Task 6 — Tests
+
+New `apps/engine/tests/test_ml_gbdt_forecast.py`, matching the exact fixture/mocking conventions of `test_flow_and_contrarian_agents.py`/`test_data_ingestion.py`:
+
+- A unit test training a tiny LightGBM model on synthetic, clearly-separable data (e.g. a feature that's perfectly correlated with the label) and confirming `GbdtForecastNode` loads it and produces the expected direction — this proves the load → feature-order → predict → decode pipeline is wired correctly without needing 70,000 real rows in a test fixture.
+- A test confirming feature vectors are built in the **exact order** `feature_columns` specifies, even when the upstream feature dict's natural key order differs — deliberately construct a feature dict with keys in a different order than `feature_columns` and confirm the model receives them correctly ordered (this is the single most important regression test in this phase, protecting against the train/serve skew Task 3.1 and Task 4.2 both warn about).
+- A test confirming `GbdtForecastNode` runs identically (same code path, no LLM-style mode gating) across `historical`, `paper`, and `live` `ctx.mode` values — this is the explicit, deliberate contrast with every Layer III agent's test suite, and should be commented as such so a future reader doesn't mistake the absence of mode-gating for an oversight.
+- A test confirming the "no trained model found" fallback returns a valid, non-crashing `Signal` with `audit.model_status == "not_found"` and a clear `rationale`.
+- A test confirming a missing expected feature column (simulate a graph where `technical-indicators` isn't actually upstream, so the feature dict is incomplete) produces the `feature_mismatch` fallback, not an unhandled `KeyError` propagating out of `run()`.
+- A test confirming `ctx.db is None` with a populated `ctx.ml_model_registry_cache` produces an identical result to the DB-backed lookup path for the same input — mirroring the exact `compute_blackout` dual-path equivalence test from Phase 17.
+- Confirm the full pre-existing engine test suite (`test_llm_gateway.py`, `test_data_ingestion.py`, `test_flow_and_contrarian_agents.py`, `test_billing.py`, `test_entitlements_enforcement.py`) still passes unmodified after this phase's `NodeContext` field addition.
+
+You are not required to run the real `train_gbdt_forecast.py` script against 2 years of live Binance data as part of the automated test suite (that's slow and belongs in manual verification, per the acceptance checklist below) — unit-test the inference node against a small, hand-trained or synthetic model artifact instead.
+
+---
+
+## 8. Explicit non-goals for this phase
+
+Do **not**:
+- Touch `sequence-model`, `vol-forecast`, `ensemble-stacker`, `anomaly-detector`, or `meta-labeler` — all remain `UniversalNode` stubs. This phase proves the "real trained artifact + registry row + lazy-loaded inference node" pattern on exactly one model, for the next phase to replicate — do not batch multiple ML models into one phase; that was explicitly the lesson already learned and stated in Phase 16 about not skipping ahead.
+- Touch Layer V (RL), Layer VI (debate/consensus), Layer VII (confidence/calibration beyond the existing risk gate), Layer XI–XII (self-learning/memory), or OCULUS vision.
+- Add any LLM involvement to `gbdt-forecast` — it is pure statistical inference, uncredited, unmetered, no gateway call.
+- Build any kind of scheduled/automatic retraining job in this phase (`retrainer`, Layer XI, is explicitly a separate future phase per the existing roadmap) — training is a manual, standalone script invocation only.
+- Modify `technical_analyst.py`, `sentiment_analyst.py`, `macro_strategist.py`, `event_specialist.py`, `flow_analyst.py`, `contrarian.py`, or anything in `apps/engine/app/llm/*` — none of them need to change for this phase; if you find yourself editing them, stop and reconcile against your Step Zero audit.
+- Modify `supabase/migrations/0001`–`0012` — only add `0013_ml_models.sql`.
+- Use a random (non-chronological) train/test split, `pickle` for model serialization, or a raw-regression (rather than 3-class classification) prediction target — all three are explicitly wrong choices for this problem, stated up front to prevent relitigating them.
+
+---
+
+## 9. Acceptance checklist
+
+- [ ] A clean Python import check on `apps/engine` passes with no errors.
+- [ ] `npx tsc --noEmit` in `apps/web` returns 0 errors.
+- [ ] All new and existing tests pass, including the new `test_ml_gbdt_forecast.py`, and every pre-existing engine test file passes unmodified.
+- [ ] Running `python -m app.ml.train_gbdt_forecast --symbol BTCUSDT --resolution 15m` against real cached candle data completes, prints a per-class accuracy breakdown to stdout, writes a model artifact file to disk, and inserts a new `ml_models` row with `is_active = true` (and correctly flips any prior row for the same symbol/resolution to `is_active = false`) — verify directly in Supabase.
+- [ ] The train-time-vs-inference-time feature parity sanity check (Task 3.1) passes and is part of the training script's own output, not just asserted silently.
+- [ ] Assembling a graph `ohlcv-feed → technical-indicators → gbdt-forecast → risk-gate → paper-executor` and running a `historical` backtest produces real, varying `direction`/`confidence` values across different trades (not a constant), each with a populated `audit.probabilities` and `audit.feature_vector` — verify by inspecting at least three different trades' audit trails and confirming the feature vectors and probabilities genuinely differ.
+- [ ] Running the same graph in `paper` mode and in `live` mode (after starting a live session) both also produce real inference — no mode-based skipping anywhere in this node, confirmed by test per Task 6.
+- [ ] Running a bot with `gbdt-forecast` configured for a symbol/resolution with no trained model produces a graceful flat fallback with a clear, actionable `rationale` ("...run app.ml.train_gbdt_forecast first") — not a crashed backtest.
+- [ ] No credit is debited from any user's wallet as a result of `gbdt-forecast` running, in any mode, any number of times — confirm by checking `credit_transactions` before/after a backtest that exercises this node heavily.
+- [ ] The existing Trade Flow Modal / Contribution Panel continue to render this node's trade audit trail without modification (its `audit` dict is a superset addition, same discipline as every prior phase's node output).
+- [ ] The final report states plainly: (a) this is a real, trained, chronologically-validated LightGBM classifier — not a stub — with a stated held-out test accuracy and honest acknowledgment of class-imbalance caveats; (b) it is the only real Layer IV node; the other five remain unbuilt stubs; (c) retraining is currently a fully manual process with no scheduled automation, and the model artifact's persistence across deploys depends on the hosting platform's disk configuration, which must be verified in the actual deployment environment, not assumed.
+
+---
+
+## 10. What this phase deliberately does not finish
+
+After this phase: one Layer IV node (`gbdt-forecast`) performs real, trained, chronologically-validated statistical inference across every backtest/live mode, with a versioned model registry and full audit-trail integration. The other five Layer IV components, all of Layer V (RL/DARWINEX), Layer VI (debate/consensus), the deeper parts of Layer VII (beyond the existing risk gate), Layers XI–XII (self-learning/memory/ChromaDB), and OCULUS vision remain exactly as they were: either `UniversalNode` heuristic stubs or entirely unbuilt. There is no scheduled retraining, no model monitoring/drift detection (that is `drift-monitor`'s own future phase), and no multi-model ensembling (`ensemble-stacker`'s own future phase). The next phase in this sequence should either (a) replicate this exact "train offline → register → lazy-load → infer" pattern for one additional Layer IV model such as `vol-forecast` (a genuinely different, well-scoped target: predicting realized volatility rather than direction), or (b) move to Layer V position-sizing RL only once at least two real ML signals exist for it to meaningfully act on — state your recommendation but do not start either without a new, separate bounded prompt, per the discipline every phase in this sequence has followed since Phase 12.

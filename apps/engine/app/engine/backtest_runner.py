@@ -1,6 +1,6 @@
 import math
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 import numpy as np
 import pandas as pd
@@ -11,8 +11,7 @@ from ..schemas.graph import BotGraph
 from ..schemas.backtest import BacktestConfig, BacktestMetrics, EquityPoint, Trade
 from ..graph.compiler import compile_graph
 from ..nodes.base import NodeContext, ClosedTrade
-from ..nodes.registry import REGISTRY
-from ..db.models import CandleModel, BacktestRunModel, TradeModel, EquityPointModel
+from ..db.models import CandleModel, BacktestRunModel, TradeModel, EquityPointModel, MacroEventModel, NewsItemModel
 from .bar_runner import build_node_instances, run_one_bar
 
 class Portfolio:
@@ -273,6 +272,8 @@ async def simulate_historical_pass(
     bot_id: Optional[str] = None,
     run_id: Optional[str] = None,
     db: Optional[Any] = None,
+    macro_events_cache: Optional[Any] = None,
+    news_items_cache: Optional[Any] = None,
 ) -> tuple[List[ClosedTrade], List[EquityPoint], Portfolio]:
     portfolio = Portfolio(cash=config.capital, seed=config.seed + seed_offset)
     equity_curve: List[EquityPoint] = []
@@ -303,6 +304,8 @@ async def simulate_historical_pass(
             bot_id=bot_id,
             run_id=run_id,
             db=db,
+            macro_events_cache=macro_events_cache,
+            news_items_cache=news_items_cache,
         )
         if closed_trade is not None:
             trades.append(closed_trade)
@@ -370,6 +373,36 @@ async def run_backtest(
         full_df, candle_records = prepare_indicators_dataframe(full_df)
         sim_type = config.type or "historical"
 
+        # Upfront cache fetch for macro events (used across all backtest simulation modes)
+        macro_events_cache = []
+        try:
+            macro_res = await db.execute(select(MacroEventModel).order_by(MacroEventModel.scheduled_at.asc()))
+            macro_events_cache = list(macro_res.scalars().all())
+        except Exception as e:
+            print(f"[Backtest Runner] Notice on pre-fetching macro events: {e}")
+
+        # Upfront cache fetch for news items (used for zero-lookahead backtest replay)
+        news_items_cache = []
+        try:
+            t0 = candle_dicts[0]["open_time"] if candle_dicts else datetime(2023, 1, 1, tzinfo=timezone.utc)
+            t1 = candle_dicts[-1]["open_time"] if candle_dicts else datetime(2027, 12, 31, tzinfo=timezone.utc)
+            if hasattr(t0, "tzinfo") and t0.tzinfo is None:
+                t0 = t0.replace(tzinfo=timezone.utc)
+            if hasattr(t1, "tzinfo") and t1.tzinfo is None:
+                t1 = t1.replace(tzinfo=timezone.utc)
+
+            news_res = await db.execute(
+                select(NewsItemModel)
+                .where(
+                    NewsItemModel.published_at >= t0 - timedelta(days=2),
+                    NewsItemModel.published_at <= t1 + timedelta(days=1),
+                )
+                .order_by(NewsItemModel.published_at.asc())
+            )
+            news_items_cache = list(news_res.scalars().all())
+        except Exception as e:
+            print(f"[Backtest Runner] Notice on pre-fetching news items: {e}")
+
         trades: List[ClosedTrade] = []
         equity_curve: List[EquityPoint] = []
         portfolio = Portfolio(cash=config.capital, seed=config.seed)
@@ -383,6 +416,7 @@ async def run_backtest(
             trades, equity_curve, portfolio = await simulate_historical_pass(
                 ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.0,
                 mode="historical", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=None,
+                macro_events_cache=macro_events_cache, news_items_cache=news_items_cache,
             )
 
         # ----------------------------------------------------
@@ -403,6 +437,7 @@ async def run_backtest(
             trades, equity_curve, portfolio = await simulate_historical_pass(
                 ordered_nodes, paper_candle_records, config, paper_full_df, slippage_multiplier=1.45, queue_delay=1, seed_offset=17,
                 mode="paper", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=db,
+                macro_events_cache=macro_events_cache, news_items_cache=news_items_cache,
             )
 
         # ----------------------------------------------------
@@ -443,6 +478,7 @@ async def run_backtest(
                         f_trades, f_eq, f_port = await simulate_historical_pass(
                             ordered_nodes, test_records, fold_cfg, test_df, slippage_multiplier=1.15, seed_offset=f * 50,
                             mode="walk-forward", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=None,
+                            macro_events_cache=macro_events_cache, news_items_cache=news_items_cache,
                         )
                         all_trades.extend(f_trades)
                         all_equity.extend(f_eq)
@@ -456,6 +492,7 @@ async def run_backtest(
                 trades, equity_curve, portfolio = await simulate_historical_pass(
                     ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.2,
                     mode="walk-forward", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=None,
+                    macro_events_cache=macro_events_cache, news_items_cache=news_items_cache,
                 )
 
         # ----------------------------------------------------
@@ -465,6 +502,7 @@ async def run_backtest(
             base_trades, base_eq, base_port = await simulate_historical_pass(
                 ordered_nodes, candle_records, config, full_df, slippage_multiplier=1.0,
                 mode="monte-carlo", user_id=user_id_str, bot_id=bot_id_str, run_id=run_id, db=None,
+                macro_events_cache=macro_events_cache, news_items_cache=news_items_cache,
             )
             np.random.seed(config.seed)
             if base_trades:

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +10,7 @@ from .routers import health, validate, backtest, live, billing, api_keys
 from .db.session import AsyncSessionLocal
 from .db.models import LiveSessionModel
 from .engine.live_runner import set_scheduler, register_bot_job
+from .data.news_ingest import ingest_news_batch_job
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,6 +20,20 @@ async def lifespan(app: FastAPI):
     app.state.scheduler = scheduler
     scheduler.start()
     print("[Engine Startup] APScheduler initialized and started.")
+
+    # 2. Register recurring news ingestion job (every 15m, first run immediate)
+    try:
+        scheduler.add_job(
+            ingest_news_batch_job,
+            "interval",
+            minutes=15,
+            id="news-ingest",
+            next_run_time=datetime.now(timezone.utc),
+        )
+        print("[Engine Startup] Registered news-ingest job (15m interval).")
+    except Exception as e:
+        print(f"[Engine Startup] Notice on registering news-ingest job: {e}")
+
 
     # 3. Re-register running bots on engine startup
     try:

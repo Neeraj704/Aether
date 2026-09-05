@@ -12,6 +12,7 @@ from sqlalchemy import (
     JSON,
     ARRAY,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import declarative_base, relationship
@@ -248,4 +249,45 @@ class UserProviderKeyModel(Base):
     encrypted_key = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class NewsItemModel(Base):
+    __tablename__ = "news_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source = Column(Text, nullable=False)
+    external_id = Column(Text, nullable=False)
+    title = Column(Text, nullable=False)
+    body_snippet = Column(Text, nullable=False, default="")
+    url = Column(Text, nullable=False)
+    published_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    symbols = Column(ARRAY(Text), nullable=False, default=list)
+    sentiment_compound = Column(Numeric, nullable=True)
+    sentiment_pos = Column(Numeric, nullable=True)
+    sentiment_neg = Column(Numeric, nullable=True)
+    sentiment_neu = Column(Numeric, nullable=True)
+    fetched_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("source", "external_id", name="news_items_source_external_id_key"),
+        Index("news_items_published_at_idx", published_at.desc()),
+    )
+
+
+class MacroEventModel(Base):
+    __tablename__ = "macro_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_type = Column(Text, nullable=False)  # 'fomc_meeting', 'cpi_release', 'nfp_release'
+    label = Column(Text, nullable=False)
+    scheduled_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    blackout_before_minutes = Column(Integer, nullable=False, default=60)
+    blackout_after_minutes = Column(Integer, nullable=False, default=60)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("event_type", "scheduled_at", name="macro_events_event_type_scheduled_at_key"),
+        Index("macro_events_scheduled_at_idx", "scheduled_at"),
+    )
+
 

@@ -1,5 +1,8 @@
 from typing import Dict, Type
 from .data_collection.ohlcv_feed import OhlcvFeedNode
+from .data_collection.news_stream import NewsStreamNode
+from .data_collection.social_sentiment import SocialSentimentNode
+from .data_collection.macro_calendar import MacroCalendarNode
 from .feature_engineering.technical_indicators import TechnicalIndicatorsNode
 from .intelligence_agents.technical_analyst import TechnicalAnalystNode
 from .intelligence_agents.sentiment_analyst import SentimentAnalystNode
@@ -14,9 +17,9 @@ REGISTRY: Dict[str, Type] = {
     # Layer I: Data Collection
     "ohlcv-feed": OhlcvFeedNode,
     "orderbook-depth": create_node_factory("orderbook-depth", "data", "Order Book Depth"),
-    "news-stream": create_node_factory("news-stream", "data", "News Stream"),
-    "social-sentiment": create_node_factory("social-sentiment", "data", "Social Firehose"),
-    "macro-calendar": create_node_factory("macro-calendar", "data", "Macro Calendar"),
+    "news-stream": NewsStreamNode,
+    "social-sentiment": SocialSentimentNode,
+    "macro-calendar": MacroCalendarNode,
     "fundamentals": create_node_factory("fundamentals", "data", "Fundamentals Snapshot"),
     "options-chain": create_node_factory("options-chain", "data", "Options Chain"),
     "onchain-feed": create_node_factory("onchain-feed", "data", "On-chain Feed"),

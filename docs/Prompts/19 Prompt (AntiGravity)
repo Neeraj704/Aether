@@ -1,0 +1,322 @@
+AETHER — Phase 17: Real Data Ingestion Layer (News, Sentiment, Macro Blackout)
+
+Bounded, single-phase prompt, same discipline as Phases 10–16 (Prompts 12–18) in docs/Prompts/. No prior conversation history is available to you — this document is self-contained. Audit first, as always, and do not expand scope beyond what is listed here.
+
+0. Context you must internalize first, and why this phase exists
+
+AETHER is a no-code visual builder for algorithmic trading agents. The frontend (apps/web, Next.js 16 / React 19 / TypeScript / Zustand / @xyflow/react) was frozen across Phases 0–9. Backend work since then (Phases 10–16) made auth, bot persistence, backtesting, the scheduled live paper-trading loop, billing/credits, presets/marketplace, and LLM reasoning for four Layer III intelligence agents (technical-agent, sentiment-agent, macro-agent, event-agent) all genuinely real.
+
+The gap this phase closes, stated plainly because Phase 16's own report already flagged it and you must not repeat the mistake of pretending otherwise:
+
+apps/engine/app/nodes/universal.py's "data" layer branch is what currently backs news-stream, social-sentiment, and macro-calendar — the three Layer I "Data Collection" nodes that are supposed to sit upstream of the sentiment/macro/event agents in a real graph. Today, that branch does not fetch anything from the outside world. It fabricates a NewsFeed-shaped output on every single call:
+
+python
+"sentimentScore": 0.65 if rsi < 40 else (-0.65 if rsi > 60 else 0.0),
+"blackoutActive": False,
+
+This means: sentimentScore is a repackaged technical indicator, not sentiment. blackoutActive is permanently False — no code path anywhere in the system has ever set it to True outside of a hand-constructed unit test. The four LLM agents you built in Phases 14–16 are real, hardened, credit-metered, audited — and they are reasoning over a number that is secretly RSI wearing a trenchcoat.
+
+Your job this phase: make news-stream, social-sentiment, and macro-calendar real Layer I data-collection nodes, each with its own dedicated class (not the generic UniversalNode stub), backed by:
+
+Real crypto news headlines, fetched on a schedule, cached in Postgres, scored for sentiment with a real (non-LLM, free, deterministic) NLP sentiment model — VADER.
+A real, curated macro event calendar (FOMC meetings, US CPI releases, US NFP releases) — seeded data, not a live third-party API dependency, for reasons explained in §3 — that genuinely drives blackoutActive for the first time in this project's history.
+Wiring both into the compiled graph exactly the way ohlcv-feed already is, so sentiment-agent / macro-agent / event-agent need zero code changes — they already consume NewsFeed-typed upstream output via find_upstream(ctx, "NewsFeed"), and this phase's job is only to make the thing they find be real.
+
+What this phase deliberately does NOT do: it does not touch LLM reasoning, credits, BYOK, the gateway, flow-agent, contrarian-agent, ML/RL, OCULUS, or ChromaDB. It does not add a second sentiment provider or a paid news API. It does not try to build a comprehensive global macro calendar — it seeds three specific, high-impact, well-known recurring US event types, because a shaky live calendar-scraping integration is worse than an honestly-scoped static one for a phase whose entire point is truthfulness about what's real.
+
+1. Mandatory Step Zero: audit before writing any code
+
+Read and summarize (real vs. mock, in your own words) before making any change:
+
+apps/engine/app/nodes/universal.py — the full "data" layer branch. Confirm exactly which componentIds route through it today (news-stream, social-sentiment, macro-calendar, plus orderbook-depth, fundamentals, options-chain, onchain-feed — only the first three are in scope this phase; the latter four stay exactly as they are, still generic stubs, out of scope).
+apps/engine/app/nodes/registry.py — confirm the current create_node_factory(...) entries for news-stream, social-sentiment, macro-calendar.
+apps/engine/app/nodes/intelligence_agents/base.py, sentiment_analyst.py, macro_strategist.py, event_specialist.py — confirm each one's compute_deterministic_baseline() reads sentimentScore / blackoutActive from self.find_upstream(ctx, "NewsFeed"), and confirm none of them care how that dict was produced — this is what makes this phase a pure upstream swap with zero downstream changes required, and you must verify this claim against the actual code, not assume it.
+apps/engine/app/nodes/data_collection/ohlcv_feed.py — this is your structural template for a real (non-UniversalNode) Layer I node: a dedicated class, a component_id, an async def run(self, ctx, config) that returns a typed dict. Your three new nodes follow this exact shape.
+apps/engine/app/engine/bar_runner.py — build_node_instances and run_one_bar. Confirm these are still the single choke point for every runner (historical, paper, walk-forward, monte-carlo, live) and that a new node type dropped into the REGISTRY requires no changes here — only a registry entry.
+apps/engine/app/engine/backtest_runner.py — confirm whether ctx.db is available during historical/walk-forward/monte-carlo passes (per Phase 14's Task 2, it is deliberately None for these to keep the hot loop DB-free). Your new data nodes must work correctly with ctx.db is None — meaning: news sentiment for historical backtests must be read from a pre-populated cache table by timestamp range, exactly the same way ohlcv-feed reads pre-cached candles, never a live fetch inside the bar loop. This is the same architectural principle already established for candles — you are extending it, not inventing a new one.
+apps/engine/app/data/binance_ingest.py — your structural template for a standalone ingestion script: fetch from an external API, normalize, upsert into Postgres with on_conflict_do_nothing, safe to re-run, idempotent.
+apps/engine/app/main.py's lifespan and apps/engine/app/engine/live_runner.py's scheduler registration pattern (Phase 11) — your news-ingestion job reuses this exact AsyncIOScheduler instance, registered once at startup, not a second scheduler.
+apps/web/mock/layers.ts — find the ComponentDef entries for news-stream, social-sentiment, macro-calendar. Note their existing fields/advancedFields — e.g. does news-stream already expose a "channels to pull from" checklist, a keyword filter, a refresh-interval slider? Your engine-side config parsing must accept whatever shape already exists there without requiring a frontend change, per the same discipline every prior phase followed for mock/models.ts/ModelSelection.
+apps/engine/requirements.txt — confirm vaderSentiment is not already present.
+
+Report all ten findings before proceeding.
+
+2. Task 1 — Database: news cache and macro event calendar
+
+New migration supabase/migrations/0012_news_and_macro_events.sql:
+
+sql
+-- Real crypto news headlines, fetched on a schedule, kept for both live sentiment
+-- scoring and historical-backtest replay (read by timestamp range, same pattern as candles).
+create table if not exists public.news_items (
+  id uuid primary key default gen_random_uuid(),
+  source text not null,                 -- e.g. 'cryptocompare'
+  external_id text not null,             -- the source's own article id, for dedup
+  title text not null,
+  body_snippet text not null default '',
+  url text not null,
+  published_at timestamptz not null,
+  symbols text[] not null default '{}',  -- e.g. {'BTC','ETH'} — tagged assets, from the source's own categorization
+  sentiment_compound numeric,             -- VADER compound score, -1.0 to 1.0, computed at ingest time
+  sentiment_pos numeric,
+  sentiment_neg numeric,
+  sentiment_neu numeric,
+  fetched_at timestamptz not null default now(),
+  unique (source, external_id)
+);
+
+create index if not exists news_items_published_at_idx on public.news_items (published_at desc);
+create index if not exists news_items_symbols_idx on public.news_items using gin (symbols);
+
+alter table public.news_items enable row level security;
+create policy "news_items readable by anyone authenticated" on public.news_items
+  for select using (auth.role() = 'authenticated');
+-- No insert/update/delete policy for anon/authenticated — only the engine's service-role
+-- ingestion job writes here, same pattern as `candles`.
+
+-- Curated, high-impact recurring US macro events. Seeded manually, not scraped from a
+-- live calendar API — see Phase 17 prompt §3 for why. `impact` is always 'high' for
+-- entries in this table; this table is deliberately narrow-scope, not a general calendar.
+create table if not exists public.macro_events (
+  id uuid primary key default gen_random_uuid(),
+  event_type text not null check (event_type in ('fomc_meeting','cpi_release','nfp_release')),
+  label text not null,                   -- e.g. 'FOMC Meeting Decision', 'US CPI Release (MoM)'
+  scheduled_at timestamptz not null,      -- the announcement time, UTC
+  blackout_before_minutes int not null default 60,
+  blackout_after_minutes int not null default 60,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists macro_events_scheduled_at_idx on public.macro_events (scheduled_at);
+
+alter table public.macro_events enable row level security;
+create policy "macro_events readable by anyone authenticated" on public.macro_events
+  for select using (auth.role() = 'authenticated');
+-- Writes: service-role only, via the seed script in Task 3 below.
+
+Add matching SQLAlchemy models NewsItemModel and MacroEventModel to apps/engine/app/db/models.py, following the exact column/type conventions already used for CandleModel (do not introduce a different ORM style — Numeric for the sentiment scores, ARRAY(Text) for symbols, Text with a Python-level enum-like check for event_type, matching how BacktestRunModel.status/kind already do a string column with application-level validation rather than a Postgres enum type).
+
+3. Why a curated table instead of a live macro-calendar API — read this before objecting
+
+A genuinely comprehensive, always-current economic calendar (Trading Economics, Forex Factory, Investing.com) either requires a paid API key, has an unstable/scraping-only free tier, or both. Building this phase's blackoutActive signal on top of a flaky or paywalled third party would make the one part of this phase meant to be unquestionably real (the macro blackout window) the least reliable part of the system — worse than the honest stub it's replacing. Instead:
+
+FOMC meeting dates are published by the Federal Reserve a year in advance and change extremely rarely. NFP (Non-Farm Payrolls) is always the first Friday of the month at 8:30am ET. CPI release dates are published by the BLS months in advance.
+Seed macro_events with the actual, real, currently-known 2025–2026 FOMC meeting dates and the real monthly NFP/CPI release pattern for the next 12 months from whenever you run the seed script. Look these up for real (Federal Reserve's own published FOMC calendar, BLS's own published release schedule) — do not fabricate plausible-looking dates. If you cannot verify a specific date with a real source at build time, mark it in a code comment as needing verification rather than inventing one.
+This is a legitimate, bounded, honest engineering choice for this phase's scope — not a shortcut. State this reasoning in your final report, exactly as Phase 16 was required to state its own honesty caveat about synthetic upstream data. This phase removes one instance of that caveat (real news sentiment) and is explicit about the scope of the other (curated, not live, macro calendar) rather than overclaiming.
+3.1 Seed script: apps/engine/app/data/seed_macro_events.py
+
+A standalone script (not an HTTP route), same idempotent-upsert pattern as binance_ingest.py:
+
+python
+# Real, verified Federal Reserve FOMC meeting dates and BLS CPI/NFP release patterns.
+# Source: federalreserve.gov FOMC calendar, bls.gov release schedule.
+# Re-verify and re-run this script whenever the Fed publishes its next calendar year.
+FOMC_MEETINGS_UTC = [
+    # (scheduled_at_utc_iso, label)
+    # Populate with real dates for the current and next calendar year.
+]
+CPI_RELEASES_UTC = [
+    # First-Friday-adjacent BLS CPI release dates, real, for the current/next 12 months.
+]
+NFP_RELEASES_UTC = [
+    # First Friday of each month, 8:30am ET converted to UTC, for the current/next 12 months.
+]
+
+Upsert all three lists into macro_events with on_conflict (event_type, scheduled_at) do nothing — note this requires a unique constraint on (event_type, scheduled_at), add it to the migration in Task 1 if you did not already include it. Run this once manually after migrating (python -m app.data.seed_macro_events), and design it so re-running it later (to append the next year's dates) is safe and additive.
+
+4. Task 2 — News ingestion: fetch, sentiment-score, cache
+4.1 Data source
+
+Use CryptoCompare's public News API (https://min-api.cryptocompare.com/data/v2/news/?lang=EN) — it requires no API key for reasonable request volumes, returns real crypto news headlines with a body, title, url, published_on (unix timestamp), categories (comma-separated, from which you can derive a rough symbols tag by checking for BTC/ETH substrings), and a stable id per article for dedup. Confirm this endpoint's exact current response shape yourself by fetching it once during development — do not assume the shape from memory; API response shapes drift.
+
+4.2 Sentiment scoring: VADER
+
+Add vaderSentiment to apps/engine/requirements.txt. VADER (vaderSentiment.vaderSentiment.SentimentIntensityAnalyzer) is a free, deterministic, lexicon-and-rule-based sentiment analyzer — not an LLM, not an API call, no cost, no rate limit, runs in milliseconds. This is the correct tool here: real NLP, zero incremental cost or latency risk to the ingestion job, and it composes cleanly with the separate, already-real LLM reasoning layer built in Phases 14–16 — VADER produces the sentimentScore that feeds the deterministic baseline and the LLM's context, exactly as the previously-fake RSI-derived number did structurally, except now the number means what it says.
+
+Run analyzer.polarity_scores(title + ". " + body_snippet) per article, storing compound, pos, neg, neu on the news_items row.
+
+4.3 apps/engine/app/data/news_ingest.py (new file)
+python
+async def fetch_latest_news(limit: int = 50) -> list[dict]:
+    """Fetches latest crypto news from CryptoCompare's public News API."""
+
+async def ingest_news_batch(session: AsyncSession):
+    """
+    Fetches latest news, scores each new article with VADER, upserts into news_items
+    (on_conflict (source, external_id) do nothing — never re-score an article twice).
+    Idempotent and safe to run on a schedule.
+    """
+
+Symbol tagging: parse the API's categories field (or equivalent) for BTC/ETH mentions; store as ['BTC'], ['ETH'], ['BTC','ETH'], or [] if neither is detected — do not guess a symbol for an article that doesn't mention one, an empty array is the honest answer for general market news.
+
+4.4 Schedule it
+
+In apps/engine/app/main.py's lifespan, register a recurring job on the same AsyncIOScheduler instance already created for the live-trading loop (Phase 11) — do not instantiate a second scheduler:
+
+python
+scheduler.add_job(
+    ingest_news_batch_job, "interval", minutes=15, id="news-ingest",
+    next_run_time=datetime.now(timezone.utc),  # run once immediately on startup, then every 15m
+)
+
+Fifteen minutes matches the existing live-tick candle resolution, so a fresh sentiment read is always available by the time a live/paper bar executes. Wrap the job body in a try/except that logs and swallows any single failed run (a transient news-API hiccup must never crash the engine process or interfere with the live-trading scheduler jobs running alongside it).
+
+Also run a one-off manual backfill (python -m app.data.news_ingest --backfill-days 30 or similar, your choice of a simple CLI flag) once during setup so paper-type backtests over the recent past have real cached sentiment to read, not an empty table — mirror how binance_ingest.py's main() does an initial historical pull before the recurring live job takes over.
+
+5. Task 3 — Three new, dedicated Layer I node classes
+
+New directory contents under apps/engine/app/nodes/data_collection/:
+
+5.1 news_stream.py — NewsStreamNode, component_id = "news-stream"
+python
+class NewsStreamNode:
+    component_id = "news-stream"
+
+    def __init__(self, config: dict = None):
+        self.config = config or {}
+
+    async def run(self, ctx: NodeContext, config: dict) -> dict:
+        """
+        Returns a real NewsFeed output: aggregate VADER sentiment across recent news_items
+        matching this node's configured symbol(s), plus the real macro-blackout check.
+        """
+
+Logic:
+
+Determine the target symbol(s) from config (reuse whatever the existing ComponentDef field already calls this — check your Step Zero audit finding #9; if it's a checklist of channels rather than a symbol filter, fall back to the candle's own symbol, ctx.candle["symbol"], as the sensible default — the goal is sentiment about the asset this bot is trading, not a generic firehose).
+Query news_items for articles published_at within a configurable lookback window (config.get("lookbackMinutes", 180), i.e. the last 3 hours by default) where symbols overlaps the target symbol, ordered by published_at desc, limited to a reasonable count (e.g. 20).
+In historical/walk-forward/monte-carlo mode (ctx.mode not in ("paper", "live"), or equivalently ctx.db is None per your audit finding #6): query relative to the candle's own open_time, not wall-clock "now" — i.e. published_at <= candle.open_time and published_at >= candle.open_time - lookback. This is what makes replaying real cached news against historical price bars internally consistent (no lookahead bias — a critical, previously-flagged concern from docs/Full context.md's own risk-disclosure language about backtest realism).
+In paper/live mode: query relative to actual wall-clock now (or the current candle's open_time, which will be very recent in these modes anyway) — same query shape, just anchored differently, matching how ohlcv-feed's live vs. historical window already differs.
+If zero matching articles are found in the window: return sentimentScore: 0.0 (true neutral — no data is not the same as fabricated neutral-via-RSI, and this is a real, honest "no signal" state that downstream agents already handle via their own find_upstream "no data" fallback path if this node is entirely absent, but here the node is present and genuinely has nothing to report, which is a distinct and equally valid case — don't conflate the two, just return 0.0 plainly).
+If articles are found: sentimentScore = average(compound scores), weighted more recent articles slightly higher if you want (simple recency weighting is fine, e.g. linear decay over the lookback window — keep it simple and explain your formula in a comment; do not over-engineer this).
+Compute blackoutActive for real (Task 4 below) and include it in the output.
+Return the exact same NewsFeed-shaped dict the old stub produced, so nothing downstream needs to change:
+python
+   return {
+       "type": "NewsFeed",
+       "symbol": target_symbol,
+       "timestamp": <candle open_time or now, isoformat>,
+       "sentimentScore": round(sentiment_score, 4),
+       "articleCount": len(articles),          # NEW field, additive-only — safe per the
+                                                  # same "never remove existing keys" rule
+                                                  # every prior phase followed for `audit`
+       "blackoutActive": blackout_active,
+       "blackoutReason": blackout_reason,       # NEW field, additive-only; None if not in blackout
+   }
+5.2 social_sentiment.py — SocialSentimentNode, component_id = "social-sentiment"
+
+Be honest about scope here too. A real, rate-limit-respecting Twitter/X or Reddit firehose integration is a substantially larger, riskier piece of work (API access tiers, auth complexity, cost) than this phase should attempt, and it is not the load-bearing gap — news-stream is what the three LLM agents actually rely on for their primary signal per your Step Zero audit. Implement SocialSentimentNode as a thin, honest pass-through this phase: it queries the exact same news_items table as NewsStreamNode (crypto news headline sentiment is a reasonable, stated proxy for aggregate social mood in the absence of a real social firehose — many real trading systems use news sentiment as their practical social-sentiment proxy for this reason) and returns the same shape, but tags its output distinctly so nothing pretends this is literal social-media data:
+
+python
+return {
+    "type": "NewsFeed",
+    ...same fields as NewsStreamNode...,
+    "sourceNote": "Derived from news headline sentiment (no live social media firehose integrated yet).",
+}
+
+State this plainly and prominently in your final report per §7 — do not let this node's output be mistaken for real Twitter/Reddit data anywhere in your summary or in code comments.
+
+5.3 macro_calendar.py — MacroCalendarNode, component_id = "macro-calendar"
+python
+class MacroCalendarNode:
+    component_id = "macro-calendar"
+
+    async def run(self, ctx: NodeContext, config: dict) -> dict:
+        """
+        Returns a NewsFeed-shaped output whose primary purpose is blackoutActive —
+        this node's sentimentScore is intentionally always 0.0 (it has no opinion on
+        direction, only on whether now is a dangerous window to trade at all), unlike
+        news-stream/social-sentiment which do carry a directional signal.
+        """
+
+Its entire job is calling the shared compute_blackout(current_time, db) helper from Task 4 and returning:
+
+python
+return {
+    "type": "NewsFeed",
+    "symbol": ctx.candle.get("symbol") if isinstance(ctx.candle, dict) else getattr(ctx.candle, "symbol", None),
+    "timestamp": <candle open_time or now>,
+    "sentimentScore": 0.0,
+    "articleCount": 0,
+    "blackoutActive": blackout_active,
+    "blackoutReason": blackout_reason,
+}
+6. Task 4 — The shared blackout-detection helper
+
+New function, co-located in apps/engine/app/data/news_ingest.py or a new small apps/engine/app/data/macro_blackout.py (your choice, but only one implementation — all three new nodes above call this one function, never reimplement the window-check logic three times, the same "shared plumbing" discipline Phase 16 established for the LLM gateway):
+
+python
+async def compute_blackout(reference_time: datetime, db: Optional[AsyncSession]) -> tuple[bool, Optional[str]]:
+    """
+    Returns (blackout_active, reason). Queries macro_events for any row where
+    reference_time falls within [scheduled_at - blackout_before_minutes,
+    scheduled_at + blackout_after_minutes]. If db is None (pure in-memory historical
+    pass with no DB session available, per Phase 14's design), fall back to an
+    in-process cache of macro_events loaded once per backtest run rather than skipping
+    the check entirely — a historical backtest should still respect real macro blackout
+    windows for backtest realism, it just can't hit the DB per-bar.
+    """
+
+Handle the db is None case correctly — this matters. Per your Step Zero audit finding #6, historical/walk-forward/monte-carlo backtest passes run with ctx.db = None to keep the hot loop DB-free. Do not simply return (False, None) when db is None — that would silently make blackout detection a paper/live-only feature and contradict the entire point of testing a strategy's behavior around real macro events historically. Instead:
+
+At the start of backtest_runner.py's run_backtest() (or simulate_historical_pass, wherever ordered_nodes/node_instances are built once per run — check your audit of this file), do a single upfront query loading all macro_events rows into an in-memory list, and pass that list down into the NodeContext as a new optional field (e.g. ctx.macro_events_cache: Optional[list]), exactly the same pattern already used for ctx.historical_window (a pre-fetched DataFrame passed once, not re-queried per bar).
+compute_blackout checks ctx.macro_events_cache first if present (historical modes), else falls back to a real DB query if ctx.db is available (paper/live modes) — either path produces a correct, real answer; the difference is only about when the data is fetched (once upfront vs. per-tick), matching the existing candles vs. historical_window design you're extending, not inventing a new architectural pattern.
+Update NodeContext in apps/engine/app/nodes/base.py to add this new optional field with a safe None default, and thread it through bar_runner.py's run_one_bar and build_node_instances the same way Phase 14 threaded through mode/user_id/db/etc. — additive, behavior-preserving for every node that doesn't use it.
+7. Task 5 — Registry and frontend field check
+7.1 apps/engine/app/nodes/registry.py
+
+Replace the three stub entries:
+
+python
+"news-stream": NewsStreamNode,
+"social-sentiment": SocialSentimentNode,
+"macro-calendar": MacroCalendarNode,
+
+Leave orderbook-depth, fundamentals, options-chain, onchain-feed exactly as their current create_node_factory(...) stub entries — untouched, out of scope this phase.
+
+7.2 apps/web/mock/layers.ts
+
+Per your Step Zero audit finding #9: if news-stream's existing fields already cover a symbol/channel filter and a lookback/refresh-interval control, leave them as-is and just confirm the field keys your Python config-parsing reads (config.get("lookbackMinutes", ...), etc.) match what's actually defined there — do not invent new field keys the frontend doesn't send. If a genuinely necessary field is missing (e.g. there's currently no way to set a lookback window at all), add the minimal field needed, following the exact same field-definition shape/conventions already used elsewhere in that file — do not restructure the file or touch unrelated ComponentDef entries.
+
+Do not touch field-renderer.tsx, deep-customization-dialog.tsx, or any other frontend component — this phase's UI footprint should be zero-to-minimal, exactly the same "no new frontend components needed" outcome Phase 16 achieved for the LLM agents.
+
+8. Task 6 — Tests
+
+New apps/engine/tests/test_data_ingestion.py, following the existing conventions in apps/engine/tests/test_llm_gateway.py and test_billing.py (same fixture/mocking style — get_test_user_id, mocked-HTTP-response pattern via patch("httpx.AsyncClient...")):
+
+ingest_news_batch with a mocked CryptoCompare response: confirms articles are correctly upserted into news_items, VADER scores are computed and non-null, and re-running the exact same batch a second time does not create duplicate rows (on_conflict (source, external_id) do nothing actually works).
+NewsStreamNode.run() with a few seeded news_items rows in a known sentiment direction (e.g. all strongly positive compound scores) returns a sentimentScore that reflects that direction, not zero and not a random value.
+NewsStreamNode.run() with zero matching news_items in the lookback window returns sentimentScore: 0.0 and articleCount: 0 — the honest "no data" case, distinct from a fabricated neutral.
+NewsStreamNode.run() in mode="historical" with a candle open_time set to a known past timestamp only considers news_items published before that timestamp within the lookback window — seed one article just before and one just after the candle's open_time and confirm only the "before" one is counted (this is your no-lookahead-bias regression test — treat it as load-bearing, not optional).
+compute_blackout() with a reference_time inside a seeded macro_events row's [scheduled_at - before, scheduled_at + after] window returns (True, <label>); just outside that window returns (False, None).
+compute_blackout() called with db=None and a populated macro_events_cache list passed instead produces the identical result as the db-backed path for the same input — this is your proof the historical-mode fallback is behaviorally equivalent to the live-mode DB path, not a second, divergent implementation.
+End-to-end: run an existing sentiment-agent/macro-agent/event-agent paper-mode test (adapt one from test_llm_gateway.py) with real seeded news_items instead of a hand-constructed upstream_outputs dict, confirming the full chain — NewsStreamNode → SentimentAnalystNode/MacroStrategistNode/EventSpecialistNode — produces a coherent result end to end for the first time in this project's history.
+Confirm the full pre-existing test_llm_gateway.py suite still passes unmodified after this phase's NodeContext field addition (Task 4) — same behavior-preservation discipline as every prior phase's refactor.
+9. Explicit non-goals for this phase
+
+Do not:
+
+Touch flow-agent, contrarian-agent, orderbook-depth, fundamentals, options-chain, or onchain-feed — all remain generic UniversalNode stubs, unrelated to this phase's scope.
+Touch the LLM gateway, credit system, BYOK, or any of the four already-real intelligence-agent node classes' internal logic — they should require zero code changes this phase; if you find yourself editing sentiment_analyst.py/macro_strategist.py/event_specialist.py/technical_analyst.py, stop and reconsider, because your Step Zero audit (finding #3) should have already confirmed they don't need to change.
+Integrate a real Twitter/X or Reddit API — SocialSentimentNode is an honest news-sentiment proxy this phase, stated as such (§5.2).
+Integrate a live, scraped, or paid macro-calendar API — macro_events is a curated, seeded table this phase, stated as such (§3).
+Add Celery, Redis, or any new queue/scheduler infrastructure — reuse the existing single AsyncIOScheduler instance from main.py/live_runner.py.
+Change how ohlcv-feed, technical-indicators, risk-gate, or paper-executor work.
+Modify supabase/migrations/0001–0011 — only add 0012_news_and_macro_events.sql.
+Touch ML ensemble, RL, debate/consensus, confidence calibration, OCULUS, or ChromaDB memory — all still future phases.
+10. Acceptance checklist
+ A clean Python import check on apps/engine passes with no errors.
+ npx tsc --noEmit in apps/web returns 0 errors (this phase should touch the frontend minimally or not at all — confirm nothing broke regardless).
+ All new and existing tests in apps/engine/tests/ pass, including the new test_data_ingestion.py, and the full pre-existing test_llm_gateway.py suite passes unmodified.
+ Running python -m app.data.seed_macro_events populates macro_events with real, verifiable FOMC/CPI/NFP dates — spot-check at least 3 rows against the actual Federal Reserve / BLS published calendars and confirm they match.
+ Running the news ingestion job (manually or via the scheduler) populates news_items with real, current crypto headlines, each with a non-null VADER sentiment_compound score — verified directly in Supabase, not just via logs.
+ Re-running news ingestion immediately again does not create duplicate news_items rows (dedup on (source, external_id) works).
+ Starting a live session (or running a paper-type backtest) on a bot whose graph includes news-stream → sentiment-agent produces a sentimentScore that demonstrably tracks real recent news tone — spot-check by comparing the value against the actual headlines in news_items for that window.
+ Manually inserting a macro_events row with scheduled_at set to a few minutes from now, then running a live tick (or a paper backtest whose from/to window covers that timestamp) for a bot including macro-calendar → macro-agent, produces blackoutActive: true and the macro agent's deterministic baseline correctly goes flat with its blackout-override rule — this is the single most important proof in this phase, since blackoutActive has never once been true in this codebase's history before now.
+ A historical-mode backtest run over a date range spanning at least one seeded macro event correctly shows the macro agent going flat around that event in the trade log / audit trail — proving the db=None in-memory fallback path (Task 4) genuinely works, not just the live/paper DB-backed path.
+ The no-lookahead-bias test (Task 6) passes: historical replay of news sentiment never lets a bar "see" an article published after that bar's own open_time.
+ Nothing in sentiment_analyst.py, macro_strategist.py, event_specialist.py, technical_analyst.py, or apps/engine/app/llm/* was modified.
+ The final report explicitly and prominently states: (a) news sentiment is now real (CryptoCompare + VADER), (b) social sentiment is an honest news-sentiment proxy, not real social media data, and (c) the macro calendar is a curated/seeded set of real, verified high-impact US event dates, not a live third-party feed — plainly, not as buried fine print, matching the standard Phase 16 already set for honesty about scope.
+11. What this phase deliberately does not finish
+
+After this phase: news-stream, social-sentiment, and macro-calendar are real, scheduled, cached, no-lookahead-safe Layer I data nodes, and the four existing LLM intelligence agents finally reason over genuine signal instead of a technical-indicator proxy for the first time. flow-agent and contrarian-agent remain rule-based stubs — per Phase 16's own closing note, they are the correct next target after this phase, since they need materially different upstream contracts (order-book microstructure for the former, an existing upstream Signal to contest for the latter) that don't belong in this batch either. Real social-media ingestion and a live macro-calendar integration remain distinct, larger, unscheduled future improvements — say so plainly in your summary, exactly as this document does, rather than implying more was completed than actually was.

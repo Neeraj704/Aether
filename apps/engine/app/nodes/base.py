@@ -43,6 +43,8 @@ class NodeContext:
         live_session_id: Optional[str] = None,
         db: Optional[Any] = None,
         current_node_id: Optional[str] = None,
+        macro_events_cache: Optional[Any] = None,
+        news_items_cache: Optional[Any] = None,
     ):
         self.candle = candle
         self.portfolio = portfolio
@@ -55,6 +57,9 @@ class NodeContext:
         self.live_session_id = live_session_id
         self.db = db
         self.current_node_id = current_node_id
+        self.macro_events_cache = macro_events_cache
+        self.news_items_cache = news_items_cache
+
 
 class Node(Protocol):
     component_id: str
